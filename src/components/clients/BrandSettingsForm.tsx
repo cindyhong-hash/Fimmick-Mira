@@ -4,9 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { X } from "lucide-react";
-
-const TONE_OPTIONS = ["幽默有梗", "專業嚴謹", "高冷奢華", "親切溫暖", "年輕活力"];
+import { X, Upload, Loader2 } from "lucide-react";
 
 export type BrandFormValues = {
   name: string;
@@ -14,6 +12,7 @@ export type BrandFormValues = {
   secondaryColor: string;
   toneLabels: string[];
   taboos: string[];
+  pastPostImageUrls: string[];
 };
 
 type Props = {
@@ -29,19 +28,19 @@ export function BrandSettingsForm({ initialValues, onSubmit, submitLabel = "儲�
     secondaryColor: initialValues?.secondaryColor ?? "",
     toneLabels: initialValues?.toneLabels ?? [],
     taboos: initialValues?.taboos ?? [],
+    pastPostImageUrls: initialValues?.pastPostImageUrls ?? [],
   });
+  const [toneInput, setToneInput] = useState("");
   const [tabooInput, setTabooInput] = useState("");
+  const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const toggleTone = (tone: string) => {
-    setValues((v) => ({
-      ...v,
-      toneLabels: v.toneLabels.includes(tone)
-        ? v.toneLabels.filter((t) => t !== tone)
-        : v.toneLabels.length < 2
-        ? [...v.toneLabels, tone]
-        : v.toneLabels,
-    }));
+  const addTone = () => {
+    const t = toneInput.trim();
+    if (t && !values.toneLabels.includes(t)) {
+      setValues((v) => ({ ...v, toneLabels: [...v.toneLabels, t] }));
+      setToneInput("");
+    }
   };
 
   const addTaboo = () => {
@@ -50,6 +49,23 @@ export function BrandSettingsForm({ initialValues, onSubmit, submitLabel = "儲�
       setValues((v) => ({ ...v, taboos: [...v.taboos, t] }));
       setTabooInput("");
     }
+  };
+
+  const uploadImage = async (file: File): Promise<string> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch("/api/upload", { method: "POST", body: formData });
+    const data = await res.json();
+    return data.url;
+  };
+
+  const handlePastPostUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []).slice(0, 5 - values.pastPostImageUrls.length);
+    if (!files.length) return;
+    setUploading(true);
+    const urls = await Promise.all(files.map(uploadImage));
+    setValues((v) => ({ ...v, pastPostImageUrls: [...v.pastPostImageUrls, ...urls].slice(0, 5) }));
+    setUploading(false);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -63,7 +79,9 @@ export function BrandSettingsForm({ initialValues, onSubmit, submitLabel = "儲�
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5 max-w-lg">
+    <form onSubmit={handleSubmit} className="space-y-6 max-w-lg">
+
+      {/* 客戶名稱 */}
       <div className="space-y-1">
         <Label>客戶名稱 *</Label>
         <Input
@@ -74,6 +92,7 @@ export function BrandSettingsForm({ initialValues, onSubmit, submitLabel = "儲�
         />
       </div>
 
+      {/* 主色 / 輔色 */}
       <div className="flex gap-4">
         <div className="space-y-1 flex-1">
           <Label>主色 *</Label>
@@ -109,45 +128,47 @@ export function BrandSettingsForm({ initialValues, onSubmit, submitLabel = "儲�
         </div>
       </div>
 
+      {/* 品牌調性 — 自由輸入 */}
       <div className="space-y-2">
-        <Label>品牌調性（最多選 2 個）</Label>
+        <Label>品牌調性</Label>
+        <p className="text-xs text-gray-400">自由輸入你覺得符合這個品牌的形容詞，AI 會參考這些來寫文案</p>
+        <div className="flex gap-2">
+          <Input
+            value={toneInput}
+            onChange={(e) => setToneInput(e.target.value)}
+            placeholder="例：幽默、高質感、年輕活力、專業中帶親切"
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTone(); } }}
+          />
+          <Button type="button" variant="outline" onClick={addTone}>加入</Button>
+        </div>
         <div className="flex flex-wrap gap-2">
-          {TONE_OPTIONS.map((tone) => (
-            <button
-              key={tone}
-              type="button"
-              onClick={() => toggleTone(tone)}
-              className={`px-3 py-1 rounded-full text-sm border transition-colors ${
-                values.toneLabels.includes(tone)
-                  ? "bg-black text-white border-black"
-                  : "bg-white text-gray-700 border-gray-300 hover:border-gray-500"
-              }`}
-            >
-              {tone}
-            </button>
+          {values.toneLabels.map((t) => (
+            <Badge key={t} variant="secondary" className="flex items-center gap-1">
+              {t}
+              <X
+                className="h-3 w-3 cursor-pointer"
+                onClick={() => setValues((v) => ({ ...v, toneLabels: v.toneLabels.filter((x) => x !== t) }))}
+              />
+            </Badge>
           ))}
         </div>
-        {values.toneLabels.length === 2 && (
-          <p className="text-xs text-gray-400">已選滿 2 個，請先取消一個再選</p>
-        )}
       </div>
 
+      {/* 禁忌事項 */}
       <div className="space-y-2">
         <Label>禁忌事項</Label>
         <div className="flex gap-2">
           <Input
             value={tabooInput}
             onChange={(e) => setTabooInput(e.target.value)}
-            placeholder="例：不可出現競品名稱"
-            onKeyDown={(e) => {
-              if (e.key === "Enter") { e.preventDefault(); addTaboo(); }
-            }}
+            placeholder="例：不可出現競品名稱、避免負面用詞"
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTaboo(); } }}
           />
           <Button type="button" variant="outline" onClick={addTaboo}>加入</Button>
         </div>
         <div className="flex flex-wrap gap-2">
           {values.taboos.map((t) => (
-            <Badge key={t} variant="secondary" className="flex items-center gap-1">
+            <Badge key={t} variant="secondary" className="flex items-center gap-1 bg-red-50 text-red-700 border-red-200">
               {t}
               <X
                 className="h-3 w-3 cursor-pointer"
@@ -155,6 +176,41 @@ export function BrandSettingsForm({ initialValues, onSubmit, submitLabel = "儲�
               />
             </Badge>
           ))}
+        </div>
+      </div>
+
+      {/* 過往貼文圖片 */}
+      <div className="space-y-2">
+        <Label>過往貼文圖片（最多 5 張）</Label>
+        <p className="text-xs text-gray-400">上傳以前做過的圖，AI 會學習你們的視覺風格，每次生成都更貼近品牌調性</p>
+        <div className="flex gap-2 flex-wrap">
+          {values.pastPostImageUrls.map((url, i) => (
+            <div key={i} className="relative w-24 h-24">
+              <img src={url} alt={`past-${i}`} className="w-24 h-24 object-cover rounded-lg border" />
+              <button
+                type="button"
+                className="absolute -top-1 -right-1 bg-white rounded-full border p-0.5 shadow"
+                onClick={() =>
+                  setValues((v) => ({ ...v, pastPostImageUrls: v.pastPostImageUrls.filter((_, idx) => idx !== i) }))
+                }
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+          {values.pastPostImageUrls.length < 5 && (
+            <label className="flex flex-col items-center justify-center w-24 h-24 border-2 border-dashed rounded-lg cursor-pointer hover:bg-gray-50">
+              {uploading ? (
+                <Loader2 className="h-5 w-5 text-gray-400 animate-spin" />
+              ) : (
+                <>
+                  <Upload className="h-6 w-6 text-gray-400" />
+                  <span className="text-xs text-gray-400 mt-1 text-center px-1">上傳貼文圖</span>
+                </>
+              )}
+              <input type="file" accept="image/*" multiple className="hidden" onChange={handlePastPostUpload} />
+            </label>
+          )}
         </div>
       </div>
 

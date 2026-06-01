@@ -11,7 +11,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const { name, primaryColor, secondaryColor, logoUrl, toneLabels, taboos } = body;
+  const { name, primaryColor, secondaryColor, logoUrl, toneLabels, taboos, pastPostImageUrls } = body;
 
   if (!name || !primaryColor) {
     return NextResponse.json({ error: "name and primaryColor are required" }, { status: 400 });
@@ -25,11 +25,13 @@ export async function POST(request: Request) {
       logoUrl: logoUrl || null,
       toneLabels: JSON.stringify(toneLabels ?? []),
       taboos: JSON.stringify(taboos ?? []),
+      pastPostImageUrls: JSON.stringify(pastPostImageUrls ?? []),
     },
   });
   return NextResponse.json({
     ...client,
     toneLabels: JSON.parse(client.toneLabels),
     taboos: JSON.parse(client.taboos),
+    pastPostImageUrls: JSON.parse(client.pastPostImageUrls),
   }, { status: 201 });
 }

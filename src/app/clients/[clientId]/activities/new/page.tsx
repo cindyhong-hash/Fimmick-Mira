@@ -19,13 +19,6 @@ export default function NewActivityPage({ params }: { params: Promise<{ clientId
     });
     const activity = await res.json();
 
-    // Trigger AI generation in background
-    fetch("/api/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ activityId: activity.id }),
-    });
-
     router.push(`/clients/${clientId}/activities/${activity.id}`);
   };
 

@@ -1,7 +1,9 @@
 "use client";
 import { useEffect, useState, useRef } from "react";
 import { LayoutPicker } from "@/components/activities/LayoutPicker";
-import { Loader2 } from "lucide-react";
+import { Loader2, Pencil } from "lucide-react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
 
 type GeneratedLayout = { id: string; layoutType: string; imageUrl: string; copyText: string };
 type Activity = { id: string; theme: string; focusPoint: string; status: string; generatedLayouts: GeneratedLayout[] };
@@ -12,6 +14,7 @@ export default function ActivityPage({ params }: { params: Promise<{ clientId: s
   const [activity, setActivity] = useState<Activity | null>(null);
   const [selectedId, setSelectedId] = useState<string>();
   const pollingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const generationTriggered = useRef(false);
 
   useEffect(() => {
     params.then(({ clientId, activityId }) => {
@@ -28,6 +31,17 @@ export default function ActivityPage({ params }: { params: Promise<{ clientId: s
         .then((r) => r.json())
         .then((data: Activity) => {
           setActivity(data);
+
+          // If PENDING and not yet triggered, kick off generation
+          if (data.status === "PENDING" && !generationTriggered.current) {
+            generationTriggered.current = true;
+            fetch("/api/generate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ activityId }),
+            });
+          }
+
           if (data.status === "GENERATING" || data.status === "PENDING") {
             pollingRef.current = setTimeout(fetchActivity, 3000);
           }
@@ -58,7 +72,14 @@ export default function ActivityPage({ params }: { params: Promise<{ clientId: s
 
   return (
     <div>
-      <h1 className="text-xl font-semibold mb-1">{activity.theme}</h1>
+      <div className="flex items-center justify-between mb-1">
+        <h1 className="text-xl font-semibold">{activity.theme}</h1>
+        <Link href={`/clients/${clientId}/activities/${activityId}/edit`}>
+          <Button variant="outline" size="sm">
+            <Pencil className="h-4 w-4 mr-1" />編輯 / 重新生成
+          </Button>
+        </Link>
+      </div>
       <p className="text-gray-500 text-sm mb-6">{activity.focusPoint}</p>
       <LayoutPicker
         layouts={activity.generatedLayouts}

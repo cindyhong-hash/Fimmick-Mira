@@ -51,6 +51,8 @@ model StyleComponent {
   type           String
   data           String   @default("{}")
   sourceLayoutId String
+  clientId       String?
+  aiPromptText   String   @default("")
   previewUrl     String?
   createdAt      DateTime @default(now())
 }

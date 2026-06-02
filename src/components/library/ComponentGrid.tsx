@@ -1,89 +1,259 @@
 "use client";
-import { useEffect, useState } from "react";
+/**
+ * ComponentGrid
+ * ─────────────
+ * Shows style components filtered by clientId.
+ * Hover over any card to reveal:
+ *   • [複製 Prompt]  – copies aiPromptText to clipboard
+ *   • [帶入生成]     – injects component into the PromptComposer slot
+ *
+ * Category tabs (All / 構圖 / 配色 / 語氣) filter the list in-page.
+ */
+
+import { useEffect, useState, useCallback } from "react";
+import { Copy, Check, ArrowRightCircle, LayoutTemplate, Palette, MessageSquare } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import type { StyleComponent, ComponentCategory, PromptSlots } from "@/types/library";
+import { CATEGORY_META } from "@/types/library";
 
-type StyleComponent = {
-  id: string;
-  name: string;
-  type: string;
-  data: Record<string, unknown>;
-  createdAt: string;
+type FilterTab = "ALL" | ComponentCategory;
+
+const FILTER_TABS: { key: FilterTab; label: string; icon?: React.ReactNode }[] = [
+  { key: "ALL", label: "全部" },
+  { key: "COMPOSITION", label: "構圖", icon: <LayoutTemplate className="h-3.5 w-3.5" /> },
+  { key: "COLOR_SCHEME", label: "配色", icon: <Palette className="h-3.5 w-3.5" /> },
+  { key: "COPY_TONE", label: "語氣", icon: <MessageSquare className="h-3.5 w-3.5" /> },
+];
+
+// ─── Single component card ────────────────────────────────────────────────────
+function ComponentCard({
+  comp,
+  isInjected,
+  onCopy,
+  onInject,
+}: {
+  comp: StyleComponent;
+  isInjected: boolean;
+  onCopy: (text: string) => void;
+  onInject: (comp: StyleComponent) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const meta = CATEGORY_META[comp.type];
+
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!comp.aiPromptText) return;
+    await navigator.clipboard.writeText(comp.aiPromptText);
+    setCopied(true);
+    onCopy(comp.aiPromptText);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleInject = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onInject(comp);
+  };
+
+  return (
+    <div
+      className={`group relative rounded-xl border p-3 transition-all duration-200 cursor-default select-none
+        ${isInjected
+          ? `${meta.bg} ${meta.border} ring-2 ring-offset-1 ring-current`
+          : "border-gray-200 bg-white hover:border-gray-300 hover:shadow-md"
+        }`}
+    >
+      {/* Injected badge */}
+      {isInjected && (
+        <span className={`absolute top-2 right-2 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color} ${meta.border} border`}>
+          已帶入
+        </span>
+      )}
+
+      {/* Card content */}
+      <div className="space-y-1.5 pr-6">
+        <div className="flex items-center gap-1.5">
+          <Badge
+            variant="outline"
+            className={`text-[10px] px-1.5 py-0 ${meta.color} ${meta.bg} ${meta.border} border`}
+          >
+            {meta.label}
+          </Badge>
+        </div>
+        <div className="text-xs font-semibold text-gray-800 leading-snug">{comp.name}</div>
+
+        {comp.type === "COLOR_SCHEME" && (() => {
+          const primary = comp.data.primaryColor as string | undefined;
+          const secondary = comp.data.secondaryColor as string | undefined;
+          return primary ? (
+            <div className="flex gap-1 mt-1">
+              <span className="w-5 h-5 rounded-full border border-white shadow-sm" style={{ backgroundColor: primary }} title={primary} />
+              {secondary && <span className="w-5 h-5 rounded-full border border-white shadow-sm" style={{ backgroundColor: secondary }} title={secondary} />}
+              <span className="text-[10px] text-gray-400 self-center">{primary}</span>
+            </div>
+          ) : null;
+        })()}
+
+        {comp.type === "COMPOSITION" && (
+          <div className="text-[11px] text-gray-500 leading-relaxed">
+            {(comp.data.description as string) ?? ""}
+          </div>
+        )}
+
+        {comp.type === "COPY_TONE" && (
+          <div className="text-[11px] text-gray-500 leading-relaxed">
+            {((comp.data.toneLabels as string[]) ?? []).join("、") || "標準語氣"}
+          </div>
+        )}
+
+        {/* AI Prompt preview (truncated) */}
+        {comp.aiPromptText && (
+          <p className="text-[10px] text-gray-400 font-mono leading-snug line-clamp-2 mt-1">
+            {comp.aiPromptText}
+          </p>
+        )}
+      </div>
+
+      {/* Hover action bar */}
+      <div className="absolute inset-x-0 bottom-0 flex items-center gap-1 px-2 pb-2 pt-6
+        bg-gradient-to-t from-white/95 to-transparent rounded-b-xl
+        opacity-0 group-hover:opacity-100 transition-all duration-200 translate-y-1 group-hover:translate-y-0">
+        <button
+          onClick={handleCopy}
+          className="flex-1 flex items-center justify-center gap-1 text-[11px] font-medium py-1 rounded-lg
+            bg-white border border-gray-200 text-gray-600 hover:border-gray-400 hover:text-gray-800 transition-colors shadow-sm"
+          title="複製 AI Prompt"
+        >
+          {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+          {copied ? "已複製" : "複製 Prompt"}
+        </button>
+        <button
+          onClick={handleInject}
+          className={`flex-1 flex items-center justify-center gap-1 text-[11px] font-medium py-1 rounded-lg transition-colors shadow-sm
+            ${isInjected
+              ? "bg-gray-100 border border-gray-200 text-gray-400"
+              : `${meta.bg} border ${meta.border} ${meta.color} hover:opacity-80`
+            }`}
+          title="帶入生成台"
+          disabled={isInjected}
+        >
+          <ArrowRightCircle className="h-3 w-3" />
+          {isInjected ? "已帶入" : "帶入生成"}
+        </button>
+      </div>
+
+      {/* Extra bottom padding so content isn't hidden behind hover bar */}
+      <div className="h-6 group-hover:h-0 transition-all duration-200" />
+    </div>
+  );
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+type Props = {
+  clientId: string | null;
+  injectedSlots: PromptSlots;
+  onInject: (comp: StyleComponent) => void;
 };
 
-const TYPE_LABELS: Record<string, string> = {
-  COMPOSITION: "構圖",
-  COLOR_SCHEME: "配色",
-  COPY_TONE: "語氣",
-};
-
-export function ComponentGrid() {
+export function ComponentGrid({ clientId, injectedSlots, onInject }: Props) {
   const [components, setComponents] = useState<StyleComponent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<FilterTab>("ALL");
+  const [lastCopied, setLastCopied] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/components")
+    setLoading(true);
+    const url = clientId ? `/api/components?clientId=${clientId}` : "/api/components";
+    fetch(url)
       .then((r) => r.json())
       .then(setComponents)
       .finally(() => setLoading(false));
-  }, []);
+  }, [clientId]);
 
-  if (loading) return <div className="text-gray-400">載入中...</div>;
-  if (components.length === 0)
-    return <div className="text-center py-20 text-gray-400">還沒有儲存任何風格組件</div>;
+  const injectedIds = new Set(
+    Object.values(injectedSlots).filter(Boolean).map((c) => c!.id)
+  );
 
-  const grouped = components.reduce<Record<string, StyleComponent[]>>((acc, c) => {
+  const filtered =
+    activeTab === "ALL" ? components : components.filter((c) => c.type === activeTab);
+
+  const grouped = filtered.reduce<Record<string, StyleComponent[]>>((acc, c) => {
     acc[c.type] = [...(acc[c.type] ?? []), c];
     return acc;
   }, {});
 
-  return (
-    <div className="space-y-8">
-      {Object.entries(grouped).map(([type, items]) => (
-        <div key={type}>
-          <h3 className="font-medium text-sm text-gray-500 mb-3">{TYPE_LABELS[type]}</h3>
-          <div className="grid grid-cols-4 gap-3">
-            {items.map((comp) => (
-              <div
-                key={comp.id}
-                className="border rounded-lg p-3 text-sm hover:border-gray-400 cursor-pointer transition-colors"
-              >
-                <div className="font-medium truncate text-xs">{comp.name}</div>
-                {type === "COLOR_SCHEME" && (
-                  <div className="flex gap-1 mt-2">
-                    <div
-                      className="w-6 h-6 rounded border"
-                      style={{ backgroundColor: (comp.data as { primaryColor: string }).primaryColor }}
-                      title={(comp.data as { primaryColor: string }).primaryColor}
-                    />
-                    {(comp.data as { secondaryColor?: string }).secondaryColor && (
-                      <div
-                        className="w-6 h-6 rounded border"
-                        style={{
-                          backgroundColor: (comp.data as { secondaryColor: string }).secondaryColor,
-                        }}
-                        title={(comp.data as { secondaryColor: string }).secondaryColor}
-                      />
-                    )}
-                  </div>
-                )}
-                {type === "COMPOSITION" && (
-                  <div className="text-xs text-gray-500 mt-1">
-                    {(comp.data as { description: string }).description}
-                  </div>
-                )}
-                {type === "COPY_TONE" && (
-                  <div className="text-xs text-gray-500 mt-1">
-                    {((comp.data as { toneLabels: string[] }).toneLabels ?? []).join("、") || "標準"}
-                  </div>
-                )}
-                <Badge variant="outline" className="text-xs mt-2">
-                  {TYPE_LABELS[type]}
-                </Badge>
-              </div>
-            ))}
-          </div>
+  if (loading) return <div className="text-gray-400 text-sm py-8 text-center">載入中…</div>;
+
+  if (components.length === 0) {
+    return (
+      <div className="text-center py-20 text-gray-400">
+        <div className="text-4xl mb-3">📦</div>
+        <div className="text-sm">
+          {clientId ? "此客戶還沒有風格組件" : "還沒有任何風格組件"}
         </div>
-      ))}
+        <div className="text-xs mt-1">生成活動後，AI 會自動提取並儲存風格組件</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Toast feedback */}
+      {lastCopied && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-gray-900 text-white text-xs px-4 py-2 rounded-full shadow-lg pointer-events-none animate-in fade-in slide-in-from-bottom-2">
+          ✓ Prompt 已複製到剪貼簿
+        </div>
+      )}
+
+      {/* Category filter tabs */}
+      <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
+        {FILTER_TABS.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              activeTab === tab.key
+                ? "bg-white shadow-sm text-gray-900"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            {tab.icon}
+            {tab.label}
+            <span className={`text-[10px] ${activeTab === tab.key ? "text-gray-400" : "text-gray-300"}`}>
+              {tab.key === "ALL"
+                ? components.length
+                : components.filter((c) => c.type === tab.key).length}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {/* Cards by group */}
+      {Object.entries(grouped).map(([type, items]) => {
+        const meta = CATEGORY_META[type as ComponentCategory];
+        return (
+          <div key={type}>
+            <h3 className={`text-xs font-semibold mb-3 flex items-center gap-1.5 ${meta.color}`}>
+              <span className={`inline-block w-2 h-2 rounded-full ${meta.bg.replace("bg-", "bg-")} border ${meta.border}`} />
+              {meta.label}
+              <span className="text-gray-400 font-normal">({items.length})</span>
+            </h3>
+            <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
+              {items.map((comp) => (
+                <ComponentCard
+                  key={comp.id}
+                  comp={comp}
+                  isInjected={injectedIds.has(comp.id)}
+                  onCopy={(text) => {
+                    setLastCopied(text);
+                    setTimeout(() => setLastCopied(null), 2500);
+                  }}
+                  onInject={onInject}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { anthropic } from "@/lib/anthropic";
 import { buildCopyPrompt } from "@/lib/prompts";
-import { extractStyleComponents } from "@/lib/extract-components";
+import { extractStyleComponents, buildAiPromptText } from "@/lib/extract-components";
 import { LAYOUT_CONFIGS } from "@/types";
 import type { LayoutType } from "@/types";
 
@@ -76,6 +76,12 @@ export async function POST(request: Request) {
 
       // Save style components to component library
       const today = new Date().toLocaleDateString("zh-TW");
+      const aiPrompts = buildAiPromptText({
+        layoutType: layoutConfig.type as LayoutType,
+        primaryColor: client.primaryColor,
+        secondaryColor: client.secondaryColor ?? undefined,
+        toneLabels,
+      });
       await db.styleComponent.createMany({
         data: [
           {
@@ -83,18 +89,24 @@ export async function POST(request: Request) {
             type: "COMPOSITION",
             data: JSON.stringify(styleComponents.composition),
             sourceLayoutId: savedLayout.id,
+            clientId: activity.clientId,
+            aiPromptText: aiPrompts.composition,
           },
           {
             name: `配色-${client.primaryColor}-${today}`,
             type: "COLOR_SCHEME",
             data: JSON.stringify(styleComponents.colorScheme),
             sourceLayoutId: savedLayout.id,
+            clientId: activity.clientId,
+            aiPromptText: aiPrompts.color,
           },
           {
             name: `語氣-${toneLabels[0] ?? "標準"}-${layoutConfig.label}`,
             type: "COPY_TONE",
             data: JSON.stringify(styleComponents.copyTone),
             sourceLayoutId: savedLayout.id,
+            clientId: activity.clientId,
+            aiPromptText: aiPrompts.tone,
           },
         ],
       });

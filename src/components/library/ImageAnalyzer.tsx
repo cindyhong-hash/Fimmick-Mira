@@ -139,9 +139,13 @@ export function ImageAnalyzer({ clientId, initialImageUrl, onSaved }: Props) {
     }
   }
 
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [savingAll, setSavingAll] = useState(false);
+
   async function saveComponent(type: keyof SavedState) {
     if (!result) return;
     setSaving(p => ({ ...p, [type]: true }));
+    setSaveError(null);
 
     let name = "", data: Record<string, unknown> = {}, aiPromptText = "";
     if (type === "COMPOSITION" && result.composition) {
@@ -158,42 +162,67 @@ export function ImageAnalyzer({ clientId, initialImageUrl, onSaved }: Props) {
       aiPromptText = result.copyTone.aiPromptText;
     }
 
-    await fetch("/api/components", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, type, clientId, data, aiPromptText, previewUrl: imageUrl }),
-    });
-
-    setSaving(p => ({ ...p, [type]: false }));
-    setSaved(p => ({ ...p, [type]: true }));
-    // Refresh past images list
-    const url = clientId ? `/api/components?clientId=${clientId}` : "/api/components";
-    fetch(url).then(r => r.json()).then((comps: StyleComponent[]) => {
-      const map: Record<string, PastImage> = {};
-      comps.filter(c => c.previewUrl).forEach(c => {
-        const u = c.previewUrl!;
-        if (!map[u]) map[u] = { url: u, types: [], names: [] };
-        if (!map[u].types.includes(c.type)) map[u].types.push(c.type);
-        map[u].names.push(c.name);
+    try {
+      const res = await fetch("/api/components", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, type, clientId, data, aiPromptText, previewUrl: imageUrl }),
       });
-      setPastImages(Object.values(map).reverse());
-    });
-    onSaved?.();
+      if (!res.ok) throw new Error(`儲存失敗 (${res.status})`);
+      setSaved(p => ({ ...p, [type]: true }));
+      // Refresh past images list
+      const url = clientId ? `/api/components?clientId=${clientId}` : "/api/components";
+      fetch(url).then(r => r.json()).then((comps: StyleComponent[]) => {
+        const map: Record<string, PastImage> = {};
+        comps.filter(c => c.previewUrl).forEach(c => {
+          const u = c.previewUrl!;
+          if (!map[u]) map[u] = { url: u, types: [], names: [] };
+          if (!map[u].types.includes(c.type)) map[u].types.push(c.type);
+          map[u].names.push(c.name);
+        });
+        setPastImages(Object.values(map).reverse());
+      });
+      onSaved?.();
+    } catch (e: unknown) {
+      setSaveError(e instanceof Error ? e.message : "儲存失敗，請重試");
+    } finally {
+      setSaving(p => ({ ...p, [type]: false }));
+    }
   }
 
   async function saveAll() {
     if (!result) return;
+    // Only save types that have result data AND are not yet saved
     const types: (keyof SavedState)[] = [];
     if (result.composition && !saved.COMPOSITION) types.push("COMPOSITION");
     if (result.colorScheme && !saved.COLOR_SCHEME) types.push("COLOR_SCHEME");
     if (result.copyTone && !saved.COPY_TONE) types.push("COPY_TONE");
-    await Promise.all(types.map(saveComponent));
+    if (types.length === 0) return;
+    setSavingAll(true);
+    setSaveError(null);
+    try {
+      await Promise.all(types.map(t => saveComponent(t)));
+    } finally {
+      setSavingAll(false);
+    }
   }
 
   const compMeta = CATEGORY_META["COMPOSITION"];
   const colorMeta = CATEGORY_META["COLOR_SCHEME"];
   const toneMeta = CATEGORY_META["COPY_TONE"];
-  const allSaved = result && saved.COMPOSITION && saved.COLOR_SCHEME && saved.COPY_TONE;
+
+  // allSaved: only count types that actually have result data
+  const allSaved = result !== null && (
+    (!result.composition || saved.COMPOSITION) &&
+    (!result.colorScheme || saved.COLOR_SCHEME) &&
+    (!result.copyTone || saved.COPY_TONE)
+  );
+  // savableCount: how many types have result data but aren't saved yet
+  const savableCount = result ? [
+    result.composition && !saved.COMPOSITION,
+    result.colorScheme && !saved.COLOR_SCHEME,
+    result.copyTone && !saved.COPY_TONE,
+  ].filter(Boolean).length : 0;
   const anySaved = saved.COMPOSITION || saved.COLOR_SCHEME || saved.COPY_TONE;
 
   return (
@@ -276,15 +305,24 @@ export function ImageAnalyzer({ clientId, initialImageUrl, onSaved }: Props) {
                   <Sparkles className="h-3 w-3" />重新 AI 分析
                 </button>
               )}
-              {result && !allSaved && (
-                <button onClick={saveAll}
-                  className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg bg-gray-900 text-white hover:bg-gray-700 transition-colors">
-                  <Plus className="h-3 w-3" />
-                  {anySaved ? "加入剩餘素材" : "全部加入素材庫"}
+              {result && savableCount > 0 && (
+                <button onClick={saveAll} disabled={savingAll}
+                  className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg bg-gray-900 text-white hover:bg-gray-700 transition-colors disabled:opacity-60">
+                  {savingAll
+                    ? <><Loader2 className="h-3 w-3 animate-spin" />儲存中…</>
+                    : <><Plus className="h-3 w-3" />{anySaved ? `加入剩餘素材（${savableCount}）` : `全部加入素材庫（${savableCount}）`}</>
+                  }
                 </button>
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Save error */}
+      {saveError && (
+        <div className="text-xs text-red-500 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          ⚠️ {saveError}
         </div>
       )}
 

@@ -27,7 +27,14 @@ export default function LibraryPage() {
   const [tab, setTab] = useState<Tab>("assets");
   const [slots, setSlots] = useState<PromptSlots>({ layout: null, color: null, tone: null });
   const [showQuickAdd, setShowQuickAdd] = useState(false);
+  const [analyzerImageUrl, setAnalyzerImageUrl] = useState<string | null>(null);
   const componentGridRef = useRef<ComponentGridHandle>(null);
+
+  // Navigate from ComponentCard thumbnail → 圖片分析 tab
+  const handleViewImage = useCallback((url: string) => {
+    setAnalyzerImageUrl(url);
+    setTab("analyzer");
+  }, []);
 
   useEffect(() => {
     fetch("/api/clients")
@@ -158,6 +165,7 @@ export default function LibraryPage() {
             injectedSlots={slots}
             onInject={handleInject}
             onOpenQuickAdd={() => setShowQuickAdd(true)}
+            onViewImage={handleViewImage}
           />
         )}
 
@@ -169,6 +177,7 @@ export default function LibraryPage() {
             </div>
             <ImageAnalyzer
               clientId={selectedClientId}
+              initialImageUrl={analyzerImageUrl}
               onSaved={() => componentGridRef.current?.refresh()}
             />
           </div>

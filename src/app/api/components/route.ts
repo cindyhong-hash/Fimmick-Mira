@@ -4,9 +4,15 @@ import { db } from "@/lib/db";
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const clientId = searchParams.get("clientId");
+  const previewUrl = searchParams.get("previewUrl");
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const where: Record<string, any> = {};
+  if (clientId) where.clientId = clientId;
+  if (previewUrl) where.previewUrl = previewUrl;
 
   const components = await db.styleComponent.findMany({
-    where: clientId ? { clientId } : undefined,
+    where: Object.keys(where).length ? where : undefined,
     orderBy: { createdAt: "desc" },
     take: 200,
   });

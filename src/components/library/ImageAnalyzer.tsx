@@ -1,14 +1,18 @@
 "use client";
 /**
- * ImageAnalyzer
- * ─────────────
- * Upload an image → see its composition, color scheme, and tone analysed visually.
- * Each result card has an "加入素材庫" button to save that specific type.
+ * ImageAnalyzer (v2)
+ * ──────────────────
+ * • Upload an image → AI auto-analyzes composition / color scheme / tone
+ * • Shows past analyzed images (grouped by previewUrl from DB)
+ * • Click any past image → loads its saved components (no new AI call)
+ * • Accepts initialImageUrl prop so ComponentGrid can deep-link to an image
+ * • Each result card has individual "加入" or "重新加入" button
  */
 
-import { useState, useRef } from "react";
-import { Upload, Sparkles, Loader2, Check, Plus, X } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { Upload, Sparkles, Loader2, Check, Plus, X, History } from "lucide-react";
 import { CATEGORY_META } from "@/types/library";
+import type { StyleComponent } from "@/types/library";
 
 type AnalysisResult = {
   composition: { name: string; description: string; aiPromptText: string } | null;
@@ -18,12 +22,15 @@ type AnalysisResult = {
 
 type SavedState = { COMPOSITION: boolean; COLOR_SCHEME: boolean; COPY_TONE: boolean };
 
+type PastImage = { url: string; types: string[]; names: string[] };
+
 type Props = {
   clientId: string | null;
+  initialImageUrl?: string | null;   // set by library page when navigating from a component card
   onSaved?: () => void;
 };
 
-export function ImageAnalyzer({ clientId, onSaved }: Props) {
+export function ImageAnalyzer({ clientId, initialImageUrl, onSaved }: Props) {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
@@ -31,7 +38,33 @@ export function ImageAnalyzer({ clientId, onSaved }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<SavedState>({ COMPOSITION: false, COLOR_SCHEME: false, COPY_TONE: false });
   const [saving, setSaving] = useState<Partial<SavedState>>({});
+  const [pastImages, setPastImages] = useState<PastImage[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Load past analyzed images from DB (grouped by previewUrl)
+  useEffect(() => {
+    const url = clientId ? `/api/components?clientId=${clientId}` : "/api/components";
+    fetch(url)
+      .then(r => r.json())
+      .then((comps: StyleComponent[]) => {
+        const map: Record<string, PastImage> = {};
+        comps.filter(c => c.previewUrl).forEach(c => {
+          const u = c.previewUrl!;
+          if (!map[u]) map[u] = { url: u, types: [], names: [] };
+          if (!map[u].types.includes(c.type)) map[u].types.push(c.type);
+          map[u].names.push(c.name);
+        });
+        setPastImages(Object.values(map).reverse());
+      });
+  }, [clientId]);
+
+  // If parent navigates us to a specific image, load it
+  useEffect(() => {
+    if (initialImageUrl && initialImageUrl !== imageUrl) {
+      loadFromDb(initialImageUrl);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialImageUrl]);
 
   async function handleUpload(file: File) {
     setUploading(true);
@@ -44,7 +77,6 @@ export function ImageAnalyzer({ clientId, onSaved }: Props) {
     const { url } = await res.json();
     setImageUrl(url);
     setUploading(false);
-    // Auto-analyze on upload
     await analyze(url);
   }
 
@@ -60,8 +92,48 @@ export function ImageAnalyzer({ clientId, onSaved }: Props) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "分析失敗");
       setResult(data);
+      setSaved({ COMPOSITION: false, COLOR_SCHEME: false, COPY_TONE: false });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "分析失敗，請重試");
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  // Load existing components from DB for a past image (no AI call)
+  async function loadFromDb(url: string) {
+    setImageUrl(url);
+    setResult(null);
+    setError(null);
+    setAnalyzing(true);
+    try {
+      const res = await fetch(`/api/components?previewUrl=${encodeURIComponent(url)}`);
+      const comps: StyleComponent[] = await res.json();
+
+      const comp = comps.find(c => c.type === "COMPOSITION");
+      const color = comps.find(c => c.type === "COLOR_SCHEME");
+      const tone = comps.find(c => c.type === "COPY_TONE");
+
+      setResult({
+        composition: comp
+          ? { name: comp.name, description: (comp.data.description as string) ?? "", aiPromptText: comp.aiPromptText }
+          : null,
+        colorScheme: color
+          ? { name: color.name, primaryColor: (color.data.primaryColor as string) ?? "#000000",
+              secondaryColor: (color.data.secondaryColor as string) ?? "#ffffff", aiPromptText: color.aiPromptText }
+          : null,
+        copyTone: tone
+          ? { name: tone.name, toneLabels: (tone.data.toneLabels as string[]) ?? [], aiPromptText: tone.aiPromptText }
+          : null,
+      });
+      // Mark all as already saved (loaded from DB)
+      setSaved({
+        COMPOSITION: !!comp,
+        COLOR_SCHEME: !!color,
+        COPY_TONE: !!tone,
+      });
+    } catch {
+      setError("載入失敗，請重試");
     } finally {
       setAnalyzing(false);
     }
@@ -94,6 +166,18 @@ export function ImageAnalyzer({ clientId, onSaved }: Props) {
 
     setSaving(p => ({ ...p, [type]: false }));
     setSaved(p => ({ ...p, [type]: true }));
+    // Refresh past images list
+    const url = clientId ? `/api/components?clientId=${clientId}` : "/api/components";
+    fetch(url).then(r => r.json()).then((comps: StyleComponent[]) => {
+      const map: Record<string, PastImage> = {};
+      comps.filter(c => c.previewUrl).forEach(c => {
+        const u = c.previewUrl!;
+        if (!map[u]) map[u] = { url: u, types: [], names: [] };
+        if (!map[u].types.includes(c.type)) map[u].types.push(c.type);
+        map[u].names.push(c.name);
+      });
+      setPastImages(Object.values(map).reverse());
+    });
     onSaved?.();
   }
 
@@ -109,17 +193,48 @@ export function ImageAnalyzer({ clientId, onSaved }: Props) {
   const compMeta = CATEGORY_META["COMPOSITION"];
   const colorMeta = CATEGORY_META["COLOR_SCHEME"];
   const toneMeta = CATEGORY_META["COPY_TONE"];
-
   const allSaved = result && saved.COMPOSITION && saved.COLOR_SCHEME && saved.COPY_TONE;
   const anySaved = saved.COMPOSITION || saved.COLOR_SCHEME || saved.COPY_TONE;
 
   return (
-    <div className="space-y-5">
-
-      {/* Upload zone */}
+    <div className="space-y-6">
       <input ref={fileRef} type="file" accept="image/*" className="hidden"
         onChange={e => { if (e.target.files?.[0]) handleUpload(e.target.files[0]); }} />
 
+      {/* ── Past analyzed images ── */}
+      {pastImages.length > 0 && (
+        <div>
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 mb-2">
+            <History className="h-3.5 w-3.5" />
+            過往分析紀錄
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {pastImages.map((p) => (
+              <button
+                key={p.url}
+                onClick={() => loadFromDb(p.url)}
+                className={`shrink-0 relative group rounded-xl overflow-hidden border-2 transition-all
+                  ${imageUrl === p.url ? "border-violet-500 shadow-md" : "border-gray-200 hover:border-violet-300"}`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={p.url} alt="past" className="w-16 h-16 object-cover" />
+                {/* Type dots */}
+                <div className="absolute bottom-1 left-0 right-0 flex justify-center gap-0.5">
+                  {["COMPOSITION","COLOR_SCHEME","COPY_TONE"].map(t => (
+                    <span key={t} className={`w-1.5 h-1.5 rounded-full ${p.types.includes(t) ? "bg-white shadow" : "bg-white/30"}`} />
+                  ))}
+                </div>
+                {imageUrl === p.url && (
+                  <div className="absolute inset-0 bg-violet-500/20" />
+                )}
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-gray-400 mt-1">點擊查看已儲存的分析，三個白點代表已儲存三種風格</p>
+        </div>
+      )}
+
+      {/* ── Upload / current image ── */}
       {!imageUrl ? (
         <button onClick={() => fileRef.current?.click()}
           className="w-full h-40 border-2 border-dashed border-gray-200 rounded-2xl flex flex-col items-center justify-center gap-2 text-gray-400 hover:border-violet-300 hover:text-violet-500 transition-colors">
@@ -136,23 +251,29 @@ export function ImageAnalyzer({ clientId, onSaved }: Props) {
               {analyzing && (
                 <div className="flex items-center gap-2 text-sm text-violet-600">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  AI 分析中…
+                  {result ? "AI 重新分析中…" : "AI 分析中…"}
                 </div>
               )}
               {result && !analyzing && (
-                <div className="text-sm font-medium text-gray-700">分析完成 ✓</div>
+                <div className="text-sm font-medium text-gray-700">
+                  {anySaved ? "✓ 已從紀錄載入" : "分析完成 ✓"}
+                </div>
               )}
               {error && <p className="text-xs text-red-500">{error}</p>}
             </div>
             <div className="flex gap-2 flex-wrap">
+              <button onClick={() => { setImageUrl(null); setResult(null); setSaved({ COMPOSITION: false, COLOR_SCHEME: false, COPY_TONE: false }); }}
+                className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 transition-colors">
+                <X className="h-3 w-3 inline mr-1" />清除
+              </button>
               <button onClick={() => fileRef.current?.click()}
                 className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 transition-colors">
                 換圖片
               </button>
-              {result && (
+              {imageUrl && (
                 <button onClick={() => analyze(imageUrl)}
                   className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg border border-violet-200 text-violet-600 hover:bg-violet-50 transition-colors">
-                  <Sparkles className="h-3 w-3" />重新分析
+                  <Sparkles className="h-3 w-3" />重新 AI 分析
                 </button>
               )}
               {result && !allSaved && (
@@ -167,20 +288,13 @@ export function ImageAnalyzer({ clientId, onSaved }: Props) {
         </div>
       )}
 
-      {/* Analysis result cards */}
+      {/* ── Analysis result cards ── */}
       {result && !analyzing && (
         <div className="grid grid-cols-1 gap-3">
 
-          {/* Composition card */}
           {result.composition && (
-            <ResultCard
-              meta={compMeta}
-              label="構圖"
-              name={result.composition.name}
-              saved={saved.COMPOSITION}
-              saving={!!saving.COMPOSITION}
-              onSave={() => saveComponent("COMPOSITION")}
-            >
+            <ResultCard meta={compMeta} label="構圖" name={result.composition.name}
+              saved={saved.COMPOSITION} saving={!!saving.COMPOSITION} onSave={() => saveComponent("COMPOSITION")}>
               <p className="text-xs text-gray-600">{result.composition.description}</p>
               {result.composition.aiPromptText && (
                 <p className="text-[11px] font-mono text-gray-400 mt-1 line-clamp-1">{result.composition.aiPromptText}</p>
@@ -188,16 +302,9 @@ export function ImageAnalyzer({ clientId, onSaved }: Props) {
             </ResultCard>
           )}
 
-          {/* Color scheme card */}
           {result.colorScheme && (
-            <ResultCard
-              meta={colorMeta}
-              label="配色"
-              name={result.colorScheme.name}
-              saved={saved.COLOR_SCHEME}
-              saving={!!saving.COLOR_SCHEME}
-              onSave={() => saveComponent("COLOR_SCHEME")}
-            >
+            <ResultCard meta={colorMeta} label="配色" name={result.colorScheme.name}
+              saved={saved.COLOR_SCHEME} saving={!!saving.COLOR_SCHEME} onSave={() => saveComponent("COLOR_SCHEME")}>
               <div className="flex items-center gap-2">
                 <span className="w-6 h-6 rounded-full border-2 border-white shadow"
                   style={{ backgroundColor: result.colorScheme.primaryColor }} />
@@ -212,16 +319,9 @@ export function ImageAnalyzer({ clientId, onSaved }: Props) {
             </ResultCard>
           )}
 
-          {/* Tone card */}
           {result.copyTone && (
-            <ResultCard
-              meta={toneMeta}
-              label="語氣"
-              name={result.copyTone.name}
-              saved={saved.COPY_TONE}
-              saving={!!saving.COPY_TONE}
-              onSave={() => saveComponent("COPY_TONE")}
-            >
+            <ResultCard meta={toneMeta} label="語氣" name={result.copyTone.name}
+              saved={saved.COPY_TONE} saving={!!saving.COPY_TONE} onSave={() => saveComponent("COPY_TONE")}>
               <div className="flex flex-wrap gap-1">
                 {result.copyTone.toneLabels.map((t, i) => (
                   <span key={i} className="text-[11px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full border border-amber-200">{t}</span>
@@ -239,13 +339,10 @@ export function ImageAnalyzer({ clientId, onSaved }: Props) {
   );
 }
 
-// ── Result card ───────────────────────────────────────────────────────────────
 function ResultCard({ meta, label, name, saved, saving, onSave, children }: {
   meta: { bg: string; border: string; color: string };
-  label: string;
-  name: string;
-  saved: boolean;
-  saving: boolean;
+  label: string; name: string;
+  saved: boolean; saving: boolean;
   onSave: () => void;
   children: React.ReactNode;
 }) {

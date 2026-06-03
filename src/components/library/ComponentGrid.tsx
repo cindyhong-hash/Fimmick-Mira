@@ -3,15 +3,18 @@
  * ComponentGrid
  * ─────────────
  * Shows style components filtered by clientId.
- * Hover over any card to reveal:
- *   • [複製 Prompt]  – copies aiPromptText to clipboard
- *   • [帶入生成]     – injects component into the PromptComposer slot
- *
- * Category tabs (All / 構圖 / 配色 / 語氣) filter the list in-page.
+ * Each card supports:
+ *   • [複製 Prompt]   – copies aiPromptText to clipboard
+ *   • [帶入生成]      – injects component into the PromptComposer slot
+ *   • [刪除]          – deletes the component (with inline confirm)
+ *   • Thumbnail click – navigates to the source image's full analysis
  */
 
 import { useEffect, useState, useCallback, useImperativeHandle, forwardRef } from "react";
-import { Copy, Check, ArrowRightCircle, LayoutTemplate, Palette, MessageSquare, Plus } from "lucide-react";
+import {
+  Copy, Check, ArrowRightCircle, LayoutTemplate, Palette,
+  MessageSquare, Plus, Trash2, ScanSearch,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { StyleComponent, ComponentCategory, PromptSlots } from "@/types/library";
 import { CATEGORY_META } from "@/types/library";
@@ -20,9 +23,9 @@ type FilterTab = "ALL" | ComponentCategory;
 
 const FILTER_TABS: { key: FilterTab; label: string; icon?: React.ReactNode }[] = [
   { key: "ALL", label: "全部" },
-  { key: "COMPOSITION", label: "構圖", icon: <LayoutTemplate className="h-3.5 w-3.5" /> },
+  { key: "COMPOSITION",  label: "構圖", icon: <LayoutTemplate className="h-3.5 w-3.5" /> },
   { key: "COLOR_SCHEME", label: "配色", icon: <Palette className="h-3.5 w-3.5" /> },
-  { key: "COPY_TONE", label: "語氣", icon: <MessageSquare className="h-3.5 w-3.5" /> },
+  { key: "COPY_TONE",    label: "語氣", icon: <MessageSquare className="h-3.5 w-3.5" /> },
 ];
 
 // ─── Single component card ────────────────────────────────────────────────────
@@ -31,13 +34,18 @@ function ComponentCard({
   isInjected,
   onCopy,
   onInject,
+  onDelete,
+  onViewImage,
 }: {
   comp: StyleComponent;
   isInjected: boolean;
   onCopy: (text: string) => void;
   onInject: (comp: StyleComponent) => void;
+  onDelete: (id: string) => void;
+  onViewImage?: (url: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const meta = CATEGORY_META[comp.type];
 
   const handleCopy = async (e: React.MouseEvent) => {
@@ -54,6 +62,16 @@ function ComponentCard({
     onInject(comp);
   };
 
+  const handleDeleteClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirmDelete) {
+      onDelete(comp.id);
+    } else {
+      setConfirmDelete(true);
+      setTimeout(() => setConfirmDelete(false), 3000);
+    }
+  };
+
   return (
     <div
       className={`group relative rounded-xl border p-3 transition-all duration-200 cursor-default select-none
@@ -67,6 +85,22 @@ function ComponentCard({
         <span className={`absolute top-2 right-2 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color} ${meta.border} border`}>
           已帶入
         </span>
+      )}
+
+      {/* Preview image thumbnail (if available) */}
+      {comp.previewUrl && onViewImage && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onViewImage(comp.previewUrl!); }}
+          className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity"
+          title="查看來源圖片分析"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={comp.previewUrl}
+            alt="source"
+            className="w-8 h-8 rounded-md object-cover border border-white shadow-md ring-1 ring-gray-200 hover:ring-violet-400 transition-all"
+          />
+        </button>
       )}
 
       {/* Card content */}
@@ -105,7 +139,6 @@ function ComponentCard({
           </div>
         )}
 
-        {/* AI Prompt preview (truncated) */}
         {comp.aiPromptText && (
           <p className="text-[10px] text-gray-400 font-mono leading-snug line-clamp-2 mt-1">
             {comp.aiPromptText}
@@ -117,6 +150,19 @@ function ComponentCard({
       <div className="absolute inset-x-0 bottom-0 flex items-center gap-1 px-2 pb-2 pt-6
         bg-gradient-to-t from-white/95 to-transparent rounded-b-xl
         opacity-0 group-hover:opacity-100 transition-all duration-200 translate-y-1 group-hover:translate-y-0">
+
+        {/* View source image button */}
+        {comp.previewUrl && onViewImage && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onViewImage(comp.previewUrl!); }}
+            className="flex items-center justify-center text-[11px] font-medium py-1 px-2 rounded-lg
+              bg-white border border-gray-200 text-violet-600 hover:border-violet-300 hover:text-violet-700 transition-colors shadow-sm"
+            title="查看來源圖片分析"
+          >
+            <ScanSearch className="h-3 w-3" />
+          </button>
+        )}
+
         <button
           onClick={handleCopy}
           className="flex-1 flex items-center justify-center gap-1 text-[11px] font-medium py-1 rounded-lg
@@ -126,6 +172,7 @@ function ComponentCard({
           {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
           {copied ? "已複製" : "複製 Prompt"}
         </button>
+
         <button
           onClick={handleInject}
           className={`flex-1 flex items-center justify-center gap-1 text-[11px] font-medium py-1 rounded-lg transition-colors shadow-sm
@@ -139,25 +186,40 @@ function ComponentCard({
           <ArrowRightCircle className="h-3 w-3" />
           {isInjected ? "已帶入" : "帶入生成"}
         </button>
+
+        {/* Delete button */}
+        <button
+          onClick={handleDeleteClick}
+          className={`flex items-center justify-center text-[11px] font-medium py-1 px-2 rounded-lg border transition-colors shadow-sm
+            ${confirmDelete
+              ? "bg-red-500 border-red-500 text-white"
+              : "bg-white border-gray-200 text-gray-400 hover:border-red-300 hover:text-red-500"
+            }`}
+          title={confirmDelete ? "再按一次確認刪除" : "刪除"}
+        >
+          <Trash2 className="h-3 w-3" />
+        </button>
       </div>
 
-      {/* Extra bottom padding so content isn't hidden behind hover bar */}
       <div className="h-6 group-hover:h-0 transition-all duration-200" />
     </div>
   );
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
+export type ComponentGridHandle = { refresh: () => void };
+
 type Props = {
   clientId: string | null;
   injectedSlots: PromptSlots;
   onInject: (comp: StyleComponent) => void;
   onOpenQuickAdd?: () => void;
+  onViewImage?: (url: string) => void;
 };
 
-export type ComponentGridHandle = { refresh: () => void };
-
-export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function ComponentGrid({ clientId, injectedSlots, onInject, onOpenQuickAdd }, ref) {
+export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function ComponentGrid(
+  { clientId, injectedSlots, onInject, onOpenQuickAdd, onViewImage }, ref
+) {
   const [components, setComponents] = useState<StyleComponent[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<FilterTab>("ALL");
@@ -174,8 +236,12 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
 
   useEffect(() => { loadComponents(); }, [loadComponents]);
 
-  // Expose refresh method so parent can call it after a new component is saved
   useImperativeHandle(ref, () => ({ refresh: loadComponents }), [loadComponents]);
+
+  const handleDelete = useCallback(async (id: string) => {
+    await fetch(`/api/components/${id}`, { method: "DELETE" });
+    setComponents((prev) => prev.filter((c) => c.id !== id));
+  }, []);
 
   const injectedIds = new Set(
     Object.values(injectedSlots).filter(Boolean).map((c) => c!.id)
@@ -214,36 +280,35 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
 
   return (
     <div className="space-y-5">
-      {/* Toast feedback */}
       {lastCopied && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-gray-900 text-white text-xs px-4 py-2 rounded-full shadow-lg pointer-events-none animate-in fade-in slide-in-from-bottom-2">
           ✓ Prompt 已複製到剪貼簿
         </div>
       )}
 
-      {/* Top bar: filter tabs + quick-add button */}
+      {/* Top bar */}
       <div className="flex items-center justify-between gap-4">
-      <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
-        {FILTER_TABS.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-              activeTab === tab.key
-                ? "bg-white shadow-sm text-gray-900"
-                : "text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            {tab.icon}
-            {tab.label}
-            <span className={`text-[10px] ${activeTab === tab.key ? "text-gray-400" : "text-gray-300"}`}>
-              {tab.key === "ALL"
-                ? components.length
-                : components.filter((c) => c.type === tab.key).length}
-            </span>
-          </button>
-        ))}
-      </div>
+        <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
+          {FILTER_TABS.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                activeTab === tab.key
+                  ? "bg-white shadow-sm text-gray-900"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              {tab.icon}
+              {tab.label}
+              <span className={`text-[10px] ${activeTab === tab.key ? "text-gray-400" : "text-gray-300"}`}>
+                {tab.key === "ALL"
+                  ? components.length
+                  : components.filter((c) => c.type === tab.key).length}
+              </span>
+            </button>
+          ))}
+        </div>
         {onOpenQuickAdd && (
           <button
             onClick={onOpenQuickAdd}
@@ -276,6 +341,8 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
                     setTimeout(() => setLastCopied(null), 2500);
                   }}
                   onInject={onInject}
+                  onDelete={handleDelete}
+                  onViewImage={onViewImage}
                 />
               ))}
             </div>

@@ -1,40 +1,56 @@
 import { NextResponse } from "next/server";
-import { getAnthropic } from "@/lib/anthropic";
+
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const OPENROUTER_MODEL = process.env.OPENROUTER_VISION_MODEL ?? "google/gemini-2.0-flash-001";
 
 export async function POST(request: Request) {
-  const { imageUrl } = await request.json();
-  if (!imageUrl) return NextResponse.json({ error: "imageUrl required" }, { status: 400 });
+  try {
+    if (!OPENROUTER_API_KEY || OPENROUTER_API_KEY === "your-openrouter-api-key-here") {
+      return NextResponse.json(
+        { error: "OPENROUTER_API_KEY 尚未設定，請在 .env.local 填入真實的 key" },
+        { status: 500 }
+      );
+    }
 
-  // Convert relative URL to absolute for fetch
-  const host = new URL(request.url).origin;
-  const absoluteUrl = imageUrl.startsWith("http") ? imageUrl : `${host}${imageUrl}`;
+    const { imageUrl } = await request.json();
+    if (!imageUrl) return NextResponse.json({ error: "imageUrl required" }, { status: 400 });
 
-  // Fetch image and convert to base64
-  const imgRes = await fetch(absoluteUrl);
-  const buffer = await imgRes.arrayBuffer();
-  const base64 = Buffer.from(buffer).toString("base64");
-  const mediaType = (imgRes.headers.get("content-type") ?? "image/jpeg") as
-    | "image/jpeg"
-    | "image/png"
-    | "image/gif"
-    | "image/webp";
+    // Convert relative URL to absolute for fetch
+    const host = new URL(request.url).origin;
+    const absoluteUrl = imageUrl.startsWith("http") ? imageUrl : `${host}${imageUrl}`;
 
-  const anthropic = getAnthropic();
+    // Fetch image and convert to base64
+    const imgRes = await fetch(absoluteUrl);
+    if (!imgRes.ok) throw new Error(`無法載入圖片：${imgRes.status}`);
+    const buffer = await imgRes.arrayBuffer();
+    const base64 = Buffer.from(buffer).toString("base64");
+    const mediaType = imgRes.headers.get("content-type") ?? "image/jpeg";
 
-  const message = await anthropic.messages.create({
-    model: "claude-opus-4-5",
-    max_tokens: 1024,
-    messages: [
-      {
-        role: "user",
-        content: [
+    // Call OpenRouter (OpenAI-compatible format)
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": host,
+        "X-Title": "Marketing Tool",
+      },
+      body: JSON.stringify({
+        model: OPENROUTER_MODEL,
+        max_tokens: 1024,
+        messages: [
           {
-            type: "image",
-            source: { type: "base64", media_type: mediaType, data: base64 },
-          },
-          {
-            type: "text",
-            text: `你是一位專業視覺設計師與品牌策略師。請仔細分析這張圖片，並以 JSON 格式回傳以下三個面向的分析結果。
+            role: "user",
+            content: [
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:${mediaType};base64,${base64}`,
+                },
+              },
+              {
+                type: "text",
+                text: `你是一位專業視覺設計師與品牌策略師。請仔細分析這張圖片，並以 JSON 格式回傳以下三個面向的分析結果。
 
 只回傳 JSON，不要任何說明文字：
 
@@ -56,20 +72,33 @@ export async function POST(request: Request) {
     "aiPromptText": "可直接用於 AI 文案生成的語氣描述（20字以內）"
   }
 }`,
+              },
+            ],
           },
         ],
-      },
-    ],
-  });
+      }),
+    });
 
-  const raw = message.content[0].type === "text" ? message.content[0].text : "";
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`OpenRouter 錯誤 ${res.status}: ${errText}`);
+    }
 
-  // Extract JSON from response
-  const jsonMatch = raw.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    return NextResponse.json({ error: "AI response parse failed", raw }, { status: 500 });
+    const data = await res.json();
+    const raw = data.choices?.[0]?.message?.content ?? "";
+
+    // Extract JSON from response
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return NextResponse.json({ error: "AI 回應解析失敗", raw }, { status: 500 });
+    }
+
+    const result = JSON.parse(jsonMatch[0]);
+    return NextResponse.json(result);
+
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[analyze] error:", message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  const result = JSON.parse(jsonMatch[0]);
-  return NextResponse.json(result);
 }

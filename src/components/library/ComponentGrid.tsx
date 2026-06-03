@@ -10,8 +10,8 @@
  * Category tabs (All / 構圖 / 配色 / 語氣) filter the list in-page.
  */
 
-import { useEffect, useState, useCallback } from "react";
-import { Copy, Check, ArrowRightCircle, LayoutTemplate, Palette, MessageSquare } from "lucide-react";
+import { useEffect, useState, useCallback, useImperativeHandle, forwardRef } from "react";
+import { Copy, Check, ArrowRightCircle, LayoutTemplate, Palette, MessageSquare, Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { StyleComponent, ComponentCategory, PromptSlots } from "@/types/library";
 import { CATEGORY_META } from "@/types/library";
@@ -152,15 +152,18 @@ type Props = {
   clientId: string | null;
   injectedSlots: PromptSlots;
   onInject: (comp: StyleComponent) => void;
+  onOpenQuickAdd?: () => void;
 };
 
-export function ComponentGrid({ clientId, injectedSlots, onInject }: Props) {
+export type ComponentGridHandle = { refresh: () => void };
+
+export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function ComponentGrid({ clientId, injectedSlots, onInject, onOpenQuickAdd }, ref) {
   const [components, setComponents] = useState<StyleComponent[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<FilterTab>("ALL");
   const [lastCopied, setLastCopied] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadComponents = useCallback(() => {
     setLoading(true);
     const url = clientId ? `/api/components?clientId=${clientId}` : "/api/components";
     fetch(url)
@@ -168,6 +171,11 @@ export function ComponentGrid({ clientId, injectedSlots, onInject }: Props) {
       .then(setComponents)
       .finally(() => setLoading(false));
   }, [clientId]);
+
+  useEffect(() => { loadComponents(); }, [loadComponents]);
+
+  // Expose refresh method so parent can call it after a new component is saved
+  useImperativeHandle(ref, () => ({ refresh: loadComponents }), [loadComponents]);
 
   const injectedIds = new Set(
     Object.values(injectedSlots).filter(Boolean).map((c) => c!.id)
@@ -190,7 +198,16 @@ export function ComponentGrid({ clientId, injectedSlots, onInject }: Props) {
         <div className="text-sm">
           {clientId ? "此客戶還沒有風格組件" : "還沒有任何風格組件"}
         </div>
-        <div className="text-xs mt-1">生成活動後，AI 會自動提取並儲存風格組件</div>
+        <div className="text-xs mt-1 mb-5">生成活動後，AI 會自動提取並儲存風格組件</div>
+        {onOpenQuickAdd && (
+          <button
+            onClick={onOpenQuickAdd}
+            className="inline-flex items-center gap-1.5 text-sm font-medium bg-gray-900 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors"
+          >
+            <Plus className="h-4 w-4" />
+            手動加入素材
+          </button>
+        )}
       </div>
     );
   }
@@ -204,7 +221,8 @@ export function ComponentGrid({ clientId, injectedSlots, onInject }: Props) {
         </div>
       )}
 
-      {/* Category filter tabs */}
+      {/* Top bar: filter tabs + quick-add button */}
+      <div className="flex items-center justify-between gap-4">
       <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
         {FILTER_TABS.map((tab) => (
           <button
@@ -225,6 +243,16 @@ export function ComponentGrid({ clientId, injectedSlots, onInject }: Props) {
             </span>
           </button>
         ))}
+      </div>
+        {onOpenQuickAdd && (
+          <button
+            onClick={onOpenQuickAdd}
+            className="flex items-center gap-1.5 text-xs font-medium bg-gray-900 text-white px-3 py-2 rounded-lg hover:bg-gray-700 transition-colors shrink-0"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            加入素材
+          </button>
+        )}
       </div>
 
       {/* Cards by group */}
@@ -256,4 +284,4 @@ export function ComponentGrid({ clientId, injectedSlots, onInject }: Props) {
       })}
     </div>
   );
-}
+});

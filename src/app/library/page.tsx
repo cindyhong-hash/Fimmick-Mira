@@ -15,11 +15,12 @@
  *     switching back to "生成圖片" shows the filled composer
  */
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { FolderOpen, Images, Layers } from "lucide-react";
 import { AssetGrid } from "@/components/library/AssetGrid";
-import { ComponentGrid } from "@/components/library/ComponentGrid";
+import { ComponentGrid, type ComponentGridHandle } from "@/components/library/ComponentGrid";
 import { PromptComposer } from "@/components/library/PromptComposer";
+import { QuickAddModal } from "@/components/library/QuickAddModal";
 import type { StyleComponent, PromptSlots } from "@/types/library";
 import { CATEGORY_META } from "@/types/library";
 
@@ -31,6 +32,8 @@ export default function LibraryPage() {
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("assets");
   const [slots, setSlots] = useState<PromptSlots>({ layout: null, color: null, tone: null });
+  const [showQuickAdd, setShowQuickAdd] = useState(false);
+  const componentGridRef = useRef<ComponentGridHandle>(null);
 
   useEffect(() => {
     fetch("/api/clients")
@@ -58,6 +61,7 @@ export default function LibraryPage() {
   const filledSlotCount = Object.values(slots).filter(Boolean).length;
 
   return (
+    <>
     <div className="flex gap-0 min-h-[calc(100vh-4rem)] -mx-6 -mt-6">
 
       {/* ── Left: Client folder sidebar ── */}
@@ -164,12 +168,27 @@ export default function LibraryPage() {
           </div>
         ) : (
           <ComponentGrid
+            ref={componentGridRef}
             clientId={selectedClientId}
             injectedSlots={slots}
             onInject={handleInject}
+            onOpenQuickAdd={() => setShowQuickAdd(true)}
           />
         )}
       </div>
     </div>
+
+    {showQuickAdd && (
+      <QuickAddModal
+        clientId={selectedClientId}
+        onClose={() => setShowQuickAdd(false)}
+        onSaved={() => {
+          setShowQuickAdd(false);
+          setTab("components");
+          componentGridRef.current?.refresh();
+        }}
+      />
+    )}
+    </>
   );
 }

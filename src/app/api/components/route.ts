@@ -15,3 +15,26 @@ export async function GET(request: Request) {
     components.map((c) => ({ ...c, data: JSON.parse(c.data) }))
   );
 }
+
+export async function POST(request: Request) {
+  const body = await request.json();
+  const { name, type, clientId, data, aiPromptText, previewUrl } = body;
+
+  if (!name || !type) {
+    return NextResponse.json({ error: "name and type are required" }, { status: 400 });
+  }
+
+  const component = await db.styleComponent.create({
+    data: {
+      name,
+      type,
+      clientId: clientId ?? null,
+      data: JSON.stringify(data ?? {}),
+      aiPromptText: aiPromptText ?? "",
+      previewUrl: previewUrl ?? null,
+      sourceLayoutId: "manual",
+    },
+  });
+
+  return NextResponse.json({ ...component, data: JSON.parse(component.data) });
+}

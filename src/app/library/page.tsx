@@ -2,30 +2,24 @@
 /**
  * LibraryPage  (/library)
  * ───────────────────────
- * Layout:
- *   [Left: client folder sidebar (160px)]
- *   [Right: tab bar + content]
- *     Tab "生成圖片"  → AssetGrid (filtered) + PromptComposer
- *     Tab "風格組件"  → ComponentGrid (filtered, hover-inject)
- *
- * Shared state:
- *   selectedClientId  – drives all child fetches
- *   slots             – the 3 PromptComposer injection slots
- *     injecting from ComponentGrid (any tab) → fills a slot
- *     switching back to "生成圖片" shows the filled composer
+ * Tabs:
+ *   "生成圖片"  → AssetGrid + PromptComposer
+ *   "風格組件"  → ComponentGrid (hover-inject)
+ *   "圖片分析"  → ImageAnalyzer (upload → AI style analysis)
  */
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { FolderOpen, Images, Layers } from "lucide-react";
+import { FolderOpen, Images, Layers, ScanSearch } from "lucide-react";
 import { AssetGrid } from "@/components/library/AssetGrid";
 import { ComponentGrid, type ComponentGridHandle } from "@/components/library/ComponentGrid";
 import { PromptComposer } from "@/components/library/PromptComposer";
 import { QuickAddModal } from "@/components/library/QuickAddModal";
+import { ImageAnalyzer } from "@/components/library/ImageAnalyzer";
 import type { StyleComponent, PromptSlots } from "@/types/library";
 import { CATEGORY_META } from "@/types/library";
 
 type Client = { id: string; name: string; _count: { activities: number } };
-type Tab = "assets" | "components";
+type Tab = "assets" | "components" | "analyzer";
 
 export default function LibraryPage() {
   const [clients, setClients] = useState<Client[]>([]);
@@ -46,11 +40,9 @@ export default function LibraryPage() {
       });
   }, []);
 
-  /** Called by ComponentGrid when user clicks "帶入生成" */
   const handleInject = useCallback((comp: StyleComponent) => {
     const slotKey = CATEGORY_META[comp.type].slot as keyof PromptSlots;
     setSlots((prev) => ({ ...prev, [slotKey]: comp }));
-    // Auto-switch to assets tab so user sees the composer update
     setTab("assets");
   }, []);
 
@@ -70,7 +62,6 @@ export default function LibraryPage() {
           客戶資料夾
         </div>
 
-        {/* "全部" option */}
         <button
           onClick={() => setSelectedClientId(null)}
           className={`flex items-center gap-2 px-2 py-2 rounded-lg text-sm transition-colors text-left w-full ${
@@ -114,7 +105,6 @@ export default function LibraryPage() {
             )}
           </h1>
 
-          {/* Slot indicator pill (shows when composer has content) */}
           {filledSlotCount > 0 && (
             <button
               onClick={() => setTab("assets")}
@@ -130,16 +120,11 @@ export default function LibraryPage() {
 
         {/* Tab bar */}
         <div className="flex gap-0 border-b mb-6">
-          {(
-            [
-              { key: "assets" as Tab, label: "生成圖片", icon: <Images className="h-4 w-4" /> },
-              {
-                key: "components" as Tab,
-                label: "風格組件",
-                icon: <Layers className="h-4 w-4" />,
-              },
-            ] as const
-          ).map(({ key, label, icon }) => (
+          {([
+            { key: "assets" as Tab,     label: "生成圖片", icon: <Images className="h-4 w-4" /> },
+            { key: "components" as Tab, label: "風格組件", icon: <Layers className="h-4 w-4" /> },
+            { key: "analyzer" as Tab,   label: "圖片分析", icon: <ScanSearch className="h-4 w-4" /> },
+          ] as const).map(({ key, label, icon }) => (
             <button
               key={key}
               onClick={() => setTab(key)}
@@ -156,17 +141,17 @@ export default function LibraryPage() {
         </div>
 
         {/* Tab content */}
-        {tab === "assets" ? (
+        {tab === "assets" && (
           <div className="space-y-8">
-            {/* Prompt Composer always visible on assets tab */}
             <PromptComposer slots={slots} onClearSlot={handleClearSlot} />
-            {/* Asset gallery */}
             <div>
               <h2 className="text-sm font-semibold text-gray-600 mb-4">圖片紀錄</h2>
               <AssetGrid clientId={selectedClientId} />
             </div>
           </div>
-        ) : (
+        )}
+
+        {tab === "components" && (
           <ComponentGrid
             ref={componentGridRef}
             clientId={selectedClientId}
@@ -175,6 +160,20 @@ export default function LibraryPage() {
             onOpenQuickAdd={() => setShowQuickAdd(true)}
           />
         )}
+
+        {tab === "analyzer" && (
+          <div className="max-w-xl">
+            <div className="mb-5">
+              <h2 className="text-sm font-semibold text-gray-700">圖片風格分析</h2>
+              <p className="text-xs text-gray-400 mt-0.5">上傳任何圖片，AI 自動分析構圖・配色・語氣，可直接加入素材庫</p>
+            </div>
+            <ImageAnalyzer
+              clientId={selectedClientId}
+              onSaved={() => componentGridRef.current?.refresh()}
+            />
+          </div>
+        )}
+
       </div>
     </div>
 

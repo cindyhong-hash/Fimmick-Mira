@@ -12,6 +12,7 @@
 | [`docs/FEATURE_LOG.md`](docs/FEATURE_LOG.md) | 完整功能/變更紀錄 + API 列表 |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | 關鍵設計決定同理由 |
 | [`docs/CHECKLIST.md`](docs/CHECKLIST.md) | 功能檢查清單 + 待增加項目（backlog） |
+| [`docs/PLAN-library-redesign.md`](docs/PLAN-library-redesign.md) | 原始素材庫重構實作計劃（plan mode 產出） |
 
 ## Getting Started
 

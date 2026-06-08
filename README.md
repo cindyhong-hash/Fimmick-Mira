@@ -1,17 +1,26 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# marketing-tool
+
+社群行銷素材工具（Next.js 16 + React 19 + Prisma/SQLite）。核心係 **素材庫 `/library`**：
+- **生成圖片**：積木組合（構圖/配色/語氣/背景）+ 主體/上傳產品圖 → AI 生成圖片(HF) + 文案(OpenRouter)，或去背產品圖合成到背景
+- **風格組件**：品牌圖庫（上傳分析圖 + 生成圖）→ 點圖睇 popup、帶入生成、編輯、行業範本一鍵套用
+
+## 文件（重要）
+| 檔案 | 內容 |
+|------|------|
+| [`docs/SETUP.md`](docs/SETUP.md) | 環境變數、token、DB、啟動、備份指令 |
+| [`docs/MIGRATION.md`](docs/MIGRATION.md) | **換電腦清單**（git 帶 vs 手動複製：dev.db / uploads / .env.local） |
+| [`docs/FEATURE_LOG.md`](docs/FEATURE_LOG.md) | 完整功能/變更紀錄 + API 列表 |
+| [`docs/DECISIONS.md`](docs/DECISIONS.md) | 關鍵設計決定同理由 |
 
 ## Getting Started
 
-First, run the development server:
+複製環境變數範本並填入真實 key（見 `.env.example` / `docs/SETUP.md`）：
 
 ```bash
+cp .env.example .env.local      # 填 OPENROUTER_API_KEY、HF_TOKEN
+npm install
+DATABASE_URL="file:./prisma/dev.db" npx prisma migrate deploy && npx prisma generate
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.

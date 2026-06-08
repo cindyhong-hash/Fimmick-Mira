@@ -30,6 +30,26 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "name and type are required" }, { status: 400 });
   }
 
+  // Upsert: if a component of this type already exists for the same image
+  // (previewUrl), update it in place + bump to top instead of creating a duplicate.
+  if (previewUrl) {
+    const existing = await db.styleComponent.findFirst({
+      where: { previewUrl, type, clientId: clientId ?? null },
+    });
+    if (existing) {
+      const updated = await db.styleComponent.update({
+        where: { id: existing.id },
+        data: {
+          name,
+          data: JSON.stringify(data ?? {}),
+          aiPromptText: aiPromptText ?? "",
+          createdAt: new Date(), // bump to top
+        },
+      });
+      return NextResponse.json({ ...updated, data: JSON.parse(updated.data) });
+    }
+  }
+
   const component = await db.styleComponent.create({
     data: {
       name,

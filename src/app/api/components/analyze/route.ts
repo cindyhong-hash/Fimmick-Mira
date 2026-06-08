@@ -52,7 +52,9 @@ export async function POST(request: Request) {
                 type: "text",
                 text: `你是一位專業視覺設計師與品牌策略師。請仔細分析這張圖片，並以 JSON 格式回傳以下三個面向的分析結果。
 
-只回傳 JSON，不要任何說明文字：
+【語言規定】所有 name、description、toneLabels 一律用「繁體中文（台灣用語）」，不可用簡體或英文；只有 aiPromptText 用英文（供 AI 圖像/文案模型使用）。
+只回傳 JSON，不要任何說明文字。
+（colorScheme.extraColors：除主色、輔色外，圖片中其他重要的點綴/中性色，0 至 3 個 hex；若沒有則回傳空陣列 []）
 
 {
   "composition": {
@@ -64,6 +66,7 @@ export async function POST(request: Request) {
     "name": "配色方案名稱（例如：暖橙系、高對比黑白）",
     "primaryColor": "#XXXXXX（主色的 hex code）",
     "secondaryColor": "#XXXXXX（輔色的 hex code，若只有單色則填主色）",
+    "extraColors": ["#XXXXXX", "#XXXXXX"],
     "aiPromptText": "可直接用於 AI 圖像生成的英文配色 prompt（20字以內）"
   },
   "copyTone": {

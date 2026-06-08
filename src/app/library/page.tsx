@@ -1,202 +1,243 @@
 "use client";
 /**
  * LibraryPage  (/library)
- * ───────────────────────
- * Tabs:
- *   "生成圖片"  → AssetGrid + PromptComposer
- *   "風格組件"  → ComponentGrid (hover-inject)
- *   "圖片分析"  → ImageAnalyzer (upload → AI style analysis)
+ * Tabs: 生成圖片 (PromptComposer + 圖片紀錄) ／ 風格組件 (品牌圖庫 + 子分頁)
+ * The ImageDetailModal is shared here so both tabs (gallery + 圖片紀錄) open it,
+ * and inject/edit/regenerate are coordinated at page level.
  */
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { FolderOpen, Images, Layers, ScanSearch } from "lucide-react";
+import { FolderOpen, Images, Layers, Check } from "lucide-react";
 import { AssetGrid } from "@/components/library/AssetGrid";
 import { ComponentGrid, type ComponentGridHandle } from "@/components/library/ComponentGrid";
 import { PromptComposer } from "@/components/library/PromptComposer";
 import { QuickAddModal } from "@/components/library/QuickAddModal";
-import { ImageAnalyzer } from "@/components/library/ImageAnalyzer";
-import type { StyleComponent, PromptSlots } from "@/types/library";
+import { ImageDetailModal } from "@/components/library/ImageDetailModal";
+import type { StyleComponent, PromptSlots, ImageDetail } from "@/types/library";
 import { CATEGORY_META } from "@/types/library";
 
 type Client = { id: string; name: string; _count: { activities: number } };
-type Tab = "assets" | "components" | "analyzer";
+type Tab = "assets" | "components";
+type Prefill = { subject?: string; notes?: string; useFlags?: Record<string, boolean> };
 
 export default function LibraryPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("assets");
-  const [slots, setSlots] = useState<PromptSlots>({ layout: null, color: null, tone: null });
+  const [slots, setSlots] = useState<PromptSlots>({ layout: null, color: null, tone: null, background: null });
   const [showQuickAdd, setShowQuickAdd] = useState(false);
-  const [analyzerImageUrl, setAnalyzerImageUrl] = useState<string | null>(null);
+  const [quickAddImageUrl, setQuickAddImageUrl] = useState<string | null>(null);
+  const [editComponent, setEditComponent] = useState<StyleComponent | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [detail, setDetail] = useState<ImageDetail | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [prefill, setPrefill] = useState<Prefill>({});
+  const [prefillNonce, setPrefillNonce] = useState(0);
   const componentGridRef = useRef<ComponentGridHandle>(null);
-
-  // Navigate from ComponentCard thumbnail → 圖片分析 tab
-  const handleViewImage = useCallback((url: string) => {
-    setAnalyzerImageUrl(url);
-    setTab("analyzer");
-  }, []);
 
   useEffect(() => {
     fetch("/api/clients")
       .then((r) => r.json())
       .then((data: Client[]) => {
         setClients(data);
-        if (data.length > 0 && !selectedClientId) {
-          setSelectedClientId(data[0].id);
-        }
+        if (data.length > 0 && !selectedClientId) setSelectedClientId(data[0].id);
       });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast((t) => (t === msg ? null : t)), 2200);
+  }, []);
+
+  // Inject a component into its slot — NO tab jump, just a toast (#3).
   const handleInject = useCallback((comp: StyleComponent) => {
     const slotKey = CATEGORY_META[comp.type].slot as keyof PromptSlots;
     setSlots((prev) => ({ ...prev, [slotKey]: comp }));
-    setTab("assets");
-  }, []);
+    showToast(`已帶入${CATEGORY_META[comp.type].label}：${comp.name}`);
+  }, [showToast]);
 
   const handleClearSlot = useCallback((key: keyof PromptSlots) => {
     setSlots((prev) => ({ ...prev, [key]: null }));
   }, []);
 
+  // Popup「分析此圖加入素材」→ open QuickAdd prefilled with the image
+  const handleAnalyze = useCallback((url: string) => {
+    setEditComponent(null);
+    setQuickAddImageUrl(url);
+    setShowQuickAdd(true);
+    setDetail(null);
+  }, []);
+
+  // Popup「編輯」→ open QuickAdd in edit mode
+  const handleEditComponent = useCallback((comp: StyleComponent) => {
+    setQuickAddImageUrl(null);
+    setEditComponent(comp);
+    setShowQuickAdd(true);
+    setDetail(null);
+  }, []);
+
+  // Popup「重新生成/調整」→ load params into composer (#5)
+  const handleRegenerate = useCallback((d: ImageDetail) => {
+    try {
+      const p = JSON.parse(d.regenerateParams || "{}");
+      if (p.slots) {
+        setSlots({
+          layout: p.slots.layout ?? null,
+          color: p.slots.color ?? null,
+          tone: p.slots.tone ?? null,
+          background: p.slots.background ?? null,
+        });
+      }
+      const useFlags: Record<string, boolean> = {};
+      (p.palette ?? []).forEach((c: { hex: string; use?: boolean }) => { useFlags[c.hex] = c.use !== false; });
+      setPrefill({ subject: d.subject ?? "", notes: p.notes ?? "", useFlags });
+      setPrefillNonce((n) => n + 1);
+    } catch { /* ignore parse errors */ }
+    setTab("assets");
+    setDetail(null);
+    showToast("已載入原參數，可調整後重新生成");
+  }, [showToast]);
+
+  const handleGenerated = useCallback(() => {
+    setReloadKey((k) => k + 1);
+    componentGridRef.current?.refresh();
+  }, []);
+
+  const injectedIds = new Set(Object.values(slots).filter(Boolean).map((c) => c!.id));
   const filledSlotCount = Object.values(slots).filter(Boolean).length;
 
   return (
     <>
-    <div className="flex gap-0 min-h-[calc(100vh-4rem)] -mx-6 -mt-6">
-
-      {/* ── Left: Client folder sidebar ── */}
-      <aside className="w-44 shrink-0 border-r bg-gray-50/70 pt-6 pb-4 flex flex-col gap-1 px-3">
-        <div className="text-xs font-semibold text-gray-500 px-2 mb-3 uppercase tracking-wide">
-          客戶資料夾
-        </div>
-
-        <button
-          onClick={() => setSelectedClientId(null)}
-          className={`flex items-center gap-2 px-2 py-2 rounded-lg text-sm transition-colors text-left w-full ${
-            selectedClientId === null
-              ? "bg-gray-200 font-medium text-gray-900"
-              : "text-gray-600 hover:bg-gray-100"
-          }`}
-        >
-          <Layers className="h-4 w-4 shrink-0 text-gray-400" />
-          <span className="truncate">全部</span>
-        </button>
-
-        {clients.map((client) => (
-          <button
-            key={client.id}
-            onClick={() => setSelectedClientId(client.id)}
+      <div className="flex gap-0 min-h-[calc(100vh-4rem)] -mx-6 -mt-6">
+        {/* ── Left: Client folder sidebar ── */}
+        <aside className="w-44 shrink-0 border-r bg-gray-50/70 pt-6 pb-4 flex flex-col gap-1 px-3">
+          <div className="text-xs font-semibold text-gray-500 px-2 mb-3 uppercase tracking-wide">客戶資料夾</div>
+          <button onClick={() => setSelectedClientId(null)}
             className={`flex items-center gap-2 px-2 py-2 rounded-lg text-sm transition-colors text-left w-full ${
-              selectedClientId === client.id
-                ? "bg-gray-200 font-medium text-gray-900"
-                : "text-gray-600 hover:bg-gray-100"
-            }`}
-          >
-            <FolderOpen className="h-4 w-4 shrink-0 text-gray-400" />
-            <span className="truncate flex-1">{client.name}</span>
-            <span className="text-[10px] text-gray-400 shrink-0">{client._count.activities}</span>
+              selectedClientId === null ? "bg-gray-200 font-medium text-gray-900" : "text-gray-600 hover:bg-gray-100"}`}>
+            <Layers className="h-4 w-4 shrink-0 text-gray-400" />
+            <span className="truncate">全部</span>
           </button>
-        ))}
-      </aside>
-
-      {/* ── Right: Tab bar + content ── */}
-      <div className="flex-1 px-6 pt-6 pb-8 overflow-auto min-w-0">
-
-        {/* Header row */}
-        <div className="flex items-center justify-between mb-5">
-          <h1 className="text-xl font-semibold">
-            素材庫
-            {selectedClientId && (
-              <span className="ml-2 text-sm font-normal text-gray-400">
-                — {clients.find((c) => c.id === selectedClientId)?.name}
-              </span>
-            )}
-          </h1>
-
-          {filledSlotCount > 0 && (
-            <button
-              onClick={() => setTab("assets")}
-              className="flex items-center gap-1.5 text-xs bg-violet-50 border border-violet-200 text-violet-700 px-3 py-1.5 rounded-full hover:bg-violet-100 transition-colors"
-            >
-              <span className="w-4 h-4 rounded-full bg-violet-600 text-white text-[9px] flex items-center justify-center font-bold">
-                {filledSlotCount}
-              </span>
-              積木已選取，前往組合台
-            </button>
-          )}
-        </div>
-
-        {/* Tab bar */}
-        <div className="flex gap-0 border-b mb-6">
-          {([
-            { key: "assets" as Tab,     label: "生成圖片", icon: <Images className="h-4 w-4" /> },
-            { key: "components" as Tab, label: "風格組件", icon: <Layers className="h-4 w-4" /> },
-            { key: "analyzer" as Tab,   label: "圖片分析", icon: <ScanSearch className="h-4 w-4" /> },
-          ] as const).map(({ key, label, icon }) => (
-            <button
-              key={key}
-              onClick={() => setTab(key)}
-              className={`flex items-center gap-1.5 px-4 pb-3 text-sm font-medium border-b-2 transition-colors ${
-                tab === key
-                  ? "border-black text-black"
-                  : "border-transparent text-gray-400 hover:text-gray-600"
-              }`}
-            >
-              {icon}
-              {label}
+          {clients.map((client) => (
+            <button key={client.id} onClick={() => setSelectedClientId(client.id)}
+              className={`flex items-center gap-2 px-2 py-2 rounded-lg text-sm transition-colors text-left w-full ${
+                selectedClientId === client.id ? "bg-gray-200 font-medium text-gray-900" : "text-gray-600 hover:bg-gray-100"}`}>
+              <FolderOpen className="h-4 w-4 shrink-0 text-gray-400" />
+              <span className="truncate flex-1">{client.name}</span>
+              <span className="text-[10px] text-gray-400 shrink-0">{client._count.activities}</span>
             </button>
           ))}
-        </div>
+        </aside>
 
-        {/* Tab content */}
-        {tab === "assets" && (
-          <div className="space-y-8">
-            <PromptComposer slots={slots} onClearSlot={handleClearSlot} />
-            <div>
-              <h2 className="text-sm font-semibold text-gray-600 mb-4">圖片紀錄</h2>
-              <AssetGrid clientId={selectedClientId} />
-            </div>
+        {/* ── Right: Tab bar + content ── */}
+        <div className="flex-1 px-6 pt-6 pb-8 overflow-auto min-w-0">
+          <div className="flex items-center justify-between mb-5">
+            <h1 className="text-xl font-semibold">
+              素材庫
+              {selectedClientId && (
+                <span className="ml-2 text-sm font-normal text-gray-400">
+                  — {clients.find((c) => c.id === selectedClientId)?.name}
+                </span>
+              )}
+            </h1>
+            {filledSlotCount > 0 && (
+              <button onClick={() => setTab("assets")}
+                className="flex items-center gap-1.5 text-xs bg-violet-50 border border-violet-200 text-violet-700 px-3 py-1.5 rounded-full hover:bg-violet-100 transition-colors">
+                <span className="w-4 h-4 rounded-full bg-violet-600 text-white text-[9px] flex items-center justify-center font-bold">{filledSlotCount}</span>
+                積木已選取，前往組合台
+              </button>
+            )}
           </div>
-        )}
 
-        {tab === "components" && (
-          <ComponentGrid
-            ref={componentGridRef}
-            clientId={selectedClientId}
-            injectedSlots={slots}
-            onInject={handleInject}
-            onOpenQuickAdd={() => setShowQuickAdd(true)}
-            onViewImage={handleViewImage}
-          />
-        )}
+          {/* Tab bar */}
+          <div className="flex gap-0 border-b mb-6">
+            {([
+              { key: "assets" as Tab, label: "生成圖片", icon: <Images className="h-4 w-4" /> },
+              { key: "components" as Tab, label: "風格組件", icon: <Layers className="h-4 w-4" /> },
+            ] as const).map(({ key, label, icon }) => (
+              <button key={key} onClick={() => setTab(key)}
+                className={`flex items-center gap-1.5 px-4 pb-3 text-sm font-medium border-b-2 transition-colors ${
+                  tab === key ? "border-black text-black" : "border-transparent text-gray-400 hover:text-gray-600"}`}>
+                {icon}
+                {label}
+              </button>
+            ))}
+          </div>
 
-        {tab === "analyzer" && (
-          <div className="max-w-xl">
-            <div className="mb-5">
-              <h2 className="text-sm font-semibold text-gray-700">圖片風格分析</h2>
-              <p className="text-xs text-gray-400 mt-0.5">上傳任何圖片，AI 自動分析構圖・配色・語氣，可直接加入素材庫</p>
+          {/* Tab content */}
+          {tab === "assets" && (
+            <div className="space-y-8">
+              <PromptComposer
+                slots={slots}
+                onClearSlot={handleClearSlot}
+                onPickSlot={handleInject}
+                clientId={selectedClientId}
+                onGenerated={handleGenerated}
+                prefill={prefill}
+                prefillNonce={prefillNonce}
+              />
+              <div>
+                <h2 className="text-sm font-semibold text-gray-600 mb-4">圖片紀錄</h2>
+                <AssetGrid clientId={selectedClientId} reloadKey={reloadKey} onOpenImage={setDetail} />
+              </div>
             </div>
-            <ImageAnalyzer
+          )}
+
+          {tab === "components" && (
+            <ComponentGrid
+              ref={componentGridRef}
               clientId={selectedClientId}
-              initialImageUrl={analyzerImageUrl}
-              onSaved={() => componentGridRef.current?.refresh()}
+              injectedSlots={slots}
+              onInject={handleInject}
+              onOpenQuickAdd={() => { setEditComponent(null); setQuickAddImageUrl(null); setShowQuickAdd(true); }}
+              onOpenImage={setDetail}
+              onEdit={handleEditComponent}
             />
-          </div>
-        )}
-
+          )}
+        </div>
       </div>
-    </div>
 
-    {showQuickAdd && (
-      <QuickAddModal
-        clientId={selectedClientId}
-        onClose={() => setShowQuickAdd(false)}
-        onSaved={() => {
-          setShowQuickAdd(false);
-          setTab("components");
-          componentGridRef.current?.refresh();
-        }}
-      />
-    )}
+      {/* Shared image popup */}
+      {detail && (
+        <ImageDetailModal
+          imageUrl={detail.imageUrl}
+          presetComponents={detail.presetComponents}
+          copyText={detail.copyText}
+          subject={detail.subject}
+          injectedIds={injectedIds}
+          onInject={handleInject}
+          onAnalyze={handleAnalyze}
+          onEdit={handleEditComponent}
+          onRegenerate={detail.regenerateParams ? () => handleRegenerate(detail) : undefined}
+          onClose={() => setDetail(null)}
+        />
+      )}
+
+      {/* Quick add / edit */}
+      {showQuickAdd && (
+        <QuickAddModal
+          clientId={selectedClientId}
+          initialImageUrl={quickAddImageUrl}
+          editComponent={editComponent}
+          onClose={() => { setShowQuickAdd(false); setQuickAddImageUrl(null); setEditComponent(null); }}
+          onSaved={() => {
+            setShowQuickAdd(false);
+            setQuickAddImageUrl(null);
+            setEditComponent(null);
+            setTab("components");
+            componentGridRef.current?.refresh();
+          }}
+        />
+      )}
+
+      {/* Auto-dismiss toast (#3) */}
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-[70] flex items-center gap-2 bg-gray-900 text-white text-sm px-4 py-2.5 rounded-xl shadow-lg animate-in fade-in slide-in-from-bottom-2">
+          <Check className="h-4 w-4 text-emerald-400" />
+          {toast}
+        </div>
+      )}
     </>
   );
 }

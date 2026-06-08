@@ -11,6 +11,7 @@
 | [`docs/MIGRATION.md`](docs/MIGRATION.md) | **換電腦清單**（git 帶 vs 手動複製：dev.db / uploads / .env.local） |
 | [`docs/FEATURE_LOG.md`](docs/FEATURE_LOG.md) | 完整功能/變更紀錄 + API 列表 |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | 關鍵設計決定同理由 |
+| [`docs/CHECKLIST.md`](docs/CHECKLIST.md) | 功能檢查清單 + 待增加項目（backlog） |
 
 ## Getting Started
 

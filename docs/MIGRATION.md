@@ -16,7 +16,7 @@
 | 備份本身 | `.backup/` | 用 USB / 雲端硬碟手動搬 |
 
 ## 新電腦設定步驟
-1. **Clone**：`git clone https://github.com/fimmick/claude-code-examples.git`
+1. **Clone**：`git clone https://github.com/verna-fimmickTW/market-tool-v-wip.git`
 2. **裝套件**：`npm install`
 3. **環境變數**：`cp .env.example .env.local` → 填入真實 `OPENROUTER_API_KEY`、`HF_TOKEN`
    - OpenRouter key：https://openrouter.ai/keys
@@ -34,6 +34,7 @@
    - 或即時重做備份：見 `docs/SETUP.md` 的「備份指令」
 
 ## Push 到 GitHub
-- Remote 已設：`origin → https://github.com/fimmick/claude-code-examples`
+- Remote 已設：`origin → https://github.com/verna-fimmickTW/market-tool-v-wip.git`（私人 repo，公司帳號 verna-fimmickTW）
 - 指令：`git push origin main`
 - 若要求登入：用 GitHub Personal Access Token（https://github.com/settings/tokens）作 HTTPS 密碼，或設定 SSH key
+- ⚠️ 唔好 push 去 `fimmick/claude-code-examples`（嗰個係 chesterchiu 嘅原始 repo，已唔再係本專案 remote）

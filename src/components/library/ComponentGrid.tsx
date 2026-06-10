@@ -11,10 +11,9 @@
 
 import { useEffect, useState, useCallback, useImperativeHandle, forwardRef } from "react";
 import {
-  Copy, Check, ArrowRightCircle, LayoutTemplate, Palette, MessageSquare,
-  Image as ImageIcon, LayoutGrid, Plus, Trash2, Sparkles, Pencil,
+  ArrowRightCircle, LayoutTemplate, Palette, MessageSquare,
+  Image as ImageIcon, LayoutGrid, Plus, Trash2, Sparkles, Wand2,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import type { StyleComponent, ComponentCategory, PromptSlots, GalleryItem, ImageDetail } from "@/types/library";
 import { CATEGORY_META, getColors } from "@/types/library";
 import { ColorCards } from "./ColorCards";
@@ -30,30 +29,19 @@ const FILTER_TABS: { key: FilterTab; label: string; icon?: React.ReactNode }[] =
   { key: "BACKGROUND", label: "背景", icon: <ImageIcon className="h-3.5 w-3.5" /> },
 ];
 
-// ─── Component card ──────────────────────────────────────────────────────────
+// ─── Component card (image-led, like SlotPicker) ─────────────────────────────
 function ComponentCard({
-  comp, isInjected, onCopy, onInject, onDelete, onOpen, onEdit,
+  comp, isInjected, onInject, onDelete, onOpen,
 }: {
   comp: StyleComponent;
   isInjected: boolean;
-  onCopy: (text: string) => void;
   onInject: (comp: StyleComponent) => void;
   onDelete: (id: string) => void;
   onOpen: (comp: StyleComponent) => void;
-  onEdit?: (comp: StyleComponent) => void;
 }) {
-  const [copied, setCopied] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const meta = CATEGORY_META[comp.type];
-
-  const handleCopy = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!comp.aiPromptText) return;
-    await navigator.clipboard.writeText(comp.aiPromptText);
-    setCopied(true);
-    onCopy(comp.aiPromptText);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  const img = comp.previewUrl || (comp.data.imageUrl as string | undefined);
 
   const handleDeleteClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -64,30 +52,36 @@ function ComponentCard({
   return (
     <div
       onClick={() => onOpen(comp)}
-      className={`relative rounded-xl border p-4 transition-all duration-200 cursor-pointer select-none
-        ${isInjected ? `${meta.bg} ${meta.border} ring-2 ring-offset-1 ring-current` : "border-gray-200 bg-white hover:border-gray-300 hover:shadow-md"}`}
+      className={`relative rounded-xl border overflow-hidden transition-all duration-200 cursor-pointer select-none
+        ${isInjected ? `${meta.border} ring-2 ring-offset-1 ring-current ${meta.color}` : "border-gray-200 bg-white hover:border-gray-300 hover:shadow-md"}`}
     >
-      {isInjected && (
-        <span className={`absolute top-2.5 right-2.5 text-[11px] font-semibold px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color} ${meta.border} border`}>
-          已帶入
-        </span>
+      {/* Image header with name overlay (falls back to a coloured header when no image) */}
+      {img ? (
+        <div className="relative">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={img} alt={comp.name} className="w-full h-32 object-cover" />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/60 to-black/10" />
+          <span className={`absolute top-2 left-2 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color} ${meta.border} border`}>{meta.label}</span>
+          <div className="absolute top-2 left-2 right-2 mt-6">
+            <div className="text-sm font-semibold text-white leading-snug drop-shadow line-clamp-2">{comp.name}</div>
+          </div>
+        </div>
+      ) : (
+        <div className={`px-3 pt-3 ${meta.bg}`}>
+          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${meta.color} ${meta.border} border bg-white`}>{meta.label}</span>
+          <div className="text-sm font-semibold text-gray-800 leading-snug mt-1.5 line-clamp-2">{comp.name}</div>
+        </div>
       )}
 
-      <div className="space-y-2">
-        <Badge variant="outline" className={`text-[11px] px-2 py-0.5 ${meta.color} ${meta.bg} ${meta.border} border`}>
-          {meta.label}
-        </Badge>
-        <div className="text-sm font-semibold text-gray-800 leading-snug pr-12">{comp.name}</div>
-
+      {/* Content preview */}
+      <div className="px-3 pt-2 pb-3">
         {comp.type === "COLOR_SCHEME" && (() => {
           const colors = getColors(comp.data);
-          return colors.length ? <ColorCards colors={colors} height="h-16" /> : null;
+          return colors.length ? <ColorCards colors={colors} height="h-12" /> : null;
         })()}
-
         {comp.type === "COMPOSITION" && (
-          <p className="text-xs text-gray-600 leading-relaxed">{(comp.data.description as string) ?? ""}</p>
+          <p className="text-xs text-gray-600 leading-relaxed line-clamp-2">{(comp.data.description as string) ?? ""}</p>
         )}
-
         {comp.type === "COPY_TONE" && (
           <div className="flex flex-wrap gap-1">
             {((comp.data.toneLabels as string[]) ?? []).length
@@ -98,115 +92,139 @@ function ComponentCard({
           </div>
         )}
 
-        {comp.type === "BACKGROUND" && Boolean(comp.data.imageUrl) && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={comp.data.imageUrl as string} alt="bg" className="w-full h-24 object-cover rounded-lg border" />
-        )}
-
-        {comp.aiPromptText && (
-          <p className="text-[11px] text-gray-400 font-mono leading-snug line-clamp-2">{comp.aiPromptText}</p>
-        )}
-      </div>
-
-      {/* Action bar */}
-      <div className="flex items-center gap-1.5 mt-3">
-        <button onClick={handleCopy}
-          className="flex-1 flex items-center justify-center gap-1 text-[11px] font-medium py-1.5 rounded-lg bg-white border border-gray-200 text-gray-600 hover:border-gray-400 hover:text-gray-800 transition-colors"
-          title="複製 AI Prompt">
-          {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
-          {copied ? "已複製" : "複製"}
-        </button>
-        <button onClick={(e) => { e.stopPropagation(); onInject(comp); }} disabled={isInjected}
-          className={`flex-1 flex items-center justify-center gap-1 text-[11px] font-medium py-1.5 rounded-lg transition-colors
-            ${isInjected ? "bg-gray-100 border border-gray-200 text-gray-400" : `${meta.bg} border ${meta.border} ${meta.color} hover:opacity-80`}`}
-          title="帶入生成台">
-          <ArrowRightCircle className="h-3 w-3" />
-          {isInjected ? "已帶入" : "帶入生成"}
-        </button>
-        {onEdit && (
-          <button onClick={(e) => { e.stopPropagation(); onEdit(comp); }}
-            className="flex items-center justify-center text-[11px] py-1.5 px-2 rounded-lg border bg-white border-gray-200 text-gray-400 hover:border-violet-300 hover:text-violet-600 transition-colors"
-            title="編輯">
-            <Pencil className="h-3 w-3" />
+        {/* Action bar: 帶入生成 + 刪除 (no pencil — edit via the image pop-up) */}
+        <div className="flex items-center gap-1.5 mt-3">
+          <button onClick={(e) => { e.stopPropagation(); onInject(comp); }} disabled={isInjected}
+            className={`flex-1 flex items-center justify-center gap-1 text-[11px] font-medium py-1.5 rounded-lg transition-colors
+              ${isInjected ? "bg-gray-100 border border-gray-200 text-gray-400" : `${meta.bg} border ${meta.border} ${meta.color} hover:opacity-80`}`}
+            title="帶入生成台">
+            <ArrowRightCircle className="h-3 w-3" />
+            {isInjected ? "已帶入" : "帶入生成"}
           </button>
-        )}
-        <button onClick={handleDeleteClick}
-          className={`flex items-center justify-center text-[11px] py-1.5 px-2 rounded-lg border transition-colors
-            ${confirmDelete ? "bg-red-500 border-red-500 text-white" : "bg-white border-gray-200 text-gray-400 hover:border-red-300 hover:text-red-500"}`}
-          title={confirmDelete ? "再按一次確認刪除" : "刪除"}>
-          <Trash2 className="h-3 w-3" />
-        </button>
+          <button onClick={handleDeleteClick}
+            className={`flex items-center justify-center text-[11px] py-1.5 px-2 rounded-lg border transition-colors
+              ${confirmDelete ? "bg-red-500 border-red-500 text-white" : "bg-white border-gray-200 text-gray-400 hover:border-red-300 hover:text-red-500"}`}
+            title={confirmDelete ? "再按一次確認刪除" : "刪除"}>
+            <Trash2 className="h-3 w-3" />
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
 // ─── Gallery tile ────────────────────────────────────────────────────────────
-function GalleryTile({ item, onOpen }: { item: GalleryItem; onOpen: (item: GalleryItem) => void }) {
+function GalleryTile({ item, onOpen, onDelete }: {
+  item: GalleryItem;
+  onOpen: (item: GalleryItem) => void;
+  onDelete: (item: GalleryItem) => void;
+}) {
+  const [confirmDel, setConfirmDel] = useState(false);
   return (
-    <button onClick={() => onOpen(item)}
-      className="group relative rounded-xl overflow-hidden border border-gray-200 bg-white hover:shadow-md hover:border-gray-300 transition-all text-left">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={item.imageUrl} alt="brand" className="w-full aspect-square object-cover" />
-      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
+    <div className="group relative rounded-xl overflow-hidden border border-gray-200 bg-white hover:shadow-md hover:border-gray-300 transition-all">
+      <button onClick={() => onOpen(item)} className="w-full text-left">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={item.imageUrl} alt="brand" className="w-full aspect-square object-cover" />
+        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors pointer-events-none" />
+      </button>
       {item.kind === "generated" ? (
-        <span className="absolute top-2 left-2 flex items-center gap-1 text-[10px] font-semibold bg-violet-600 text-white px-1.5 py-0.5 rounded-full shadow">
-          <Sparkles className="h-2.5 w-2.5" />生成
+        <span className="absolute top-2 left-2 flex items-center gap-1 text-[10px] font-semibold bg-violet-600 text-white px-1.5 py-0.5 rounded-full shadow pointer-events-none">
+          <Sparkles className="h-2.5 w-2.5" />AI生成
+        </span>
+      ) : item.kind === "material" ? (
+        <span className="absolute top-2 left-2 flex items-center gap-1 text-[10px] font-semibold bg-amber-500 text-white px-1.5 py-0.5 rounded-full shadow pointer-events-none">
+          背景
         </span>
       ) : (
-        <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1">
-          {(["COMPOSITION", "COLOR_SCHEME", "COPY_TONE", "BACKGROUND"] as ComponentCategory[]).map((t) => (
-            <span key={t} className={`w-1.5 h-1.5 rounded-full ${item.types.includes(t) ? "bg-white shadow" : "bg-white/30"}`} />
-          ))}
-        </div>
+        <span className="absolute top-2 left-2 flex items-center gap-1 text-[10px] font-semibold bg-emerald-600 text-white px-1.5 py-0.5 rounded-full shadow pointer-events-none">
+          上傳
+        </span>
       )}
-    </button>
+      {/* Delete button */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          if (confirmDel) { onDelete(item); }
+          else { setConfirmDel(true); setTimeout(() => setConfirmDel(false), 3000); }
+        }}
+        className={`absolute top-2 right-2 p-1 rounded-lg text-[10px] shadow transition-all opacity-0 group-hover:opacity-100
+          ${confirmDel ? "bg-red-500 text-white" : "bg-white/90 text-gray-500 hover:bg-red-50 hover:text-red-500"}`}
+        title={confirmDel ? "再按確認刪除" : "刪除"}>
+        <Trash2 className="h-3 w-3" />
+      </button>
+    </div>
   );
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 export type ComponentGridHandle = { refresh: () => void };
 
+type GalleryFilter = "ALL" | "material" | "uploaded" | "generated";
+
 type Props = {
   clientId: string | null;
   injectedSlots: PromptSlots;
   onInject: (comp: StyleComponent) => void;
   onOpenQuickAdd?: () => void;
+  onOpenGenerateAsset?: () => void;
   onOpenImage: (detail: ImageDetail) => void;
-  onEdit?: (comp: StyleComponent) => void;
+  reloadKey?: number;
 };
 
 export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function ComponentGrid(
-  { clientId, injectedSlots, onInject, onOpenQuickAdd, onOpenImage, onEdit }, ref,
+  { clientId, injectedSlots, onInject, onOpenQuickAdd, onOpenGenerateAsset, onOpenImage, reloadKey = 0 }, ref,
 ) {
   const [components, setComponents] = useState<StyleComponent[]>([]);
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<FilterTab>("GALLERY");
-  const [lastCopied, setLastCopied] = useState<string | null>(null);
+  const [galleryFilter, setGalleryFilter] = useState<GalleryFilter>("ALL");
 
-  const loadAll = useCallback(() => {
-    setLoading(true);
+  // Internal tick for imperative refresh (via ref.refresh())
+  const [localTick, setLocalTick] = useState(0);
+
+  // Fetch helper stored in ref so delete handlers always call the latest version
+  const doFetch = useCallback(() => {
     const cq = clientId ? `?clientId=${clientId}` : "";
-    Promise.all([
-      fetch(`/api/components${cq}`).then((r) => r.json()),
-      fetch(`/api/library/gallery${cq}`).then((r) => r.json()),
-    ])
+    const bust = `${cq ? "&" : "?"}_t=${Date.now()}`;
+    return Promise.all([
+      fetch(`/api/components${cq}${bust}`, { cache: "no-store" }).then((r) => r.json()),
+      fetch(`/api/library/gallery${cq}${bust}`, { cache: "no-store" }).then((r) => r.json()),
+    ]);
+  }, [clientId]);
+
+  // Primary data effect — runs whenever clientId, reloadKey (from parent), or localTick changes
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    doFetch()
       .then(([comps, gal]) => {
+        if (!active) return;
         setComponents(Array.isArray(comps) ? comps : []);
         setGallery(Array.isArray(gal) ? gal : []);
       })
-      .finally(() => setLoading(false));
-  }, [clientId]);
+      .catch(() => {})
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [clientId, reloadKey, localTick, doFetch]);
 
-  useEffect(() => { loadAll(); }, [loadAll]);
-  useImperativeHandle(ref, () => ({ refresh: loadAll }), [loadAll]);
+  // Expose imperative refresh for cases where parent needs it
+  useImperativeHandle(ref, () => ({ refresh: () => setLocalTick((t) => t + 1) }), []);
 
   const handleDelete = useCallback(async (id: string) => {
     await fetch(`/api/components/${id}`, { method: "DELETE" });
     setComponents((prev) => prev.filter((c) => c.id !== id));
-    loadAll();
-  }, [loadAll]);
+    setLocalTick((t) => t + 1);
+  }, []);
+
+  const handleDeleteGalleryItem = useCallback(async (item: GalleryItem) => {
+    if (item.kind === "generated") {
+      await fetch(`/api/library/images/${item.libraryImageId}`, { method: "DELETE" });
+    } else {
+      await Promise.all(item.componentIds.map((id) => fetch(`/api/components/${id}`, { method: "DELETE" })));
+    }
+    setLocalTick((t) => t + 1);
+  }, []);
 
   const injectedIds = new Set(Object.values(injectedSlots).filter(Boolean).map((c) => c!.id));
 
@@ -215,14 +233,23 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
     else onOpenImage({ imageUrl: null, presetComponents: [comp] });
   };
   const openFromGallery = (item: GalleryItem) => {
-    if (item.kind === "generated")
-      onOpenImage({ imageUrl: item.imageUrl, presetComponents: [], copyText: item.copyText, subject: item.subject, regenerateParams: item.paramsJson });
-    else onOpenImage({ imageUrl: item.imageUrl });
+    if (item.kind === "generated") {
+      let slotComps: StyleComponent[] = [];
+      try {
+        const p = JSON.parse(item.paramsJson ?? "{}");
+        slotComps = Object.values(p.slots ?? {}).filter(Boolean) as StyleComponent[];
+      } catch { /* ignore */ }
+      onOpenImage({ imageUrl: item.imageUrl, presetComponents: slotComps, copyText: item.copyText, subject: item.subject, regenerateParams: item.paramsJson, prompt: item.prompt, libraryImageId: item.libraryImageId });
+    } else {
+      onOpenImage({ imageUrl: item.imageUrl });
+    }
   };
 
+  // 背景 is now an image-only asset — hide legacy text-only backgrounds (no image) everywhere.
+  const visibleComponents = components.filter((c) => c.type !== "BACKGROUND" || c.previewUrl || c.data?.imageUrl);
   const filtered = activeTab === "ALL" || activeTab === "GALLERY"
-    ? components
-    : components.filter((c) => c.type === activeTab);
+    ? visibleComponents
+    : visibleComponents.filter((c) => c.type === activeTab);
 
   const grouped = filtered.reduce<Record<string, StyleComponent[]>>((acc, c) => {
     acc[c.type] = [...(acc[c.type] ?? []), c];
@@ -231,19 +258,14 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
 
   const counts = (key: FilterTab) =>
     key === "GALLERY" ? gallery.length
-    : key === "ALL" ? components.length
-    : components.filter((c) => c.type === key).length;
+    : key === "ALL" ? visibleComponents.length
+    : visibleComponents.filter((c) => c.type === key).length;
 
   return (
     <div className="space-y-5">
-      {lastCopied && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-gray-900 text-white text-xs px-4 py-2 rounded-full shadow-lg pointer-events-none animate-in fade-in slide-in-from-bottom-2">
-          ✓ Prompt 已複製到剪貼簿
-        </div>
-      )}
 
       {/* Top bar */}
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit flex-wrap">
           {FILTER_TABS.map((t) => (
             <button key={t.key} onClick={() => setActiveTab(t.key)}
@@ -255,28 +277,55 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
             </button>
           ))}
         </div>
-        {onOpenQuickAdd && (
-          <button onClick={onOpenQuickAdd}
-            className="flex items-center gap-1.5 text-xs font-medium bg-gray-900 text-white px-3 py-2 rounded-lg hover:bg-gray-700 transition-colors shrink-0">
-            <Plus className="h-3.5 w-3.5" />加入素材
-          </button>
-        )}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* 背景生成 only shows in 圖庫 / 全部 / 背景 sub-tabs */}
+          {onOpenGenerateAsset && (activeTab === "GALLERY" || activeTab === "ALL" || activeTab === "BACKGROUND") && (
+            <button onClick={onOpenGenerateAsset}
+              className="flex items-center gap-1.5 text-xs font-medium bg-violet-600 text-white px-3 py-2 rounded-lg hover:bg-violet-700 transition-colors">
+              <Wand2 className="h-3.5 w-3.5" />背景生成
+            </button>
+          )}
+          {onOpenQuickAdd && (
+            <button onClick={onOpenQuickAdd}
+              className="flex items-center gap-1.5 text-xs font-medium bg-gray-900 text-white px-3 py-2 rounded-lg hover:bg-gray-700 transition-colors">
+              <Plus className="h-3.5 w-3.5" />加入素材
+            </button>
+          )}
+        </div>
       </div>
 
       {loading ? (
         <div className="text-gray-400 text-sm py-8 text-center">載入中…</div>
       ) : activeTab === "GALLERY" ? (
         // ── Gallery view ──
-        gallery.length === 0 ? (
-          <EmptyState onOpenQuickAdd={onOpenQuickAdd}
-            text={clientId ? "此客戶還沒有圖片" : "還沒有任何圖片"} hint="上傳圖片分析，或在「生成圖片」分頁產生新圖" />
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
-            {gallery.map((item) => (
-              <GalleryTile key={`${item.kind}-${item.imageUrl}`} item={item} onOpen={openFromGallery} />
-            ))}
+        <>
+          {/* Gallery filter pills */}
+          <div className="flex gap-1.5 flex-wrap">
+            {(["ALL", "material", "uploaded", "generated"] as GalleryFilter[]).map((f) => {
+              const label = f === "ALL" ? "全部" : f === "material" ? "🟠 背景" : f === "uploaded" ? "🟢 上傳" : "🟣 AI生成";
+              const cnt = f === "ALL" ? gallery.length : gallery.filter((g) => g.kind === f).length;
+              return (
+                <button key={f} onClick={() => setGalleryFilter(f)}
+                  className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${galleryFilter === f ? "bg-gray-900 text-white border-gray-900" : "bg-white text-gray-500 border-gray-200 hover:border-gray-400"}`}>
+                  {label} <span className="opacity-60">{cnt}</span>
+                </button>
+              );
+            })}
           </div>
-        )
+          {gallery.length === 0 ? (
+            <EmptyState onOpenQuickAdd={onOpenQuickAdd}
+              text={clientId ? "此客戶還沒有圖片" : "還沒有任何圖片"} hint="上傳圖片分析，或在「生成圖片」分頁產生新圖" />
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
+              {gallery
+                .filter((item) => galleryFilter === "ALL" || item.kind === galleryFilter)
+                .map((item) => (
+                  <GalleryTile key={`${item.kind}-${item.imageUrl}`} item={item}
+                    onOpen={openFromGallery} onDelete={handleDeleteGalleryItem} />
+                ))}
+            </div>
+          )}
+        </>
       ) : components.length === 0 ? (
         <EmptyState onOpenQuickAdd={onOpenQuickAdd}
           text={clientId ? "此客戶還沒有風格組件" : "還沒有任何風格組件"} hint="生成活動或上傳圖片後，會自動提取風格組件" />
@@ -295,8 +344,7 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                   {items.map((comp) => (
                     <ComponentCard key={comp.id} comp={comp} isInjected={injectedIds.has(comp.id)}
-                      onCopy={(text) => { setLastCopied(text); setTimeout(() => setLastCopied(null), 2500); }}
-                      onInject={onInject} onDelete={handleDelete} onOpen={openFromCard} onEdit={onEdit} />
+                      onInject={onInject} onDelete={handleDelete} onOpen={openFromCard} />
                   ))}
                 </div>
               </div>

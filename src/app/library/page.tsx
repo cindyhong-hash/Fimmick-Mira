@@ -6,12 +6,14 @@
  * and inject/edit/regenerate are coordinated at page level.
  */
 
-import { useEffect, useState, useCallback, useRef } from "react";
-import { FolderOpen, Images, Layers, Check } from "lucide-react";
+import { useEffect, useRef, useState, useCallback } from "react";
+import Link from "next/link";
+import { FolderOpen, Images, Layers, Check, ChevronLeft } from "lucide-react";
 import { AssetGrid } from "@/components/library/AssetGrid";
 import { ComponentGrid, type ComponentGridHandle } from "@/components/library/ComponentGrid";
 import { PromptComposer } from "@/components/library/PromptComposer";
 import { QuickAddModal } from "@/components/library/QuickAddModal";
+import { GenerateAssetModal } from "@/components/library/GenerateAssetModal";
 import { ImageDetailModal } from "@/components/library/ImageDetailModal";
 import type { StyleComponent, PromptSlots, ImageDetail } from "@/types/library";
 import { CATEGORY_META } from "@/types/library";
@@ -23,24 +25,28 @@ type Prefill = { subject?: string; notes?: string; useFlags?: Record<string, boo
 export default function LibraryPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>("assets");
+  const [tab, setTab] = useState<Tab>("components");
   const [slots, setSlots] = useState<PromptSlots>({ layout: null, color: null, tone: null, background: null });
   const [showQuickAdd, setShowQuickAdd] = useState(false);
+  const [showGenerateAsset, setShowGenerateAsset] = useState(false);
   const [quickAddImageUrl, setQuickAddImageUrl] = useState<string | null>(null);
   const [editComponent, setEditComponent] = useState<StyleComponent | null>(null);
+  const [prefillComponents, setPrefillComponents] = useState<StyleComponent[] | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [componentReloadKey, setComponentReloadKey] = useState(0);
   const [detail, setDetail] = useState<ImageDetail | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [prefill, setPrefill] = useState<Prefill>({});
   const [prefillNonce, setPrefillNonce] = useState(0);
   const componentGridRef = useRef<ComponentGridHandle>(null);
+  const prevShowQuickAdd = useRef(false);
 
   useEffect(() => {
     fetch("/api/clients")
       .then((r) => r.json())
       .then((data: Client[]) => {
         setClients(data);
-        if (data.length > 0 && !selectedClientId) setSelectedClientId(data[0].id);
+        // Default to「全部」(selectedClientId stays null) — no auto-select of first client.
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -69,10 +75,11 @@ export default function LibraryPage() {
     setDetail(null);
   }, []);
 
-  // Popup「編輯」→ open QuickAdd in edit mode
-  const handleEditComponent = useCallback((comp: StyleComponent) => {
-    setQuickAddImageUrl(null);
-    setEditComponent(comp);
+  // Popup「調整」→ image-based edit: open QuickAdd prefilled with ALL of the image's components
+  const handleAdjustImage = useCallback((url: string, comps: StyleComponent[]) => {
+    setQuickAddImageUrl(url);
+    setEditComponent(null);
+    setPrefillComponents(comps);
     setShowQuickAdd(true);
     setDetail(null);
   }, []);
@@ -99,9 +106,33 @@ export default function LibraryPage() {
     showToast("已載入原參數，可調整後重新生成");
   }, [showToast]);
 
+  // When QuickAdd modal closes (was open → now closed), always refresh the component grid.
+  // This is a belt-and-suspenders approach alongside the reloadKey prop, ensuring we never
+  // miss a refresh even if React batches the state updates in an unexpected order.
+  useEffect(() => {
+    if (prevShowQuickAdd.current && !showQuickAdd) {
+      setComponentReloadKey((k) => k + 1);
+    }
+    prevShowQuickAdd.current = showQuickAdd;
+  }, [showQuickAdd]);
+
   const handleGenerated = useCallback(() => {
     setReloadKey((k) => k + 1);
     componentGridRef.current?.refresh();
+  }, []);
+
+  const handleDeleteLibraryImage = useCallback(async (id: string) => {
+    await fetch(`/api/library/images/${id}`, { method: "DELETE" });
+    setReloadKey((k) => k + 1);
+    componentGridRef.current?.refresh();
+    setDetail(null);
+  }, []);
+
+  // Delete style components by id (e.g. 背景素材 from its popup)
+  const handleDeleteComponents = useCallback(async (ids: string[]) => {
+    await Promise.all(ids.map((id) => fetch(`/api/components/${id}`, { method: "DELETE" })));
+    setComponentReloadKey((k) => k + 1);
+    setDetail(null);
   }, []);
 
   const injectedIds = new Set(Object.values(slots).filter(Boolean).map((c) => c!.id));
@@ -112,6 +143,9 @@ export default function LibraryPage() {
       <div className="flex gap-0 min-h-[calc(100vh-4rem)] -mx-6 -mt-6">
         {/* ── Left: Client folder sidebar ── */}
         <aside className="w-44 shrink-0 border-r bg-gray-50/70 pt-6 pb-4 flex flex-col gap-1 px-3">
+          <Link href="/clients" className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-800 px-2 mb-2 transition-colors">
+            <ChevronLeft className="h-3.5 w-3.5" />返回客戶
+          </Link>
           <div className="text-xs font-semibold text-gray-500 px-2 mb-3 uppercase tracking-wide">客戶資料夾</div>
           <button onClick={() => setSelectedClientId(null)}
             className={`flex items-center gap-2 px-2 py-2 rounded-lg text-sm transition-colors text-left w-full ${
@@ -153,8 +187,8 @@ export default function LibraryPage() {
           {/* Tab bar */}
           <div className="flex gap-0 border-b mb-6">
             {([
-              { key: "assets" as Tab, label: "生成圖片", icon: <Images className="h-4 w-4" /> },
               { key: "components" as Tab, label: "風格組件", icon: <Layers className="h-4 w-4" /> },
+              { key: "assets" as Tab, label: "生成圖片", icon: <Images className="h-4 w-4" /> },
             ] as const).map(({ key, label, icon }) => (
               <button key={key} onClick={() => setTab(key)}
                 className={`flex items-center gap-1.5 px-4 pb-3 text-sm font-medium border-b-2 transition-colors ${
@@ -191,8 +225,9 @@ export default function LibraryPage() {
               injectedSlots={slots}
               onInject={handleInject}
               onOpenQuickAdd={() => { setEditComponent(null); setQuickAddImageUrl(null); setShowQuickAdd(true); }}
+              onOpenGenerateAsset={() => setShowGenerateAsset(true)}
               onOpenImage={setDetail}
-              onEdit={handleEditComponent}
+              reloadKey={componentReloadKey}
             />
           )}
         </div>
@@ -205,12 +240,29 @@ export default function LibraryPage() {
           presetComponents={detail.presetComponents}
           copyText={detail.copyText}
           subject={detail.subject}
+          prompt={detail.prompt}
+          libraryImageId={detail.libraryImageId}
           injectedIds={injectedIds}
           onInject={handleInject}
           onAnalyze={handleAnalyze}
-          onEdit={handleEditComponent}
+          onAdjust={handleAdjustImage}
           onRegenerate={detail.regenerateParams ? () => handleRegenerate(detail) : undefined}
+          onDelete={detail.libraryImageId ? handleDeleteLibraryImage : undefined}
+          onDeleteComponents={handleDeleteComponents}
           onClose={() => setDetail(null)}
+        />
+      )}
+
+      {/* Generate asset */}
+      {showGenerateAsset && (
+        <GenerateAssetModal
+          clientId={selectedClientId}
+          onClose={() => setShowGenerateAsset(false)}
+          onSaved={() => {
+            setShowGenerateAsset(false);
+            setReloadKey((k) => k + 1);
+            setComponentReloadKey((k) => k + 1);
+          }}
         />
       )}
 
@@ -220,13 +272,15 @@ export default function LibraryPage() {
           clientId={selectedClientId}
           initialImageUrl={quickAddImageUrl}
           editComponent={editComponent}
-          onClose={() => { setShowQuickAdd(false); setQuickAddImageUrl(null); setEditComponent(null); }}
+          prefillComponents={prefillComponents}
+          onClose={() => { setShowQuickAdd(false); setQuickAddImageUrl(null); setEditComponent(null); setPrefillComponents(null); }}
           onSaved={() => {
             setShowQuickAdd(false);
             setQuickAddImageUrl(null);
             setEditComponent(null);
+            setPrefillComponents(null);
             setTab("components");
-            componentGridRef.current?.refresh();
+            setComponentReloadKey((k) => k + 1);
           }}
         />
       )}

@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
+// Never statically cache this handler — gallery contents change on every edit/save/delete.
+export const dynamic = "force-dynamic";
+
 /**
  * GET /api/library/gallery?clientId=...
  * The brand image gallery for the merged 風格組件 tab — a union of:
@@ -11,6 +14,17 @@ import { db } from "@/lib/db";
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const clientId = searchParams.get("clientId");
+
+  // ── Generated library images ── (fetch first so we can exclude their URLs from uploaded)
+  const gens = await db.libraryImage.findMany({
+    where: clientId ? { clientId } : undefined,
+    orderBy: { createdAt: "desc" },
+    take: 500,
+  });
+
+  // Exclude previewUrls that are already a generated image URL (to prevent analysed generated
+  // images from appearing twice — once as AI生成, once as 上傳).
+  const genUrls = new Set(gens.map((g) => g.imageUrl));
 
   // ── Uploaded analyzed images (components that carry a previewUrl) ──
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -25,33 +39,33 @@ export async function GET(request: Request) {
 
   const uploadedMap = new Map<
     string,
-    { imageUrl: string; types: string[]; componentIds: string[]; createdAt: Date }
+    { imageUrl: string; types: string[]; componentIds: string[]; createdAt: Date; name: string }
   >();
   for (const c of comps) {
     const u = c.previewUrl!;
+    if (genUrls.has(u)) continue; // skip: this image is already a LibraryImage (AI生成)
     const entry =
-      uploadedMap.get(u) ?? { imageUrl: u, types: [], componentIds: [], createdAt: c.createdAt };
+      uploadedMap.get(u) ?? { imageUrl: u, types: [], componentIds: [], createdAt: c.createdAt, name: c.name };
     if (!entry.types.includes(c.type)) entry.types.push(c.type);
     entry.componentIds.push(c.id);
-    if (c.createdAt > entry.createdAt) entry.createdAt = c.createdAt;
+    // The group's representative name + sort time follow the most-recently-edited component.
+    if (c.createdAt >= entry.createdAt) { entry.createdAt = c.createdAt; entry.name = c.name; }
     uploadedMap.set(u, entry);
   }
 
-  // ── Generated library images ──
-  const gens = await db.libraryImage.findMany({
-    where: clientId ? { clientId } : undefined,
-    orderBy: { createdAt: "desc" },
-    take: 500,
-  });
-
   const items = [
-    ...[...uploadedMap.values()].map((e) => ({
-      kind: "uploaded" as const,
-      imageUrl: e.imageUrl,
-      types: e.types,
-      componentIds: e.componentIds,
-      createdAt: e.createdAt,
-    })),
+    ...[...uploadedMap.values()].map((e) => {
+      // A group whose ONLY type is BACKGROUND = 背景素材 (material); otherwise = 上傳 (analysed image).
+      const isMaterial = e.types.length > 0 && e.types.every((t) => t === "BACKGROUND");
+      return {
+        kind: (isMaterial ? "material" : "uploaded") as "material" | "uploaded",
+        imageUrl: e.imageUrl,
+        types: e.types,
+        componentIds: e.componentIds,
+        name: e.name,
+        createdAt: e.createdAt,
+      };
+    }),
     ...gens.map((g) => ({
       kind: "generated" as const,
       imageUrl: g.imageUrl,
@@ -59,6 +73,7 @@ export async function GET(request: Request) {
       copyText: g.copyText,
       subject: g.subject,
       paramsJson: g.paramsJson,
+      prompt: g.prompt,
       createdAt: g.createdAt,
     })),
   ].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());

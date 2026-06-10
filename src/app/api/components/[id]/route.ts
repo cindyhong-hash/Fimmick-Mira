@@ -21,6 +21,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (body.aiPromptText !== undefined) data.aiPromptText = body.aiPromptText;
   if (body.previewUrl !== undefined) data.previewUrl = body.previewUrl;
   if (body.data !== undefined) data.data = JSON.stringify(body.data);
+  if (body.type !== undefined) data.type = body.type;
+  if (body.clientId !== undefined) data.clientId = body.clientId;
+  // Bump createdAt so the edited component sorts to the top (schema has no updatedAt)
+  data.createdAt = new Date();
   try {
     const updated = await db.styleComponent.update({ where: { id }, data });
     return NextResponse.json({ ...updated, data: JSON.parse(updated.data) });

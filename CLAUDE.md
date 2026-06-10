@@ -16,7 +16,8 @@ git 只帶 code + docs。**手動帶**（gitignore，唔會喺 clone 入面）�
 - **Merge 時：`docs/` 同 `.claude/*.md`（WIP 筆記）唔好 merge 入公司 repo**，只 merge 程式碼/功能。
 - commit email 用公司 `vernaip@fimmick.com`。⚠️ 全機 global 預設係個人 email；新機 clone 後要：`git config user.email vernaip@fimmick.com`
 
-## 供應商 / 已知
-- 圖片生成靠 **HF FLUX**（`HF_TOKEN`，端點 `router.huggingface.co`）；Pollinations 對部分 IP 回 402，故 `POLLINATIONS_TOKEN` 留空直接行 HF。
-- 文字/分析用 **OpenRouter**；model id 會輪換，404 就去 `/api/v1/models` 換現存平價 model（現用 `openai/gpt-5.4-nano`）。
-- 所有 AI 輸出（分析名稱/描述/文案）一律**繁體中文（台灣）**；英文 `aiPromptText` 保留俾圖像模型。
+## 供應商 / 已知（2026-06-11）
+- 圖片生成（text→image）：**fal.ai FLUX.1-schnell**（`FAL_KEY`，主）→ **HF FLUX**（`HF_TOKEN`，備，端點 `router.huggingface.co`）→ Pollinations（停，402）。
+- 產品合成：**fal.ai Bria Product Shot**（`fal-ai/bria/product-shot`，~$0.04/張，主）→ `sharp` 疊圖（備，需透明去背 PNG）。
+- 文字/分析用 **OpenRouter**（vision + text 都用 `openai/gpt-4o-mini`）；model id 會輪換，404 就去 `/api/v1/models` 換現存平價 model。
+- 設計描述以**繁中為主**，生成時自動翻英餵 FLUX；所有 AI 輸出（分析/文案）一律**繁體中文（台灣）**。

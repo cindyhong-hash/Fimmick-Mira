@@ -23,6 +23,9 @@ export function Sidebar() {
     loadClients();
   }, [pathname]);
 
+  // 素材庫 has its own client-folder column (with a 《 back link), so hide the global sidebar there.
+  if (pathname === "/library") return null;
+
   const handleDelete = async (e: React.MouseEvent, clientId: string, clientName: string) => {
     e.preventDefault();
     e.stopPropagation();

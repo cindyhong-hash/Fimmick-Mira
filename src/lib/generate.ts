@@ -21,6 +21,8 @@ const POLLINATIONS_TOKEN = process.env.POLLINATIONS_TOKEN;
 // Fallback image provider: Hugging Face Inference (free token at huggingface.co/settings/tokens).
 const HF_TOKEN = process.env.HF_TOKEN;
 const HF_IMAGE_MODEL = process.env.HF_IMAGE_MODEL ?? "black-forest-labs/FLUX.1-schnell";
+// fal.ai primary image provider (keyId:keySecret)
+const FAL_KEY = process.env.FAL_KEY;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -77,6 +79,82 @@ export function compileImagePrompt(i: CompilePromptInput): string {
   // High-quality marketing visual hint
   parts.push("high quality marketing visual, professional, sharp focus");
   return parts.filter(Boolean).join(", ");
+}
+
+/**
+ * Build a Traditional-Chinese design brief from the composer fields.
+ * This is the human-authored "source of truth"; translateBriefToEnglishPrompt turns it into
+ * an English prompt the image model actually understands well.
+ */
+export interface ChineseBriefInput {
+  subject?: string;
+  compositionDesc?: string | null;
+  backgroundDesc?: string | null;
+  toneLabels?: string[];
+  palette?: { hex: string; label?: string; role?: string; use?: boolean }[];
+  notes?: string;
+}
+
+export function compileChineseBrief(i: ChineseBriefInput): string {
+  const lines: string[] = [];
+  if (i.subject?.trim()) lines.push(`主體：${i.subject.trim()}`);
+  if (i.compositionDesc?.trim()) lines.push(`構圖：${i.compositionDesc.trim()}`);
+  if (i.backgroundDesc?.trim()) lines.push(`背景：${i.backgroundDesc.trim()}`);
+  const used = (i.palette ?? []).filter((c) => c.use !== false && c.hex);
+  if (used.length) lines.push(`配色：${used.map((c) => `${c.label ?? ""} ${c.hex}`.trim()).join("、")}`);
+  if (i.toneLabels?.length) lines.push(`風格語氣：${i.toneLabels.join("、")}`);
+  if (i.notes?.trim()) lines.push(`其他要求：${i.notes.trim()}`);
+  return lines.join("\n");
+}
+
+/**
+ * Translate a (usually Traditional-Chinese) design brief into ONE optimized English prompt for FLUX.
+ * Chinese-first authoring, English output — FLUX is trained on English and renders it far better.
+ * Falls back to the raw brief if no OpenRouter key (so generation still works).
+ */
+export async function translateBriefToEnglishPrompt(brief: string): Promise<string> {
+  const text = brief.trim();
+  if (!text) return "";
+  if (!OPENROUTER_API_KEY || OPENROUTER_API_KEY === "your-openrouter-api-key-here") {
+    return text; // graceful fallback
+  }
+  const sys =
+    "You are an expert prompt engineer for the FLUX text-to-image model. " +
+    "You convert marketing-image design briefs (often written in Traditional Chinese) into a single, " +
+    "concise, vivid ENGLISH image-generation prompt. Preserve every concrete detail: subject, composition, " +
+    "background, mood, and exact color hex codes. Do NOT add people or text unless the brief asks. " +
+    "Output ONLY the final English prompt — no quotes, no explanation, no line breaks.";
+  const user = `Design brief:\n${text}\n\nEnglish FLUX prompt:`;
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "http://localhost:3000",
+        "X-Title": "Marketing Tool",
+      },
+      body: JSON.stringify({
+        model: OPENROUTER_TEXT_MODEL,
+        max_tokens: 300,
+        messages: [
+          { role: "system", content: sys },
+          { role: "user", content: user },
+        ],
+      }),
+      signal: AbortSignal.timeout(45_000),
+    });
+    if (!res.ok) {
+      console.error("[translateBrief] OpenRouter error", res.status, await res.text().catch(() => ""));
+      return text; // fallback to raw brief
+    }
+    const data = await res.json();
+    const out = (data.choices?.[0]?.message?.content ?? "").trim().replace(/^["']|["']$/g, "");
+    return out || text;
+  } catch (err) {
+    console.error("[translateBrief] failed:", err instanceof Error ? err.message : err);
+    return text;
+  }
 }
 
 // ─── Copy generation ──────────────────────────────────────────────────────────
@@ -156,36 +234,108 @@ export async function generateImage(input: GenerateImageInput): Promise<Generate
   return generateImageInApp(input);
 }
 
-/** In-app image: Pollinations (primary) → Hugging Face FLUX.1-schnell (fallback). */
+/** In-app image: fal.ai (primary) → HuggingFace FLUX (fallback). */
 async function generateImageInApp(input: GenerateImageInput): Promise<GeneratedImage> {
   const seed = input.seed ?? Math.floor(Math.random() * 1_000_000_000);
 
-  // Try Pollinations when we have a token, or as a last resort when HF isn't set
-  // either. (Anonymous Pollinations is IP-rate-limited, so skip it when HF is available.)
-  const tryPollinations = Boolean(POLLINATIONS_TOKEN) || !HF_TOKEN;
-
-  let pollErr = "";
-  if (tryPollinations) {
+  // 1st priority: fal.ai FLUX.1-schnell
+  if (FAL_KEY) {
     try {
-      return await pollinationsImage(input, seed);
+      return await falAiImage(input, seed);
     } catch (e) {
-      pollErr = e instanceof Error ? e.message : String(e);
-      console.error("[generateImage] Pollinations failed:", pollErr);
+      console.error("[generateImage] fal.ai failed:", e instanceof Error ? e.message : e);
     }
-  } else {
-    pollErr = "未設定 POLLINATIONS_TOKEN（已略過，直接用 Hugging Face）";
   }
 
+  // 2nd priority: HuggingFace FLUX (素材生成 / fallback)
   if (HF_TOKEN) {
     try {
       return await huggingFaceImage(input, seed);
     } catch (e) {
       const hfErr = e instanceof Error ? e.message : String(e);
       console.error("[generateImage] HuggingFace failed:", hfErr);
-      throw new Error(`圖片生成失敗。Pollinations：${pollErr} ｜ HuggingFace：${hfErr}`);
+      throw new Error(`圖片生成失敗（fal.ai + HuggingFace 均失敗）：${hfErr}`);
     }
   }
-  throw new Error(`Pollinations 生成失敗：${pollErr}（可在 .env.local 設定 HF_TOKEN 作為備援圖片來源）`);
+
+  // Last resort: Pollinations (only when no other provider)
+  if (POLLINATIONS_TOKEN || !FAL_KEY) {
+    try {
+      return await pollinationsImage(input, seed);
+    } catch (e) {
+      throw new Error(`圖片生成失敗：${e instanceof Error ? e.message : e}`);
+    }
+  }
+
+  throw new Error("請在 .env.local 設定 FAL_KEY 或 HF_TOKEN 以啟用圖片生成");
+}
+
+/**
+ * AI product compositing via fal.ai Bria Product Shot (fal-ai/bria/product-shot, ~$0.04/image).
+ * Places a product image into an AI-generated scene — either from a reference background image
+ * (refImageDataUri) OR a text scene description. Returns the composited image.
+ * Images are passed as data URIs so fal's servers don't need to reach our localhost /uploads.
+ */
+export interface ProductShotInput {
+  productDataUri: string;        // the product cutout (data:image/png;base64,...)
+  refImageDataUri?: string;      // optional reference background image
+  sceneDescription?: string;     // used when no reference image (English works best)
+}
+
+export async function falProductShot(i: ProductShotInput): Promise<GeneratedImage> {
+  if (!FAL_KEY) throw new Error("FAL_KEY 未設定，無法做 AI 合成");
+  const body: Record<string, unknown> = {
+    image_url: i.productDataUri,
+    num_results: 1,
+    placement_type: "original",
+    sync_mode: false,
+  };
+  if (i.refImageDataUri) body.ref_image_url = i.refImageDataUri;
+  else if (i.sceneDescription?.trim()) body.scene_description = i.sceneDescription.trim();
+  else body.scene_description = "clean professional studio background, soft lighting";
+
+  const res = await fetch("https://fal.run/fal-ai/bria/product-shot", {
+    method: "POST",
+    headers: { Authorization: `Key ${FAL_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Bria product-shot 錯誤 ${res.status}: ${errText.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const url = data.images?.[0]?.url;
+  if (!url) throw new Error("Bria product-shot 回應無圖片 URL");
+  const imgRes = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+  if (!imgRes.ok) throw new Error(`Bria 圖片下載失敗：${imgRes.status}`);
+  const contentType = imgRes.headers.get("content-type") ?? "image/png";
+  return { buffer: Buffer.from(await imgRes.arrayBuffer()), contentType, seed: 0 };
+}
+
+async function falAiImage(input: GenerateImageInput, seed: number): Promise<GeneratedImage> {
+  if (!FAL_KEY) throw new Error("FAL_KEY 未設定");
+  const w = input.width ?? 1024;
+  const h = input.height ?? 1024;
+  const imageSize = w > h ? "landscape_4_3" : h > w ? "portrait_4_3" : "square_hd";
+
+  const res = await fetch("https://fal.run/fal-ai/flux/schnell", {
+    method: "POST",
+    headers: { "Authorization": `Key ${FAL_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt: input.prompt, image_size: imageSize, num_inference_steps: 4, seed, enable_safety_checker: false }),
+    signal: AbortSignal.timeout(90_000),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`fal.ai 錯誤 ${res.status}: ${errText.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const imageUrl = data.images?.[0]?.url;
+  if (!imageUrl) throw new Error("fal.ai 回應無圖片 URL");
+  const imgRes = await fetch(imageUrl, { signal: AbortSignal.timeout(60_000) });
+  if (!imgRes.ok) throw new Error(`fal.ai 圖片下載失敗：${imgRes.status}`);
+  const contentType = imgRes.headers.get("content-type") ?? "image/jpeg";
+  return { buffer: Buffer.from(await imgRes.arrayBuffer()), contentType, seed };
 }
 
 async function pollinationsImage(input: GenerateImageInput, seed: number): Promise<GeneratedImage> {

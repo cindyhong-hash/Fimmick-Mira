@@ -22,10 +22,12 @@ export function ColorCards({
   colors,
   height = "h-20",
   showRole = true,
+  showHex = true,
 }: {
   colors: PaletteColor[];
   height?: string;
   showRole?: boolean;
+  showHex?: boolean;
 }) {
   const [copied, setCopied] = useState<string | null>(null);
   if (!colors.length) return null;
@@ -52,16 +54,18 @@ export function ColorCards({
               e.stopPropagation();
               copy(c.hex);
             }}
-            className="flex-1 flex flex-col justify-end items-center pb-2 transition-all hover:flex-[1.4]"
+            className="group/swatch flex-1 flex flex-col justify-end items-center pb-1.5 [transition:flex-grow_280ms_ease-in-out,opacity_200ms] hover:[flex-grow:2]"
             style={{ backgroundColor: c.hex, color: txt }}
             title={`${c.label} ${c.hex}（點擊複製）`}
           >
             {showRole && (
-              <span className="text-[9px] font-medium opacity-80 leading-none mb-1">{c.label}</span>
+              <span className="text-[9px] font-medium opacity-0 group-hover/swatch:opacity-80 transition-opacity leading-none mb-0.5">{c.label}</span>
             )}
-            <span className="text-[11px] font-mono font-semibold uppercase leading-none">
-              {copied === c.hex ? "已複製" : c.hex}
-            </span>
+            {showHex && (
+              <span className="text-[10px] font-mono font-semibold uppercase leading-none opacity-0 group-hover/swatch:opacity-100 transition-opacity">
+                {copied === c.hex ? "✓" : c.hex}
+              </span>
+            )}
           </button>
         );
       })}

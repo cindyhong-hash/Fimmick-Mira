@@ -8,7 +8,7 @@
  * the generated copy and offers 「分析此圖加入素材」.
  */
 import { useEffect, useState } from "react";
-import { X, ArrowRightCircle, Copy, Check, Sparkles, ScanSearch, Pencil, RefreshCw } from "lucide-react";
+import { X, ArrowRightCircle, Sparkles, ScanSearch, Pencil, RefreshCw, Trash2 } from "lucide-react";
 import type { StyleComponent, ComponentCategory } from "@/types/library";
 import { CATEGORY_META, getColors } from "@/types/library";
 import { ColorCards } from "./ColorCards";
@@ -19,11 +19,17 @@ type Props = {
   presetComponents?: StyleComponent[];
   copyText?: string | null;
   subject?: string | null;
+  prompt?: string | null;
+  libraryImageId?: string;
   injectedIds?: Set<string>;
   onInject: (comp: StyleComponent) => void;
   onAnalyze?: (imageUrl: string) => void;
-  onEdit?: (comp: StyleComponent) => void;
+  /** Image-based edit: adjust this image's 構圖/配色/語氣 together. */
+  onAdjust?: (imageUrl: string, components: StyleComponent[]) => void;
   onRegenerate?: () => void;
+  onDelete?: (id: string) => void;
+  /** Delete StyleComponents by id (used for 背景素材 in the popup). */
+  onDeleteComponents?: (ids: string[]) => void;
   onClose: () => void;
 };
 
@@ -34,13 +40,18 @@ export function ImageDetailModal({
   presetComponents,
   copyText,
   subject,
+  prompt,
+  libraryImageId,
   injectedIds,
   onInject,
   onAnalyze,
-  onEdit,
+  onAdjust,
   onRegenerate,
+  onDelete,
+  onDeleteComponents,
   onClose,
 }: Props) {
+  const [confirmDel, setConfirmDel] = useState(false);
   const [components, setComponents] = useState<StyleComponent[]>(presetComponents ?? []);
   const [loading, setLoading] = useState(!presetComponents && !!imageUrl);
 
@@ -51,15 +62,65 @@ export function ImageDetailModal({
     }
     if (!imageUrl) return;
     setLoading(true);
-    fetch(`/api/components?previewUrl=${encodeURIComponent(imageUrl)}`)
+    // cache-bust + no-store: when re-opening the SAME image after an edit, the browser must
+    // not serve a stale cached component list (this caused "編輯後內容唔 update").
+    fetch(`/api/components?previewUrl=${encodeURIComponent(imageUrl)}&_t=${Date.now()}`, { cache: "no-store" })
       .then((r) => r.json())
       .then((comps: StyleComponent[]) => setComponents(Array.isArray(comps) ? comps : []))
       .finally(() => setLoading(false));
   }, [imageUrl, presetComponents]);
 
-  const sorted = [...components].sort(
-    (a, b) => ORDER.indexOf(a.type) - ORDER.indexOf(b.type),
-  );
+  // 背景 is a standalone image asset, not an analysed style block.
+  const bgComp = components.find((c) => c.type === "BACKGROUND");
+  const sorted = [...components]
+    .filter((c) => c.type !== "BACKGROUND")
+    .sort((a, b) => ORDER.indexOf(a.type) - ORDER.indexOf(b.type));
+
+  // 背景素材 popup: a compact, fixed-square layout — square image on top, buttons below.
+  if (!loading && bgComp && sorted.length === 0) {
+    const injected = injectedIds?.has(bgComp.id) ?? false;
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+        <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b shrink-0">
+            <h2 className="text-sm font-semibold flex items-center gap-1.5 min-w-0 truncate">
+              <ScanSearch className="h-4 w-4 text-teal-500 shrink-0" />
+              <span className="truncate">{bgComp.name}</span>
+            </h2>
+            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors shrink-0">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="p-5">
+            {imageUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={imageUrl} alt={bgComp.name} className="w-full aspect-square object-cover rounded-xl border" />
+            )}
+            <div className="mt-3 flex items-center gap-2">
+              <button onClick={() => onInject(bgComp)} disabled={injected}
+                className={`flex-1 flex items-center justify-center gap-1.5 text-sm font-medium py-2 rounded-lg border transition-colors
+                  ${injected ? "bg-gray-100 border-gray-200 text-gray-400" : "bg-teal-50 border-teal-200 text-teal-700 hover:opacity-80"}`}>
+                <ArrowRightCircle className="h-4 w-4" />{injected ? "已帶入" : "帶入生成（背景）"}
+              </button>
+              {onDeleteComponents && (
+                <button
+                  onClick={() => {
+                    if (confirmDel) { onDeleteComponents([bgComp.id]); onClose(); }
+                    else { setConfirmDel(true); setTimeout(() => setConfirmDel(false), 3000); }
+                  }}
+                  className={`flex items-center justify-center gap-1 text-sm py-2 px-3 rounded-lg border transition-colors
+                    ${confirmDel ? "bg-red-500 text-white border-red-500" : "bg-white border-gray-200 text-gray-500 hover:border-red-300 hover:text-red-500"}`}
+                  title={confirmDel ? "再按確認刪除" : "刪除"}>
+                  <Trash2 className="h-4 w-4" />{confirmDel ? "確認" : ""}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -67,15 +128,37 @@ export function ImageDetailModal({
 
       <div className="relative w-full max-w-3xl max-h-[88vh] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b shrink-0">
-          <h2 className="text-sm font-semibold flex items-center gap-1.5">
-            <ScanSearch className="h-4 w-4 text-violet-500" />
-            圖片風格
-            {subject && <span className="text-gray-400 font-normal">— {subject}</span>}
+        <div className="flex items-center justify-between px-5 py-3.5 border-b shrink-0 gap-3 min-w-0">
+          <h2 className="text-sm font-semibold flex items-center gap-1.5 min-w-0 truncate">
+            <ScanSearch className="h-4 w-4 text-violet-500 shrink-0" />
+            <span className="shrink-0">圖片風格</span>
+            {subject && <span className="text-gray-400 font-normal truncate">— {subject}</span>}
           </h2>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Image-based adjust — edit this image's 構圖/配色/語氣 together */}
+            {onAdjust && imageUrl && sorted.length > 0 && (
+              <button onClick={() => onAdjust(imageUrl, sorted)}
+                className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border whitespace-nowrap bg-white border-gray-200 text-gray-600 hover:border-violet-300 hover:text-violet-600 transition-colors">
+                <Pencil className="h-3.5 w-3.5" />調整
+              </button>
+            )}
+            {onDelete && libraryImageId && (
+              <button
+                onClick={() => {
+                  if (confirmDel) { onDelete(libraryImageId); onClose(); }
+                  else { setConfirmDel(true); setTimeout(() => setConfirmDel(false), 3000); }
+                }}
+                className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border whitespace-nowrap transition-colors
+                  ${confirmDel ? "bg-red-500 text-white border-red-500" : "bg-white border-gray-200 text-gray-500 hover:border-red-300 hover:text-red-500"}`}
+                title={confirmDel ? "再按確認刪除" : "刪除此生成圖"}>
+                <Trash2 className="h-3.5 w-3.5" />
+                {confirmDel ? "確認刪除" : "刪除"}
+              </button>
+            )}
+            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors shrink-0">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         {/* Body */}
@@ -92,8 +175,16 @@ export function ImageDetailModal({
             )}
             {copyText && (
               <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
-                <div className="text-[11px] font-semibold text-amber-700 mb-1">生成文案</div>
+                <div className="text-[11px] font-semibold text-amber-700 mb-1">參考文案</div>
                 <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{copyText}</p>
+              </div>
+            )}
+            {prompt && (
+              <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 p-3">
+                <div className="text-[11px] font-semibold text-violet-700 mb-1 flex items-center gap-1">
+                  <Sparkles className="h-3 w-3" />AI Prompt
+                </div>
+                <p className="text-[11px] font-mono text-gray-600 leading-relaxed break-all">{prompt}</p>
               </div>
             )}
             {onRegenerate && (
@@ -109,6 +200,19 @@ export function ImageDetailModal({
           <div className="space-y-3">
             {loading ? (
               <div className="text-sm text-gray-400 py-6 text-center">載入中…</div>
+            ) : bgComp ? (
+              // 背景素材：image-only, just offer 帶入生成（背景）
+              <div className="rounded-xl border border-teal-200 bg-teal-50 p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-teal-50 border-teal-200 text-teal-700">背景素材</span>
+                  <span className="text-xs font-semibold text-gray-800 truncate ml-2">{bgComp.name}</span>
+                </div>
+                <button onClick={() => onInject(bgComp)} disabled={injectedIds?.has(bgComp.id)}
+                  className={`w-full flex items-center justify-center gap-1 text-xs font-medium py-2 rounded-lg border transition-colors
+                    ${injectedIds?.has(bgComp.id) ? "bg-gray-100 border-gray-200 text-gray-400" : "bg-white border-teal-200 text-teal-700 hover:opacity-80"}`}>
+                  <ArrowRightCircle className="h-3.5 w-3.5" />{injectedIds?.has(bgComp.id) ? "已帶入" : "帶入生成（背景）"}
+                </button>
+              </div>
             ) : sorted.length === 0 ? (
               <div className="text-center py-8 px-3 rounded-xl border border-dashed border-gray-200 bg-gray-50">
                 <div className="text-sm text-gray-500 mb-1">此圖尚未分析風格</div>
@@ -130,7 +234,6 @@ export function ImageDetailModal({
                   comp={comp}
                   injected={injectedIds?.has(comp.id) ?? false}
                   onInject={onInject}
-                  onEdit={onEdit}
                 />
               ))
             )}
@@ -145,26 +248,12 @@ function ComponentRow({
   comp,
   injected,
   onInject,
-  onEdit,
 }: {
   comp: StyleComponent;
   injected: boolean;
   onInject: (comp: StyleComponent) => void;
-  onEdit?: (comp: StyleComponent) => void;
 }) {
-  const [copied, setCopied] = useState(false);
   const meta = CATEGORY_META[comp.type];
-
-  const copy = async () => {
-    if (!comp.aiPromptText) return;
-    try {
-      await navigator.clipboard.writeText(comp.aiPromptText);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* noop */
-    }
-  };
 
   return (
     <div className={`rounded-xl border p-3 ${meta.bg} ${meta.border}`}>
@@ -209,24 +298,6 @@ function ComponentRow({
           <ArrowRightCircle className="h-3 w-3" />
           {injected ? "已帶入" : "帶入生成"}
         </button>
-        {onEdit && (
-          <button
-            onClick={() => onEdit(comp)}
-            className="flex items-center justify-center text-[11px] py-1.5 px-2 rounded-lg border bg-white border-gray-200 text-gray-500 hover:border-violet-300 hover:text-violet-600 transition-colors"
-            title="編輯此素材"
-          >
-            <Pencil className="h-3 w-3" />
-          </button>
-        )}
-        {comp.aiPromptText && (
-          <button
-            onClick={copy}
-            className="flex items-center justify-center text-[11px] py-1.5 px-2 rounded-lg border bg-white border-gray-200 text-gray-500 hover:border-gray-400 transition-colors"
-            title="複製 Prompt"
-          >
-            {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
-          </button>
-        )}
       </div>
     </div>
   );

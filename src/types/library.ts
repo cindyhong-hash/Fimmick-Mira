@@ -126,10 +126,12 @@ export interface LibraryImageRow {
 /** A single tile in the brand image gallery (merged 風格組件 tab). */
 export type GalleryItem =
   | {
-      kind: "uploaded";
+      /** "uploaded" = analysed image (構圖/配色/語氣); "material" = 背景素材 (background-only). */
+      kind: "uploaded" | "material";
       imageUrl: string;
       types: ComponentCategory[];
       componentIds: string[];
+      name: string;
       createdAt: string;
     }
   | {
@@ -139,6 +141,7 @@ export type GalleryItem =
       copyText: string | null;
       subject: string | null;
       paramsJson: string;
+      prompt: string | null;
       createdAt: string;
     };
 
@@ -150,6 +153,9 @@ export interface ImageDetail {
   subject?: string | null;
   /** paramsJson of a generated LibraryImage — enables 重新生成. */
   regenerateParams?: string;
+  prompt?: string | null;
+  /** LibraryImage id — enables delete in modal. */
+  libraryImageId?: string;
 }
 
 /** The four slots the PromptComposer manages. */

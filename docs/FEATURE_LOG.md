@@ -48,6 +48,46 @@
 8. **AI 存素材改 upsert**：`POST /api/components` 同 previewUrl+type 已存在 → 更新 + 置頂，唔再重複
 - 已知限制：免費 text-to-image 唔做 img2img，「直接使用產品圖」靠 sharp 合成（需透明去背 PNG）
 
+## 第三輪：繁中為主生成 + AI 合成 + 素材模型重整（2026-06-10～11）
+
+### 生成語言：繁中為主 → 自動翻英
+- `generate.ts` 加 `compileChineseBrief`（砌繁中設計描述）+ `translateBriefToEnglishPrompt`（OpenRouter 翻成優化英文 prompt 餵 FLUX）；無 key 時 fallback 原文。
+- `generate/route.ts` full-AI 路徑改：取 customPrompt(繁中brief) 或由 slots 砌 → 翻英 → 出圖。
+- PromptComposer 重寫：構圖描述/語氣 tag 可 **inline 編輯**；配色用 5-role checkbox（色票+hex，跟 QuickAddModal 一致）；「設計描述預覽」**唯讀**（鎖 icon）。
+
+### 產品合成：fal.ai Bria Product Shot（真 AI 合成）
+- `generate.ts` 加 `falProductShot`（`fal-ai/bria/product-shot`，~$0.04/張，圖片以 data URI 傳）。
+- composite mode 改：**先試 Bria**（有背景圖→`ref_image_url`；無→繁中brief翻英做`scene_description`）→ **失敗 fallback 舊 sharp 疊圖**。
+- 解決舊「sharp 純疊圖無修光、效果差」問題。
+
+### 背景重整為純圖片資產
+- 背景**只係圖片**（移除文字描述欄）、**只用於合成**、**移出文字 brief**、**唔再由相片分析產生**。
+- 生成素材 → 改為 **背景生成**（只生背景：無人/文字/產品；只喺 圖庫/全部/背景 出現；移除素材分類選項）。
+- 圖庫三分類 filter：**🟠 背景 / 🟢 上傳 / 🟣 AI生成**（gallery route 按 group 類型判斷 material vs uploaded）。
+- ImageDetailModal 背景 popup：固定**正方形**版面（圖在上 + 帶入生成 + 刪除，不左右分欄）；移除「未分析」狀態。
+
+### 以圖為單位編輯
+- ImageDetailModal「**調整**」掣（刪除旁）：一次載入該圖 構圖+配色+語氣 → QuickAddModal 多段預填 → 一次存（upsert by previewUrl+type）；**uncheck 某類即刪該組件**。
+- 風格組件積木卡改**圖片式**（圖+名稱 overlay + 帶入生成 + 刪除，移除逐個 pencil）；點卡 → 開該圖 popup。
+- 移除 QuickAddModal 各類「AI Prompt」欄、編輯模式「分類」dropdown（保留專案 dropdown）。
+
+### 修正以往 bug
+- 編輯後不更新/順序唔郁：`/api/components`、`/api/library/gallery` 加 `dynamic="force-dynamic"` + 前端 `cache:"no-store"`+時間戳；PATCH bump `createdAt` 置頂。
+- 編輯背景把 previewUrl 改錯導致 tile 消失：編輯時一律保留 `editComponent.previewUrl`。
+- GalleryItem 加 `name`（曾用嚟喺 tile 顯示，後改為淨圖）。
+- 生成素材未選的圖不入庫：generate 加 `draftOnly`（只存檔不寫 DB），選取先寫。
+
+### Layout + 預設
+- `/library` 收起全域 Sidebar；素材庫自己客戶資料夾欄做唯一左欄 + 「《 返回客戶」→ `/clients`。
+- 預設客戶「全部」、預設分頁「風格組件」（tab 順序：風格組件 在前）。
+- Composer 反應慢：改 prev-state 比較重置（消 setState-in-effect 連鎖重繪）。
+
+### API model
+- vision + text 由 `openai/gpt-5.4-nano` 改 **`openai/gpt-4o-mini`**（更平、支援 vision、穩定）。
+
+### 新增 API endpoints
+- `DELETE /api/library/images/[id]`（刪生成圖）、`POST /api/library/save-image`（背景生成保留時寫 LibraryImage）。
+
 ## 更早（已 commit，2026-06-03 批次）
 | commit | 功能 |
 |--------|------|
@@ -67,14 +107,16 @@
 | DELETE | `/api/components/[id]` | 刪除組件 |
 | POST | `/api/components/analyze` | OpenRouter 圖片分析（繁中、含 extraColors） |
 | GET | `/api/library/gallery` | 品牌圖庫 union（上傳 + 生成） |
-| POST | `/api/library/generate` | 生成圖片（HF/Pollinations）+ 文案 + 合成模式 |
+| POST | `/api/library/generate` | 生成圖（繁中brief→翻英→fal/HF）+ 文案；composite=Bria合成→sharp備援；draftOnly=只存檔 |
+| POST | `/api/library/save-image` | 把 draft 圖寫入 LibraryImage（背景生成保留時用） |
+| DELETE | `/api/library/images/[id]` | 刪除生成圖（LibraryImage） |
 | POST | `/api/library/describe` | vision 描述（kind=subject/background → 繁中 + 英文） |
 | POST | `/api/upload` | 上傳圖片到 public/uploads/ |
 
 ## 關鍵檔案
 - `src/app/library/page.tsx` — 素材庫頁（2 tabs，統一管理 popup/toast/編輯/重生成）
-- `src/components/library/` — PromptComposer / ComponentGrid / AssetGrid / QuickAddModal / ImageDetailModal / SlotPickerModal / ColorCards
-- `src/lib/generate.ts` — 生成抽象層
+- `src/components/library/` — PromptComposer / ComponentGrid / AssetGrid / QuickAddModal / GenerateAssetModal(背景生成) / ImageDetailModal / SlotPickerModal / ColorCards
+- `src/lib/generate.ts` — 生成抽象層（compileChineseBrief / translateBriefToEnglishPrompt / generateImage 鏈 / falProductShot / generateCopy）
 - `src/types/library.ts` — 型別 + CATEGORY_META + PALETTE_ROLES + getColors()
 - `src/types/presets.ts` — 行業範本
 - 測試素材：`.claude/TESTING_MATERIALS_BY_INDUSTRY.md`、`.claude/TEST_MATERIALS.md`（圖片在 `public/uploads/`，gitignore，需從備份帶過去）

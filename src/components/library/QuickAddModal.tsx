@@ -13,13 +13,15 @@ import { useState, useRef, useEffect } from "react";
 import { X, Upload, Sparkles, Loader2, Plus, Trash2, Check } from "lucide-react";
 import { CATEGORY_META, PALETTE_ROLES, getColors } from "@/types/library";
 import type { PaletteRole, StyleComponent, ComponentCategory } from "@/types/library";
-import { INDUSTRY_PRESETS, type IndustryPreset } from "@/types/presets";
+// INDUSTRY_PRESETS moved to PromptComposer (積木組合台)
 import { ColorCards } from "./ColorCards";
 
 type Props = {
   clientId: string | null;
   initialImageUrl?: string | null;
   editComponent?: StyleComponent | null;
+  /** Image-based edit: prefill ALL of an image's components (構圖/配色/語氣) to edit together. */
+  prefillComponents?: StyleComponent[] | null;
   onClose: () => void;
   onSaved: () => void;
 };
@@ -33,12 +35,17 @@ const DEFAULT_PALETTE: PaletteEntry[] = PALETTE_ROLES.map((r, idx) => ({
   enabled: idx < 2, // primary + secondary on by default
 }));
 
-export function QuickAddModal({ clientId, initialImageUrl, editComponent, onClose, onSaved }: Props) {
-  const isEdit = !!editComponent;
+export function QuickAddModal({ clientId, initialImageUrl, editComponent, prefillComponents, onClose, onSaved }: Props) {
+  const isEdit = !!editComponent || (!!prefillComponents && prefillComponents.length > 0);
   // ── Reference image (for AI analyze) ──
   const [imageUrl, setImageUrl] = useState<string | null>(initialImageUrl ?? null);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // ── Edit-mode: type and clientId change ──
+  const [editType, setEditType] = useState<ComponentCategory>(editComponent?.type ?? "COMPOSITION");
+  const [editClientId, setEditClientId] = useState<string | null>(editComponent?.clientId ?? clientId);
+  const [clients, setClients] = useState<{ id: string; name: string }[]>([]);
 
   // ── Section toggles ──
   const [include, setInclude] = useState({
@@ -67,40 +74,9 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, onClos
   // ── BACKGROUND (upload-only) ──
   const [bgName, setBgName] = useState("");
   const [bgImageUrl, setBgImageUrl] = useState<string | null>(null);
-  const [bgUploading, setBgUploading] = useState(false);
-  const [bgDescription, setBgDescription] = useState("");
-  const [bgPrompt, setBgPrompt] = useState("");
-  const bgFileRef = useRef<HTMLInputElement>(null);
+  // (背景 is image-only now — no description / aiPrompt fields)
 
-  // ── Industry preset ──
-  const [activePreset, setActivePreset] = useState<string | null>(null);
-
-  function applyPreset(p: IndustryPreset) {
-    setActivePreset(p.key);
-    setCompName(p.composition.name);
-    setDescription(p.composition.description);
-    setCompPrompt(p.composition.aiPromptText);
-    setColorName(p.color.name);
-    setColorPrompt(p.color.aiPromptText);
-    setPalette(
-      PALETTE_ROLES.map((r, idx) => {
-        const c = p.color.colors.find((c) => c.role === r.role);
-        return {
-          role: r.role,
-          label: r.label,
-          hex: c?.hex ?? (idx === 0 ? "#3b82f6" : idx === 1 ? "#1f2937" : "#e5e7eb"),
-          enabled: !!c,
-        };
-      }),
-    );
-    setToneName(p.tone.name);
-    setToneLabels(p.tone.toneLabels);
-    setTonePrompt(p.tone.aiPromptText);
-    setBgName(p.background.name);
-    setBgDescription(p.background.description);
-    setBgPrompt(p.background.aiPromptText);
-    setInclude((prev) => ({ ...prev, COMPOSITION: true, COLOR_SCHEME: true, COPY_TONE: true }));
-  }
+  // (套用行業範本 moved to PromptComposer / 積木組合台)
 
   // ── AI ──
   const [analyzing, setAnalyzing] = useState(false);
@@ -110,10 +86,17 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, onClos
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  // Load client list for project selector
+  useEffect(() => {
+    fetch("/api/clients").then((r) => r.json()).then((data) => setClients(Array.isArray(data) ? data : []));
+  }, []);
+
   // ── Edit-mode init: prefill the one section being edited ──
   useEffect(() => {
     if (!editComponent) return;
     const t = editComponent.type as ComponentCategory;
+    setEditType(t);
+    setEditClientId(editComponent.clientId ?? clientId);
     setInclude({ COMPOSITION: t === "COMPOSITION", COLOR_SCHEME: t === "COLOR_SCHEME", COPY_TONE: t === "COPY_TONE", BACKGROUND: t === "BACKGROUND" });
     const d = editComponent.data ?? {};
     if (t === "COMPOSITION") { setCompName(editComponent.name); setDescription((d.description as string) ?? ""); setCompPrompt(editComponent.aiPromptText); }
@@ -126,27 +109,34 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, onClos
       }));
     }
     if (t === "COPY_TONE") { setToneName(editComponent.name); setToneLabels((d.toneLabels as string[]) ?? []); setTonePrompt(editComponent.aiPromptText); }
-    if (t === "BACKGROUND") { setBgName(editComponent.name); setBgImageUrl((d.imageUrl as string) ?? null); setBgDescription((d.description as string) ?? ""); setBgPrompt(editComponent.aiPromptText); }
+    if (t === "BACKGROUND") { setBgName(editComponent.name); setBgImageUrl((d.imageUrl as string) ?? editComponent.previewUrl ?? null); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // AI-detect a background image's description (#6)
-  async function detectBg() {
-    if (!bgImageUrl) return;
-    setAiError(null);
-    try {
-      const res = await fetch("/api/library/describe", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageUrl: bgImageUrl, kind: "background" }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "偵測失敗");
-      if (data.text) setBgDescription(data.text);
-      if (data.prompt) setBgPrompt(data.prompt);
-    } catch (e: unknown) {
-      setAiError(e instanceof Error ? e.message : "偵測失敗");
+  // ── Image-based edit init: prefill ALL of the image's components (構圖/配色/語氣) ──
+  useEffect(() => {
+    if (!prefillComponents || prefillComponents.length === 0) return;
+    const present = { COMPOSITION: false, COLOR_SCHEME: false, COPY_TONE: false, BACKGROUND: false };
+    setEditClientId(prefillComponents[0].clientId ?? clientId);
+    for (const comp of prefillComponents) {
+      const t = comp.type as ComponentCategory;
+      const d = comp.data ?? {};
+      present[t] = true;
+      if (t === "COMPOSITION") { setCompName(comp.name); setDescription((d.description as string) ?? ""); setCompPrompt(comp.aiPromptText); }
+      if (t === "COLOR_SCHEME") {
+        setColorName(comp.name); setColorPrompt(comp.aiPromptText);
+        const cols = getColors(d);
+        setPalette(PALETTE_ROLES.map((r, idx) => {
+          const c = cols.find((c) => c.role === r.role);
+          return { role: r.role, label: r.label, hex: c?.hex ?? (idx === 0 ? "#3b82f6" : idx === 1 ? "#1f2937" : "#e5e7eb"), enabled: !!c };
+        }));
+      }
+      if (t === "COPY_TONE") { setToneName(comp.name); setToneLabels((d.toneLabels as string[]) ?? []); setTonePrompt(comp.aiPromptText); }
     }
-  }
+    setInclude({ COMPOSITION: present.COMPOSITION, COLOR_SCHEME: present.COLOR_SCHEME, COPY_TONE: present.COPY_TONE, BACKGROUND: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
 
   const checkedCount = Object.values(include).filter(Boolean).length;
 
@@ -163,12 +153,6 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, onClos
     setUploading(true);
     setImageUrl(await uploadFile(file));
     setUploading(false);
-  }
-
-  async function handleBgUpload(file: File) {
-    setBgUploading(true);
-    setBgImageUrl(await uploadFile(file));
-    setBgUploading(false);
   }
 
   function updateColor(role: PaletteRole, patch: Partial<PaletteEntry>) {
@@ -217,6 +201,8 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, onClos
         setToneLabels(copyTone.toneLabels ?? []);
         setTonePrompt(copyTone.aiPromptText ?? "");
       }
+      // NOTE: 背景 is now a standalone image asset (uploaded / generated), NOT derived from
+      // photo analysis. So we intentionally do NOT auto-fill or enable the BACKGROUND section here.
     } catch (e: unknown) {
       setAiError(e instanceof Error ? e.message : "AI 分析失敗，請重試");
     } finally {
@@ -241,7 +227,7 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, onClos
       case "COPY_TONE":
         return { name: toneName.trim(), data: { toneLabels }, aiPromptText: tonePrompt, previewUrl: imageUrl };
       case "BACKGROUND":
-        return { name: bgName.trim(), data: { imageUrl: bgImageUrl, description: bgDescription }, aiPromptText: bgPrompt, previewUrl: bgImageUrl };
+        return { name: bgName.trim(), data: { imageUrl: bgImageUrl }, aiPromptText: "", previewUrl: bgImageUrl };
     }
   }
 
@@ -250,18 +236,26 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, onClos
     if (include.COMPOSITION && !compName.trim()) errors.push("構圖");
     if (include.COLOR_SCHEME && !colorName.trim()) errors.push("配色");
     if (include.COPY_TONE && !toneName.trim()) errors.push("語氣");
-    if (include.BACKGROUND && !bgName.trim()) errors.push("背景");
+    if (include.BACKGROUND && (!bgName.trim() || !bgImageUrl)) errors.push("背景（需名稱＋圖片）");
     if (errors.length) { setSaveError(`請填寫名稱：${errors.join("、")}`); return; }
-    if (checkedCount === 0) { setSaveError("請至少勾選一個素材類型"); return; }
+    // Allow uncheck-all only in image-based edit (= delete all that image's components).
+    if (checkedCount === 0 && !prefillComponents) { setSaveError("請至少勾選一個素材類型"); return; }
 
     setSaving(true);
     setSaveError(null);
 
     // Edit mode: PATCH the single component in place.
     if (isEdit && editComponent) {
-      const p = payloadFor(editComponent.type);
+      // Build the payload for the (possibly changed) type.
+      const p = payloadFor(editType);
+      // CRITICAL: preserve the component's ORIGINAL previewUrl. The previewUrl identifies which
+      // gallery image this component belongs to — editing its content must never move it to a
+      // different gallery group. (Bug: payloadFor("BACKGROUND") returned previewUrl=bgImageUrl,
+      // which differs from previewUrl when the bg image ≠ the analysed gallery photo, so saving
+      // silently re-homed the component and the original tile appeared "not updated".)
       const res = await fetch(`/api/components/${editComponent.id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p),
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...p, type: editType, clientId: editClientId, previewUrl: editComponent.previewUrl }),
       });
       setSaving(false);
       if (!res.ok) { setSaveError("儲存失敗，請重試"); return; }
@@ -270,13 +264,22 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, onClos
       return;
     }
 
+    // POST upserts by previewUrl+type, so image-based edit re-uses this path (updates in place).
     const post = (type: ComponentCategory) =>
       fetch("/api/components", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type, clientId, ...payloadFor(type) }),
+        body: JSON.stringify({ type, clientId: editClientId, ...payloadFor(type) }),
       });
 
     const saves: Promise<Response>[] = [];
+    // Image-based edit: a prefilled component whose section was UNCHECKED → delete it.
+    if (prefillComponents) {
+      for (const comp of prefillComponents) {
+        if (!include[comp.type as keyof typeof include]) {
+          saves.push(fetch(`/api/components/${comp.id}`, { method: "DELETE" }));
+        }
+      }
+    }
     if (include.COMPOSITION) saves.push(post("COMPOSITION"));
     if (include.COLOR_SCHEME) saves.push(post("COLOR_SCHEME"));
     if (include.COPY_TONE) saves.push(post("COPY_TONE"));
@@ -292,7 +295,6 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, onClos
   const compMeta = CATEGORY_META["COMPOSITION"];
   const colorMeta = CATEGORY_META["COLOR_SCHEME"];
   const toneMeta = CATEGORY_META["COPY_TONE"];
-  const bgMeta = CATEGORY_META["BACKGROUND"];
 
   const enabledColors = palette.filter((p) => p.enabled && p.hex);
 
@@ -312,34 +314,31 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, onClos
           </button>
         </div>
 
+        {/* Edit-mode: project selector only (type is fixed — an image's 構圖/配色/語氣 are edited together) */}
+        {isEdit && (
+          <div className="px-6 py-3 border-b bg-gray-50/60 flex items-center gap-2 flex-wrap">
+            <label className="text-xs font-semibold text-gray-500 whitespace-nowrap">專案</label>
+            <select value={editClientId ?? ""} onChange={(e) => setEditClientId(e.target.value || null)}
+              className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white">
+              <option value="">全部（無分類）</option>
+              {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+        )}
+
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
-          {!isEdit && (<>
-          {/* Industry preset picker */}
+          {/* Reference image upload + AI analyze — available in both create and edit mode */}
           <div>
-            <label className="text-xs font-semibold text-gray-600 mb-2 block">套用行業範本（一鍵填入構圖 / 配色 / 語氣 / 背景）</label>
-            <div className="flex flex-wrap gap-1.5">
-              {INDUSTRY_PRESETS.map((p) => (
-                <button key={p.key} onClick={() => applyPreset(p)}
-                  className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-full border transition-colors ${
-                    activePreset === p.key
-                      ? "bg-gray-900 text-white border-gray-900"
-                      : "bg-white border-gray-200 text-gray-600 hover:border-gray-400"}`}>
-                  <span>{p.emoji}</span>{p.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Reference image upload */}
-          <div>
-            <label className="text-xs font-semibold text-gray-600 mb-2 block">參考圖片（選填，供 AI 分析構圖/配色/語氣）</label>
+            <label className="text-xs font-semibold text-gray-600 mb-2 block">
+              參考圖片（選填，供 AI 分析構圖／配色／語氣／背景）
+            </label>
             <input ref={fileRef} type="file" accept="image/*" className="hidden"
               onChange={(e) => { if (e.target.files?.[0]) handleUpload(e.target.files[0]); }} />
             {imageUrl ? (
               <div className="relative group">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={imageUrl} alt="preview" className="w-full h-44 object-cover rounded-xl border" />
+                <img src={imageUrl} alt="preview" className="w-full h-44 object-contain rounded-xl border bg-gray-50" />
                 <button onClick={() => setImageUrl(null)}
                   className="absolute top-2 right-2 bg-white/90 hover:bg-white p-1.5 rounded-lg shadow opacity-0 group-hover:opacity-100 transition-opacity">
                   <Trash2 className="h-3.5 w-3.5 text-red-500" />
@@ -360,7 +359,6 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, onClos
             )}
             {aiError && <p className="text-xs text-red-500 mt-1.5">{aiError}</p>}
           </div>
-          </>)}
 
           {/* COMPOSITION */}
           <SectionWrapper meta={compMeta} label="構圖" checked={include.COMPOSITION}
@@ -372,10 +370,6 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, onClos
             <Field label="構圖描述">
               <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="例：主體置中，大量留白，視覺乾淨" rows={2}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-400" />
-            </Field>
-            <Field label="AI Prompt（英文，供生成圖片用）">
-              <textarea value={compPrompt} onChange={(e) => setCompPrompt(e.target.value)} placeholder="例：centered product, minimal white space, clean" rows={2}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono resize-none focus:outline-none focus:ring-2 focus:ring-indigo-400" />
             </Field>
           </SectionWrapper>
 
@@ -412,10 +406,6 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, onClos
                 })}
               </div>
             </Field>
-            <Field label="AI Prompt（英文，供生成圖片用）">
-              <textarea value={colorPrompt} onChange={(e) => setColorPrompt(e.target.value)} placeholder="例：warm orange tones, high contrast, vibrant palette" rows={2}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono resize-none focus:outline-none focus:ring-2 focus:ring-rose-400" />
-            </Field>
           </SectionWrapper>
 
           {/* COPY_TONE */}
@@ -444,51 +434,6 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, onClos
                   <Plus className="h-4 w-4" />
                 </button>
               </div>
-            </Field>
-            <Field label="AI Prompt（供文案生成用）">
-              <textarea value={tonePrompt} onChange={(e) => setTonePrompt(e.target.value)} placeholder="例：親切活潑、帶有幽默感、符合年輕族群" rows={2}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-400" />
-            </Field>
-          </SectionWrapper>
-
-          {/* BACKGROUND — image optional, AI-detect description */}
-          <SectionWrapper meta={bgMeta} label="背景" checked={include.BACKGROUND}
-            onToggle={() => setInclude((p) => ({ ...p, BACKGROUND: !p.BACKGROUND }))}>
-            <Field label="素材名稱 *">
-              <input value={bgName} onChange={(e) => setBgName(e.target.value)} placeholder="例：柔和漸層棚拍背景"
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
-            </Field>
-            <Field label="背景圖片（選填，可純文字描述）">
-              <input ref={bgFileRef} type="file" accept="image/*" className="hidden"
-                onChange={(e) => { if (e.target.files?.[0]) handleBgUpload(e.target.files[0]); }} />
-              {bgImageUrl ? (
-                <div className="relative group">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={bgImageUrl} alt="bg" className="w-full h-32 object-cover rounded-xl border" />
-                  <button onClick={() => setBgImageUrl(null)}
-                    className="absolute top-2 right-2 bg-white/90 hover:bg-white p-1.5 rounded-lg shadow opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                  </button>
-                  <button onClick={detectBg}
-                    className="absolute bottom-2 right-2 flex items-center gap-1.5 text-xs font-medium bg-teal-600 hover:bg-teal-700 text-white px-3 py-1.5 rounded-lg shadow transition-colors">
-                    <Sparkles className="h-3.5 w-3.5" />AI 偵測描述
-                  </button>
-                </div>
-              ) : (
-                <button onClick={() => bgFileRef.current?.click()} disabled={bgUploading}
-                  className="w-full h-28 border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center gap-1.5 text-gray-400 hover:border-teal-300 hover:text-teal-500 transition-colors">
-                  {bgUploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Upload className="h-5 w-5" />}
-                  <span className="text-xs">{bgUploading ? "上傳中…" : "點擊上傳背景圖"}</span>
-                </button>
-              )}
-            </Field>
-            <Field label="背景描述">
-              <textarea value={bgDescription} onChange={(e) => setBgDescription(e.target.value)} placeholder="例：米白色棉麻質感、柔光" rows={2}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-teal-400" />
-            </Field>
-            <Field label="AI Prompt（英文，供生成圖片用）">
-              <textarea value={bgPrompt} onChange={(e) => setBgPrompt(e.target.value)} placeholder="例：soft beige linen studio backdrop, gentle light" rows={2}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono resize-none focus:outline-none focus:ring-2 focus:ring-teal-400" />
             </Field>
           </SectionWrapper>
         </div>

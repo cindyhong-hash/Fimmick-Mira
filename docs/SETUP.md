@@ -5,7 +5,7 @@
 ## 環境變數（`.env.local`，不 commit）
 見 `.env.example`。重點：
 - `OPENROUTER_API_KEY` — 圖片分析(vision) + 生成文案。https://openrouter.ai/keys
-- `OPENROUTER_VISION_MODEL` / `OPENROUTER_TEXT_MODEL` — 預設 `openai/gpt-5.4-nano`
+- `OPENROUTER_VISION_MODEL` / `OPENROUTER_TEXT_MODEL` — 預設 `openai/gpt-4o-mini`
   - ⚠️ OpenRouter model id 會輪換/下架。若 analyze 或 generate 回 `No endpoints found` / 404，去 `https://openrouter.ai/api/v1/models` 揾現存平價且支援 vision 的 model 換上即可。
 - `HF_TOKEN` — 圖片生成主力（HF FLUX.1-schnell）。https://huggingface.co/settings/tokens（Read）
 - `POLLINATIONS_TOKEN` — 留空（免費匿名常回 402，留空直接行 HF）

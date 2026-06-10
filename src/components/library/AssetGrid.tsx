@@ -5,7 +5,8 @@
  * Refetches whenever `reloadKey` changes (bumped after a successful generation).
  */
 import { useEffect, useState } from "react";
-import type { GalleryItem, ImageDetail } from "@/types/library";
+import { Sparkles } from "lucide-react";
+import type { GalleryItem, ImageDetail, StyleComponent } from "@/types/library";
 
 type Props = { clientId: string | null; reloadKey?: number; onOpenImage?: (detail: ImageDetail) => void };
 
@@ -37,21 +38,41 @@ export function AssetGrid({ clientId, reloadKey = 0, onOpenImage }: Props) {
 
   return (
     <div className="grid grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
-      {items.map((item) => (
-        <button key={item.libraryImageId} type="button"
-          onClick={() => onOpenImage?.({ imageUrl: item.imageUrl, presetComponents: [], copyText: item.copyText, subject: item.subject, regenerateParams: item.paramsJson })}
-          className="group border rounded-xl overflow-hidden hover:shadow-lg transition-all duration-200 bg-white text-left">
-          <div className="relative">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={item.imageUrl} alt={item.subject ?? "generated"} className="w-full aspect-square object-cover" />
-            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors duration-200" />
-          </div>
-          <div className="p-2.5 space-y-1">
-            {item.subject && <div className="text-xs font-semibold truncate text-gray-800">{item.subject}</div>}
-            {item.copyText && <div className="text-[11px] text-gray-500 line-clamp-2 whitespace-pre-wrap">{item.copyText}</div>}
-          </div>
-        </button>
-      ))}
+      {items.map((item) => {
+        // Parse paramsJson to extract slot components for the detail modal
+        let slotComps: StyleComponent[] = [];
+        try {
+          const p = JSON.parse(item.paramsJson ?? "{}");
+          slotComps = Object.values(p.slots ?? {}).filter(Boolean) as StyleComponent[];
+        } catch { /* ignore */ }
+
+        return (
+          <button key={item.libraryImageId} type="button"
+            onClick={() => onOpenImage?.({
+              imageUrl: item.imageUrl,
+              presetComponents: slotComps,
+              copyText: item.copyText,
+              subject: item.subject,
+              regenerateParams: item.paramsJson,
+              prompt: item.prompt,
+              libraryImageId: item.libraryImageId,
+            })}
+            className="group border rounded-xl overflow-hidden hover:shadow-lg transition-all duration-200 bg-white text-left">
+            <div className="relative">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={item.imageUrl} alt={item.subject ?? "generated"} className="w-full aspect-square object-cover" />
+              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors duration-200" />
+              <span className="absolute top-2 left-2 flex items-center gap-1 text-[10px] font-semibold bg-violet-600 text-white px-1.5 py-0.5 rounded-full shadow">
+                <Sparkles className="h-2.5 w-2.5" />AI生成
+              </span>
+            </div>
+            <div className="p-2.5 space-y-1">
+              {item.subject && <div className="text-xs font-semibold truncate text-gray-800">{item.subject}</div>}
+              {item.copyText && <div className="text-[11px] text-gray-500 line-clamp-2 whitespace-pre-wrap">{item.copyText}</div>}
+            </div>
+          </button>
+        );
+      })}
     </div>
   );
 }

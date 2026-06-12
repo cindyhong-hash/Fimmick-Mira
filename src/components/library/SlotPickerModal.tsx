@@ -110,7 +110,7 @@ export function SlotPickerModal({ clientId, category, onPick, onClose }: Props) 
                   {comp.previewUrl ? (
                     <div className="relative">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={comp.previewUrl} alt={comp.name} className="w-full h-32 object-cover" />
+                      <img src={comp.previewUrl} alt={comp.name} loading="lazy" decoding="async" className={`w-full object-cover ${comp.type === "BACKGROUND" ? "aspect-square" : "h-32"}`} />
                       <div className="absolute inset-0 bg-gradient-to-b from-black/60 to-black/10" />
                       <div className="absolute top-2.5 left-2.5 right-2.5">
                         <div className="text-sm font-semibold text-white leading-snug drop-shadow line-clamp-2">{comp.name}</div>

@@ -15,7 +15,7 @@ import {
   Image as ImageIcon, LayoutGrid, Plus, Trash2, Sparkles, Wand2,
 } from "lucide-react";
 import type { StyleComponent, ComponentCategory, PromptSlots, GalleryItem, ImageDetail } from "@/types/library";
-import { CATEGORY_META, getColors } from "@/types/library";
+import { CATEGORY_META, getColors, engineLabel } from "@/types/library";
 import { ColorCards } from "./ColorCards";
 
 type FilterTab = "GALLERY" | "ALL" | ComponentCategory;
@@ -59,7 +59,7 @@ function ComponentCard({
       {img ? (
         <div className="relative">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={img} alt={comp.name} className="w-full h-32 object-cover" />
+          <img src={img} alt={comp.name} loading="lazy" decoding="async" className={`w-full object-cover ${comp.type === "BACKGROUND" ? "aspect-square" : "h-32"}`} />
           <div className="absolute inset-0 bg-gradient-to-b from-black/60 to-black/10" />
           <span className={`absolute top-2 left-2 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color} ${meta.border} border`}>{meta.label}</span>
           <div className="absolute top-2 left-2 right-2 mt-6">
@@ -120,17 +120,29 @@ function GalleryTile({ item, onOpen, onDelete }: {
   onDelete: (item: GalleryItem) => void;
 }) {
   const [confirmDel, setConfirmDel] = useState(false);
+  const [dims, setDims] = useState("");
   return (
-    <div className="group relative rounded-xl overflow-hidden border border-gray-200 bg-white hover:shadow-md hover:border-gray-300 transition-all">
+    <div className="group relative rounded-xl overflow-hidden border border-gray-200 bg-gray-50 hover:shadow-md hover:border-gray-300 transition-all">
       <button onClick={() => onOpen(item)} className="w-full text-left">
+        {/* Show the FULL image (no crop) — object-contain, letterboxed in a square box. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={item.imageUrl} alt="brand" className="w-full aspect-square object-cover" />
+        <img src={item.imageUrl} alt="brand" loading="lazy" decoding="async"
+          onLoad={(e) => { const t = e.currentTarget; setDims((d) => d || `${t.naturalWidth}×${t.naturalHeight}`); }}
+          className="w-full aspect-square object-contain" />
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors pointer-events-none" />
       </button>
+      {dims && (
+        <span className="absolute bottom-2 right-2 text-[10px] font-medium bg-black/55 text-white px-1.5 py-0.5 rounded shadow pointer-events-none">{dims}</span>
+      )}
       {item.kind === "generated" ? (
-        <span className="absolute top-2 left-2 flex items-center gap-1 text-[10px] font-semibold bg-violet-600 text-white px-1.5 py-0.5 rounded-full shadow pointer-events-none">
-          <Sparkles className="h-2.5 w-2.5" />AI生成
-        </span>
+        <div className="absolute top-2 left-2 flex items-center gap-1 pointer-events-none">
+          <span className="flex items-center gap-1 text-[10px] font-semibold bg-violet-600 text-white px-1.5 py-0.5 rounded-full shadow whitespace-nowrap">
+            <Sparkles className="h-2.5 w-2.5" />AI生成
+          </span>
+          {engineLabel(item.paramsJson) && (
+            <span className="text-[10px] font-medium bg-black/55 text-white px-1.5 py-0.5 rounded-full shadow whitespace-nowrap">{engineLabel(item.paramsJson)}</span>
+          )}
+        </div>
       ) : item.kind === "material" ? (
         <span className="absolute top-2 left-2 flex items-center gap-1 text-[10px] font-semibold bg-amber-500 text-white px-1.5 py-0.5 rounded-full shadow pointer-events-none">
           背景

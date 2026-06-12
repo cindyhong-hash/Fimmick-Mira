@@ -158,6 +158,27 @@ export interface ImageDetail {
   libraryImageId?: string;
 }
 
+/** Human-facing AI-engine label for a generated image (from paramsJson.mode). */
+export function engineLabel(paramsJson?: string | null): string | null {
+  if (!paramsJson) return null;
+  try {
+    const mode = JSON.parse(paramsJson).mode as string | undefined;
+    if (!mode) return null;
+    const map: Record<string, string> = {
+      "fal-edit": "Nano Banana",
+      "bria-preserve": "Bria",
+      "bria": "Bria",
+      "gpt-image": "GPT image",
+      "paste-text": "疊圖",
+      "sharp": "疊圖",
+      "flux": "FLUX",
+    };
+    return map[mode] ?? mode;
+  } catch {
+    return null;
+  }
+}
+
 /** The four slots the PromptComposer manages. */
 export interface PromptSlots {
   layout: StyleComponent | null;

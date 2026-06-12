@@ -32,6 +32,8 @@ export default function LibraryPage() {
   const [quickAddImageUrl, setQuickAddImageUrl] = useState<string | null>(null);
   const [editComponent, setEditComponent] = useState<StyleComponent | null>(null);
   const [prefillComponents, setPrefillComponents] = useState<StyleComponent[] | null>(null);
+  // When adjusting a GENERATED image, save edits back into its paramsJson (not StyleComponent rows).
+  const [adjustLibraryImageId, setAdjustLibraryImageId] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [componentReloadKey, setComponentReloadKey] = useState(0);
   const [detail, setDetail] = useState<ImageDetail | null>(null);
@@ -75,11 +77,13 @@ export default function LibraryPage() {
     setDetail(null);
   }, []);
 
-  // Popup「調整」→ image-based edit: open QuickAdd prefilled with ALL of the image's components
-  const handleAdjustImage = useCallback((url: string, comps: StyleComponent[]) => {
+  // Popup「調整」→ image-based edit: open QuickAdd prefilled with ALL of the image's components.
+  // libraryImageId is set only for generated images → save rewrites that image's paramsJson.slots.
+  const handleAdjustImage = useCallback((url: string, comps: StyleComponent[], libraryImageId?: string) => {
     setQuickAddImageUrl(url);
     setEditComponent(null);
     setPrefillComponents(comps);
+    setAdjustLibraryImageId(libraryImageId ?? null);
     setShowQuickAdd(true);
     setDetail(null);
   }, []);
@@ -249,6 +253,7 @@ export default function LibraryPage() {
           onRegenerate={detail.regenerateParams ? () => handleRegenerate(detail) : undefined}
           onDelete={detail.libraryImageId ? handleDeleteLibraryImage : undefined}
           onDeleteComponents={handleDeleteComponents}
+          onRefresh={() => { setReloadKey((k) => k + 1); setComponentReloadKey((k) => k + 1); }}
           onClose={() => setDetail(null)}
         />
       )}
@@ -273,13 +278,15 @@ export default function LibraryPage() {
           initialImageUrl={quickAddImageUrl}
           editComponent={editComponent}
           prefillComponents={prefillComponents}
-          onClose={() => { setShowQuickAdd(false); setQuickAddImageUrl(null); setEditComponent(null); setPrefillComponents(null); }}
+          libraryImageId={adjustLibraryImageId ?? undefined}
+          onClose={() => { setShowQuickAdd(false); setQuickAddImageUrl(null); setEditComponent(null); setPrefillComponents(null); setAdjustLibraryImageId(null); }}
           onSaved={() => {
             setShowQuickAdd(false);
             setQuickAddImageUrl(null);
             setEditComponent(null);
             setPrefillComponents(null);
-            setTab("components");
+            setAdjustLibraryImageId(null);
+            setReloadKey((k) => k + 1);
             setComponentReloadKey((k) => k + 1);
           }}
         />

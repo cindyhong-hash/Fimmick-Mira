@@ -22,6 +22,9 @@ type Props = {
   editComponent?: StyleComponent | null;
   /** Image-based edit: prefill ALL of an image's components (構圖/配色/語氣) to edit together. */
   prefillComponents?: StyleComponent[] | null;
+  /** Set when editing a GENERATED image → save rewrites that image's paramsJson.slots
+   *  instead of writing StyleComponent rows (which the generated-image modal never reads). */
+  libraryImageId?: string;
   onClose: () => void;
   onSaved: () => void;
 };
@@ -35,7 +38,7 @@ const DEFAULT_PALETTE: PaletteEntry[] = PALETTE_ROLES.map((r, idx) => ({
   enabled: idx < 2, // primary + secondary on by default
 }));
 
-export function QuickAddModal({ clientId, initialImageUrl, editComponent, prefillComponents, onClose, onSaved }: Props) {
+export function QuickAddModal({ clientId, initialImageUrl, editComponent, prefillComponents, libraryImageId, onClose, onSaved }: Props) {
   const isEdit = !!editComponent || (!!prefillComponents && prefillComponents.length > 0);
   // ── Reference image (for AI analyze) ──
   const [imageUrl, setImageUrl] = useState<string | null>(initialImageUrl ?? null);
@@ -80,6 +83,8 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, prefil
 
   // ── AI ──
   const [analyzing, setAnalyzing] = useState(false);
+  // Which single section is being (re)analyzed via its per-block AI button (null = none).
+  const [sectionAnalyzing, setSectionAnalyzing] = useState<ComponentCategory | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
 
   // ── Save ──
@@ -159,54 +164,84 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, prefil
     setPalette((prev) => prev.map((p) => (p.role === role ? { ...p, ...patch } : p)));
   }
 
+  // Call the analyze endpoint once; throws on error. Returns { composition, colorScheme, copyTone, ... }.
+  async function runAnalyze() {
+    const res = await fetch("/api/components/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ imageUrl }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? "AI 分析失敗");
+    return data;
+  }
+
+  // ── Per-section appliers (used by both「填入全部」and per-block buttons) ──
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function applyComposition(c: any) {
+    if (!c) return;
+    setCompName(c.name ?? "");
+    setDescription(c.description ?? "");
+    setCompPrompt(c.aiPromptText ?? "");
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function applyColorScheme(cs: any) {
+    if (!cs) return;
+    setColorName(cs.name ?? "");
+    setColorPrompt(cs.aiPromptText ?? "");
+    // Map primary, secondary, then extraColors → accent/neutral/highlight
+    const extra: string[] = Array.isArray(cs.extraColors) ? cs.extraColors : [];
+    setPalette((prev) =>
+      prev.map((p, idx) => {
+        if (p.role === "primary" && cs.primaryColor) return { ...p, hex: cs.primaryColor, enabled: true };
+        if (p.role === "secondary" && cs.secondaryColor) return { ...p, hex: cs.secondaryColor, enabled: true };
+        const extraIdx = idx - 2; // accent=0, neutral=1, highlight=2
+        if (extraIdx >= 0 && extra[extraIdx]) return { ...p, hex: extra[extraIdx], enabled: true };
+        return p;
+      }),
+    );
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function applyCopyTone(t: any) {
+    if (!t) return;
+    setToneName(t.name ?? "");
+    setToneLabels(t.toneLabels ?? []);
+    setTonePrompt(t.aiPromptText ?? "");
+  }
+
+  // 「AI 讀取圖片，填入欄位」— fill ALL three sections at once.
   async function handleAnalyze() {
     if (!imageUrl) return;
     setAnalyzing(true);
     setAiError(null);
     try {
-      const res = await fetch("/api/components/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageUrl }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "AI 分析失敗");
-
-      const { composition, colorScheme, copyTone } = data;
-      if (composition) {
-        setCompName(composition.name ?? "");
-        setDescription(composition.description ?? "");
-        setCompPrompt(composition.aiPromptText ?? "");
-      }
-      if (colorScheme) {
-        setColorName(colorScheme.name ?? "");
-        setColorPrompt(colorScheme.aiPromptText ?? "");
-        // Map primary, secondary, then extraColors → accent/neutral/highlight
-        const extra: string[] = Array.isArray(colorScheme.extraColors) ? colorScheme.extraColors : [];
-        setPalette((prev) =>
-          prev.map((p, idx) => {
-            if (p.role === "primary" && colorScheme.primaryColor)
-              return { ...p, hex: colorScheme.primaryColor, enabled: true };
-            if (p.role === "secondary" && colorScheme.secondaryColor)
-              return { ...p, hex: colorScheme.secondaryColor, enabled: true };
-            const extraIdx = idx - 2; // accent=0, neutral=1, highlight=2
-            if (extraIdx >= 0 && extra[extraIdx])
-              return { ...p, hex: extra[extraIdx], enabled: true };
-            return p;
-          }),
-        );
-      }
-      if (copyTone) {
-        setToneName(copyTone.name ?? "");
-        setToneLabels(copyTone.toneLabels ?? []);
-        setTonePrompt(copyTone.aiPromptText ?? "");
-      }
-      // NOTE: 背景 is now a standalone image asset (uploaded / generated), NOT derived from
-      // photo analysis. So we intentionally do NOT auto-fill or enable the BACKGROUND section here.
+      const data = await runAnalyze();
+      applyComposition(data.composition);
+      applyColorScheme(data.colorScheme);
+      applyCopyTone(data.copyTone);
+      // NOTE: 背景 is a standalone image asset, NOT derived from analysis — left untouched here.
     } catch (e: unknown) {
       setAiError(e instanceof Error ? e.message : "AI 分析失敗，請重試");
     } finally {
       setAnalyzing(false);
+    }
+  }
+
+  // Per-block AI: (re)analyze the image but apply ONLY the chosen section — others stay intact.
+  async function analyzeSection(section: ComponentCategory) {
+    if (!imageUrl) return;
+    setSectionAnalyzing(section);
+    setAiError(null);
+    try {
+      const data = await runAnalyze();
+      if (section === "COMPOSITION") applyComposition(data.composition);
+      else if (section === "COLOR_SCHEME") applyColorScheme(data.colorScheme);
+      else if (section === "COPY_TONE") applyCopyTone(data.copyTone);
+      setInclude((p) => ({ ...p, [section]: true })); // ensure the filled section is enabled
+    } catch (e: unknown) {
+      setAiError(e instanceof Error ? e.message : "AI 分析失敗，請重試");
+    } finally {
+      setSectionAnalyzing(null);
     }
   }
 
@@ -243,6 +278,41 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, prefil
 
     setSaving(true);
     setSaveError(null);
+
+    // Generated-image edit: rewrite the image's paramsJson.slots (NOT StyleComponent rows).
+    // The generated-image modal reads its 構圖/配色/語氣 from paramsJson, and the prefilled
+    // components' ids belong to the ORIGINAL source library assets — so we must neither write
+    // orphan StyleComponents nor DELETE by those ids here.
+    if (libraryImageId) {
+      const byType = Object.fromEntries((prefillComponents ?? []).map((c) => [c.type, c]));
+      const mkSlot = (type: ComponentCategory) => {
+        if (!include[type]) return null; // unchecked → drop from the snapshot
+        const p = payloadFor(type)!;
+        const orig = byType[type];
+        return {
+          ...(orig ?? { id: `edited-${type}`, clientId: editClientId, sourceLayoutId: "", previewUrl: null, createdAt: new Date().toISOString() }),
+          type,
+          name: p.name,
+          data: p.data,
+          aiPromptText: p.aiPromptText,
+        };
+      };
+      const slots = {
+        layout: mkSlot("COMPOSITION"),
+        color: mkSlot("COLOR_SCHEME"),
+        tone: mkSlot("COPY_TONE"),
+        background: byType["BACKGROUND"] ?? null, // 背景 is not editable here — keep as-is
+      };
+      const res = await fetch(`/api/library/images/${libraryImageId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slots, clientId: editClientId ?? null }),
+      });
+      setSaving(false);
+      if (!res.ok) { setSaveError("儲存失敗，請重試"); return; }
+      onSaved();
+      onClose();
+      return;
+    }
 
     // Edit mode: PATCH the single component in place.
     if (isEdit && editComponent) {
@@ -338,7 +408,7 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, prefil
             {imageUrl ? (
               <div className="relative group">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={imageUrl} alt="preview" className="w-full h-44 object-contain rounded-xl border bg-gray-50" />
+                <img src={imageUrl} alt="preview" className="w-full h-64 object-contain rounded-xl border bg-gray-50" />
                 <button onClick={() => setImageUrl(null)}
                   className="absolute top-2 right-2 bg-white/90 hover:bg-white p-1.5 rounded-lg shadow opacity-0 group-hover:opacity-100 transition-opacity">
                   <Trash2 className="h-3.5 w-3.5 text-red-500" />
@@ -362,7 +432,8 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, prefil
 
           {/* COMPOSITION */}
           <SectionWrapper meta={compMeta} label="構圖" checked={include.COMPOSITION}
-            onToggle={() => setInclude((p) => ({ ...p, COMPOSITION: !p.COMPOSITION }))}>
+            onToggle={() => setInclude((p) => ({ ...p, COMPOSITION: !p.COMPOSITION }))}
+            action={imageUrl ? <SectionAIButton loading={sectionAnalyzing === "COMPOSITION"} disabled={!!sectionAnalyzing || analyzing} onClick={() => analyzeSection("COMPOSITION")} /> : null}>
             <Field label="素材名稱 *">
               <input value={compName} onChange={(e) => setCompName(e.target.value)} placeholder="例：留白極簡構圖"
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
@@ -375,7 +446,8 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, prefil
 
           {/* COLOR_SCHEME — 5-color palette */}
           <SectionWrapper meta={colorMeta} label="配色" checked={include.COLOR_SCHEME}
-            onToggle={() => setInclude((p) => ({ ...p, COLOR_SCHEME: !p.COLOR_SCHEME }))}>
+            onToggle={() => setInclude((p) => ({ ...p, COLOR_SCHEME: !p.COLOR_SCHEME }))}
+            action={imageUrl ? <SectionAIButton loading={sectionAnalyzing === "COLOR_SCHEME"} disabled={!!sectionAnalyzing || analyzing} onClick={() => analyzeSection("COLOR_SCHEME")} /> : null}>
             <Field label="素材名稱 *">
               <input value={colorName} onChange={(e) => setColorName(e.target.value)} placeholder="例：暖橙系配色"
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-400" />
@@ -410,7 +482,8 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, prefil
 
           {/* COPY_TONE */}
           <SectionWrapper meta={toneMeta} label="語氣" checked={include.COPY_TONE}
-            onToggle={() => setInclude((p) => ({ ...p, COPY_TONE: !p.COPY_TONE }))}>
+            onToggle={() => setInclude((p) => ({ ...p, COPY_TONE: !p.COPY_TONE }))}
+            action={imageUrl ? <SectionAIButton loading={sectionAnalyzing === "COPY_TONE"} disabled={!!sectionAnalyzing || analyzing} onClick={() => analyzeSection("COPY_TONE")} /> : null}>
             <Field label="素材名稱 *">
               <input value={toneName} onChange={(e) => setToneName(e.target.value)} placeholder="例：活潑親切語氣"
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
@@ -456,23 +529,40 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, prefil
 }
 
 // ── Small helpers ──
-function SectionWrapper({ meta, label, checked, onToggle, children }: {
+function SectionWrapper({ meta, label, checked, onToggle, children, action }: {
   meta: { bg: string; border: string; color: string };
   label: string;
   checked: boolean;
   onToggle: () => void;
   children: React.ReactNode;
+  /** Optional control rendered at the right of the header (e.g. per-block AI button). */
+  action?: React.ReactNode;
 }) {
   return (
     <div className={`rounded-xl border transition-opacity ${checked ? "" : "opacity-40"} ${meta.bg} ${meta.border}`}>
-      <button onClick={onToggle} className="w-full flex items-center gap-2 px-4 pt-3 pb-2 text-left">
-        <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${checked ? `${meta.border} ${meta.bg}` : "border-gray-300 bg-white"}`}>
-          {checked && <Check className={`h-3 w-3 ${meta.color}`} />}
-        </span>
-        <span className={`text-xs font-semibold ${meta.color}`}>{label}</span>
-      </button>
+      <div className="w-full flex items-center gap-2 px-4 pt-3 pb-2">
+        <button onClick={onToggle} className="flex items-center gap-2 text-left flex-1 min-w-0">
+          <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${checked ? `${meta.border} ${meta.bg}` : "border-gray-300 bg-white"}`}>
+            {checked && <Check className={`h-3 w-3 ${meta.color}`} />}
+          </span>
+          <span className={`text-xs font-semibold ${meta.color}`}>{label}</span>
+        </button>
+        {action}
+      </div>
       {checked && <div className="px-4 pb-4 space-y-3">{children}</div>}
     </div>
+  );
+}
+
+// Small per-block「AI 生成此項」button shown in a section header.
+function SectionAIButton({ loading, disabled, onClick }: { loading: boolean; disabled?: boolean; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} disabled={loading || disabled}
+      title="只用 AI 重新生成此項（不影響其他積木）"
+      className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-lg border border-violet-200 text-violet-600 bg-white hover:bg-violet-50 transition-colors disabled:opacity-50 shrink-0">
+      {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+      AI 生成此項
+    </button>
   );
 }
 

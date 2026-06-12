@@ -97,6 +97,51 @@
 | `cdef47b` | feat: 圖片分析改用 OpenRouter |
 | `f346da5` | feat: 素材庫快速加入素材功能（初版） |
 
+## 第三輪（2026-06-11 → 06-13）：合成引擎大改 + 多產品 + 文字保留 + UI 全面打磨
+
+> 由 commit `f8a10ec` 之後嘅工作（全部喺 working tree，未 commit）。按時序記錄；回推項目附原因。
+
+### 時序
+
+1. **清空 DB 重建測試** — 刪晒 Client/Activity/StyleComponent/LibraryImage + `public/uploads/`，先完整備份去 `.backup/<ts>/`（dev.db + uploads）。
+2. **合成 bug：生成背景無被用** — 查明係 **Bria `ref_image_url` 嘅語意**：佢只攞背景做「風格參考去生成新場景」，唔會原樣用。→ 唔係 wiring 問題。
+3. **背景積木重新定位 + ImageDetailModal 修復**
+   - 背景積木改名「生成背景參考」、移到語氣之下、修描述預覽文字。
+   - 修 `ImageDetailModal`：移除 `bgComp` 短路 bug（之前有背景就只顯示背景、隱藏構圖/配色/語氣）→ 改為永遠顯示構圖/配色/語氣。
+4. **分析模型比較 → 換 nano** — 用 `gpt-5.4-nano` 重跑 5 張參考圖 vs 現用 `gpt-4o-mini`：nano **構圖讀得準（唔再套版）、抓到品牌主導色、識分促銷語氣**。→ `OPENROUTER_VISION_MODEL` 改 `openai/gpt-5.4-nano` + **收緊 analyze prompt**（據實判讀、禁套版、硬性字數上限）。
+5. **ImageDetailModal 加功能** — 構圖/配色/語氣**個別刪除** icon（兩段式確認）；**圖片下載**掣。
+6. **多項 popup/composer 修正**
+   - QuickAddModal「專案」分類改唔到 → 修 `POST /api/components` upsert：match 改 **`previewUrl+type`（去掉 clientId）** + update 時寫 clientId（容許搬專案，唔再 fork 重複）。
+   - 上傳圖 popup 加 header 刪除（刪該圖所有組件）；背景 popup 加 header 下載+刪除、收起底部 trash。
+   - **按積木生成**：QuickAddModal 每個積木加「AI 生成此項」（只重生成嗰一項）。
+7. **生成圖積木更新 bug** — 生成圖嘅構圖/配色/語氣存喺 `LibraryImage.paramsJson.slots`（快照），但「調整」寫去 StyleComponent rows，兩邊唔通。→ 新增 **`PATCH /api/library/images/[id]`** 直接改寫 paramsJson.slots；編輯後 **bump createdAt** 令該圖排到最新。可改埋 clientId、subject。
+8. **9 項 UI 打磨**（一次過）— 產品提示說明、移除語氣積木、背景積木改名「背景」、結果框唔顯示文案、圖片紀錄**全圖+尺寸標籤**、放大編輯素材參考圖、modal **放回背景積木 + 加回 AI Prompt**、**可改照片標題**。
+9. **AI Prompt 改中文** — 合成存 `sceneCn`（用戶原本繁中 brief），唔再存英文翻譯；ComponentRow 唔再顯示細說明；背景生成加正方/長方尺寸。
+10. **合成引擎 saga（核心）**
+    - GPT-5.4 image 2 做主力 → 實測 timeout：① 產品 PNG payload 太大 → 改降 1024 **JPEG**；② **兩張輸入圖會 hang** → GPT 改只送 1 圖 + 文字場景；③ provider 本身 **intermittent**。
+    - 加 **fal nano-banana edit** 做可靠 workhorse（~8s、收多圖、用真背景）→ **對調做主力**。
+    - **尺寸選項**（1200²/1800×1200）+ `aspect_ratio` + supersample（2x render 再縮）。
+    - **多產品（最多 3）**：nano-banana 收多圖；Bria/GPT 單圖（多產品 UI 禁用）。
+    - **3 引擎選擇器**（自然合成 nano / 保留文字 Bria / GPT image）+ 引擎徽章。
+    - **3 件產品時背景 → 文字參考**（唔當第 4 圖輸入）。
+
+### 回推（rollback）項目 + 原因
+
+| 項目 | 曾加入 | 回推原因 |
+|---|---|---|
+| **Bria `shot_size: 2400`（超採樣）** | 想細字更清 | Bria 原生 ~1MP，叫佢出 2400 只係**內部放大自己 → 更糊**。超採樣只對真高清 render（FLUX/疊圖）有效。→ Bria 移除 shot_size。 |
+| **文字疊圖（真字 overlay）** | 海報文案永遠清晰 | 用戶覺得效果唔好（且只適合平面文案）→ UI 移除（後端 `applyTextOverlay` 留 dormant）。 |
+| **源圖高清化（clarity-upscaler）** | 救低清產品相 | 低清字 AI 放大唔係「仍糊」就係「清但亂估字」→ UI 移除（dormant）。 |
+| **去背+疊圖（保留文字 v1）** | 文字 100% 保留 | 去背毛邊、只能置中、死版 → 改用 **Bria product-shot**（automatic 擺位、保留原相）。 |
+| **GPT 模型 `gpt-5-image-mini`** | 快、平、初測靚 | 重測**質素唔好** + 一樣 intermittent → 回推 `gpt-5.4-image-2` + timeout 25s→**60s**。 |
+| **分析模型（舊記 gpt-4o-mini）** | — | 本輪改 `gpt-5.4-nano`（比較後較準）；已更新 DECISIONS。 |
+
+### Summary
+
+合成流程由「Bria/sharp」進化成 **3 引擎可選 + 自動 fallback**（nano-banana 主力 / Bria 保留文字 / GPT 測試 → sharp 備援），支援 **1–3 產品 + 兩種尺寸**，並認清 **AI 重畫文字嘅本質限制**（中文標籤靠 Bria 保留原相解）。期間試錯多個方向（超採樣/疊字/升頻/GPT mini）並據實回推，留低最穩定有效嘅組合。
+
+---
+
 ## API endpoints（累計）
 | Method | Path | 功能 |
 |--------|------|------|
@@ -109,14 +154,19 @@
 | GET | `/api/library/gallery` | 品牌圖庫 union（上傳 + 生成） |
 | POST | `/api/library/generate` | 生成圖（繁中brief→翻英→fal/HF）+ 文案；composite=Bria合成→sharp備援；draftOnly=只存檔 |
 | POST | `/api/library/save-image` | 把 draft 圖寫入 LibraryImage（背景生成保留時用） |
+| PATCH | `/api/library/images/[id]` | 更新生成圖：`slots`（改寫 paramsJson）/ `clientId`（搬專案）/ `subject`（改標題）；會 bump createdAt 排到最新 |
 | DELETE | `/api/library/images/[id]` | 刪除生成圖（LibraryImage） |
 | POST | `/api/library/describe` | vision 描述（kind=subject/background → 繁中 + 英文） |
 | POST | `/api/upload` | 上傳圖片到 public/uploads/ |
 
+> `POST /api/library/generate` 進階參數（第三輪）：`engine`（nano/bria/gpt）、`size`（square/landscape）、`productImageUrls[]`（1–3 件）、`preserveText`(舊)/`upscaleSource`/`overlay`（已 dormant）。合成排序見 [AI-ENGINES.md](./AI-ENGINES.md)。
+
 ## 關鍵檔案
 - `src/app/library/page.tsx` — 素材庫頁（2 tabs，統一管理 popup/toast/編輯/重生成）
 - `src/components/library/` — PromptComposer / ComponentGrid / AssetGrid / QuickAddModal / GenerateAssetModal(背景生成) / ImageDetailModal / SlotPickerModal / ColorCards
-- `src/lib/generate.ts` — 生成抽象層（compileChineseBrief / translateBriefToEnglishPrompt / generateImage 鏈 / falProductShot / generateCopy）
-- `src/types/library.ts` — 型別 + CATEGORY_META + PALETTE_ROLES + getColors()
+- `src/lib/generate.ts` — 生成抽象層（compileChineseBrief / translateBriefToEnglishPrompt / generateImage 鏈 / **falImageEdit(nano-banana) / falProductShot(Bria) / gptImageComposite / falRemoveBg / falUpscale** / generateCopy）。**頂部有模型常數一覽 + 改排序指引**。
+- `src/app/api/library/generate/route.ts` — 合成主流程；搜 `手動改` 睇引擎排序註解
+- `src/types/library.ts` — 型別 + CATEGORY_META + PALETTE_ROLES + getColors() + **engineLabel()**（引擎徽章）
 - `src/types/presets.ts` — 行業範本
+- 文檔：[index.md](./index.md)（總目錄）、[AI-ENGINES.md](./AI-ENGINES.md)、[GUIDE-新手使用.md](./GUIDE-新手使用.md)
 - 測試素材：`.claude/TESTING_MATERIALS_BY_INDUSTRY.md`、`.claude/TEST_MATERIALS.md`（圖片在 `public/uploads/`，gitignore，需從備份帶過去）

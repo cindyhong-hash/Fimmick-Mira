@@ -7,12 +7,15 @@
 import { useEffect, useState } from "react";
 import { Sparkles } from "lucide-react";
 import type { GalleryItem, ImageDetail, StyleComponent } from "@/types/library";
+import { engineLabel } from "@/types/library";
 
 type Props = { clientId: string | null; reloadKey?: number; onOpenImage?: (detail: ImageDetail) => void };
 
 export function AssetGrid({ clientId, reloadKey = 0, onOpenImage }: Props) {
   const [items, setItems] = useState<Extract<GalleryItem, { kind: "generated" }>[]>([]);
   const [loading, setLoading] = useState(true);
+  // Natural pixel size per image (read on load), shown as a badge on each tile.
+  const [dims, setDims] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setLoading(true);
@@ -58,17 +61,30 @@ export function AssetGrid({ clientId, reloadKey = 0, onOpenImage }: Props) {
               libraryImageId: item.libraryImageId,
             })}
             className="group border rounded-xl overflow-hidden hover:shadow-lg transition-all duration-200 bg-white text-left">
-            <div className="relative">
+            <div className="relative bg-gray-50">
+              {/* Show the FULL image (no crop) via object-contain, letterboxed in a square box. */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={item.imageUrl} alt={item.subject ?? "generated"} className="w-full aspect-square object-cover" />
+              <img src={item.imageUrl} alt={item.subject ?? "generated"} loading="lazy" decoding="async"
+                onLoad={(e) => { const t = e.currentTarget; setDims((d) => d[item.imageUrl] ? d : { ...d, [item.imageUrl]: `${t.naturalWidth}×${t.naturalHeight}` }); }}
+                className="w-full aspect-square object-contain" />
               <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors duration-200" />
-              <span className="absolute top-2 left-2 flex items-center gap-1 text-[10px] font-semibold bg-violet-600 text-white px-1.5 py-0.5 rounded-full shadow">
-                <Sparkles className="h-2.5 w-2.5" />AI生成
-              </span>
+              <div className="absolute top-2 left-2 flex items-center gap-1">
+                <span className="flex items-center gap-1 text-[10px] font-semibold bg-violet-600 text-white px-1.5 py-0.5 rounded-full shadow whitespace-nowrap">
+                  <Sparkles className="h-2.5 w-2.5" />AI生成
+                </span>
+                {engineLabel(item.paramsJson) && (
+                  <span className="text-[10px] font-medium bg-black/55 text-white px-1.5 py-0.5 rounded-full shadow whitespace-nowrap">{engineLabel(item.paramsJson)}</span>
+                )}
+              </div>
+              {dims[item.imageUrl] && (
+                <span className="absolute bottom-2 right-2 text-[10px] font-medium bg-black/55 text-white px-1.5 py-0.5 rounded shadow">
+                  {dims[item.imageUrl]}
+                </span>
+              )}
             </div>
             <div className="p-2.5 space-y-1">
               {item.subject && <div className="text-xs font-semibold truncate text-gray-800">{item.subject}</div>}
-              {item.copyText && <div className="text-[11px] text-gray-500 line-clamp-2 whitespace-pre-wrap">{item.copyText}</div>}
+              {/* 文案（主標/副標）intentionally hidden — copy is no longer surfaced in the gallery. */}
             </div>
           </button>
         );

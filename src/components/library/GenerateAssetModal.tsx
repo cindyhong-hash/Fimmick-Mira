@@ -25,6 +25,7 @@ type Props = {
 export function GenerateAssetModal({ clientId, onClose, onSaved }: Props) {
   const [description, setDescription] = useState("");
   const [count, setCount] = useState(3);
+  const [size, setSize] = useState<"square" | "landscape">("square");
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<GeneratedItem[]>([]);
@@ -51,6 +52,7 @@ export function GenerateAssetModal({ clientId, onClose, onSaved }: Props) {
               clientId,
               subject: description.trim(),
               customPrompt: prompt,
+              size,
               draftOnly: true,
             }),
           }).then((r) => r.json())
@@ -147,6 +149,21 @@ export function GenerateAssetModal({ clientId, onClose, onSaved }: Props) {
             </div>
           </div>
 
+          {/* Size */}
+          <div className="flex items-center gap-3">
+            <label className="text-xs font-semibold text-gray-600 whitespace-nowrap">背景尺寸</label>
+            <div className="flex gap-1.5">
+              <button onClick={() => setSize("square")}
+                className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors ${size === "square" ? "bg-violet-600 text-white border-violet-600" : "bg-white border-gray-200 text-gray-600 hover:border-violet-300"}`}>
+                <span className="inline-block w-3 h-3 border border-current rounded-[2px]" />正方形 1200×1200
+              </button>
+              <button onClick={() => setSize("landscape")}
+                className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors ${size === "landscape" ? "bg-violet-600 text-white border-violet-600" : "bg-white border-gray-200 text-gray-600 hover:border-violet-300"}`}>
+                <span className="inline-block w-4 h-3 border border-current rounded-[2px]" />橫向 1800×1200
+              </button>
+            </div>
+          </div>
+
           <button
             onClick={handleGenerate}
             disabled={!description.trim() || generating}
@@ -172,7 +189,7 @@ export function GenerateAssetModal({ clientId, onClose, onSaved }: Props) {
                     className={`relative rounded-xl border-2 overflow-hidden cursor-pointer transition-all ${item.selected ? "border-violet-500 shadow-md" : "border-gray-200 opacity-50"}`}
                     onClick={() => toggle(item.imageUrl)}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={item.imageUrl} alt="generated" className="w-full aspect-square object-cover" />
+                    <img src={item.imageUrl} alt="generated" className="w-full aspect-square object-contain bg-gray-50" />
                     <div className={`absolute inset-0 transition-colors ${item.selected ? "bg-transparent" : "bg-gray-100/30"}`} />
                     {item.selected && (
                       <span className="absolute top-2 right-2 w-5 h-5 rounded-full bg-violet-600 flex items-center justify-center shadow">

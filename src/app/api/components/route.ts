@@ -35,15 +35,18 @@ export async function POST(request: Request) {
 
   // Upsert: if a component of this type already exists for the same image
   // (previewUrl), update it in place + bump to top instead of creating a duplicate.
+  // Match on previewUrl+type only (NOT clientId) so that changing 專案 in the editor
+  // MOVES the existing component to the new client instead of forking a duplicate.
   if (previewUrl) {
     const existing = await db.styleComponent.findFirst({
-      where: { previewUrl, type, clientId: clientId ?? null },
+      where: { previewUrl, type },
     });
     if (existing) {
       const updated = await db.styleComponent.update({
         where: { id: existing.id },
         data: {
           name,
+          clientId: clientId ?? null, // allow re-homing to a different 專案 (or 全部/null)
           data: JSON.stringify(data ?? {}),
           aiPromptText: aiPromptText ?? "",
           createdAt: new Date(), // bump to top

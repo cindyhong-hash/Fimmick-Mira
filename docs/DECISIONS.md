@@ -59,3 +59,51 @@
 - 帶入素材 → 唔跳分頁，出自動消失 toast。
 - slot / 圖片 / 卡片 統一用一個 `ImageDetailModal`（提升到 page 管理）。
 - 編輯素材重用「加入素材」彈窗（編輯模式 + PATCH），介面一致。
+
+---
+
+# 第三輪決定（2026-06-11 → 06-13）
+
+> 完整時序見 [FEATURE_LOG.md](./FEATURE_LOG.md)「第三輪」；引擎細節見 [AI-ENGINES.md](./AI-ENGINES.md)。
+
+## 產品合成引擎：3 揀 1 + 自動 fallback（取代「Bria 主力 / sharp 備援」）
+- **討論過程**：
+  1. 發現 Bria `ref_image_url` 只做風格參考、唔原樣用背景 → 想搵能「用真背景 + 自然」嘅方案。
+  2. 試 **GPT-5.4 image 2**：payload（PNG/兩圖）整到 timeout，修完仍發現 provider **本身 intermittent**（時秒回、時 hang 幾分鐘）。
+  3. 試 **fal nano-banana**（Gemini）：穩、快、收多圖、可用真背景 → **升做主力**。
+- **最終決定**：UI 可揀 `nano`（預設，自然、多產品）/ `bria`（保留文字、單圖）/ `gpt`（測試）；route 按揀嘅 engine **先試主力再 fallback**，最後 sharp。
+- 排序喺 `route.ts` 嘅 `order`（有註解教改）。
+
+## 文字保留：Bria product-shot（單圖），唔靠去背疊圖
+- **討論**：產品中文標籤被重畫模型整爛。試過「去背+疊原相」→ 有毛邊、只能置中、死版。
+- **最終**：用 **Bria product-shot**（保留產品原像素、automatic 自然擺位、乾淨 matte）；多產品（Bria 單圖）時用 nano-banana。
+- **認清限制**：force「繁中/UTF-8 output」對圖片文字**無用**（圖係像素冇編碼）；斜面/弧面標籤冇可靠重造法 → 靠保留原相。
+
+## OpenRouter 圖像模型：gpt-5.4-image-2（非 mini）
+- 試過 `gpt-5-image-mini`（最平、初測秒回）→ **質素唔好** + 重測一樣 intermittent → **回推 `gpt-5.4-image-2`**，GPT timeout 設 **60s**。
+- 結論：OpenRouter 上 OpenAI 影像模型全部不穩，只做「測試/撞順風」，唔做穩定主力（要穩 → 直連 OpenAI 官方 API）。
+
+## 分析模型：改返 gpt-5.4-nano（覆蓋舊「gpt-4o-mini」決定）
+- 比較 5 張參考圖：`gpt-5.4-nano` 構圖讀得準（唔套版）、抓到品牌主導色、識分促銷語氣，勝 `gpt-4o-mini`。
+- 同時**收緊 analyze prompt**：據實判讀（禁一律「產品居中」、主色要取實際主導色）+ 硬性字數上限。
+- `OPENROUTER_VISION_MODEL = openai/gpt-5.4-nano`（text 文案仍 gpt-4o-mini）。
+
+## 生成圖「調整」寫返 paramsJson（唔寫 StyleComponent）
+- 生成圖嘅構圖/配色/語氣係 `paramsJson.slots` 快照；編輯改寫 paramsJson（新增 `PATCH /api/library/images/[id]`），唔再產生孤兒 StyleComponent 或誤刪來源素材。編輯後 bump createdAt 排最新。
+
+## 組件 upsert：match previewUrl+type（去掉 clientId）
+- 之前 match 連 clientId → 改專案時會 fork 重複。改成 match `previewUrl+type`、update 寫 clientId → **搬專案而唔 fork**。
+
+## 圖片文字清晰：認限制 + 分工（唔做以下）
+- ❌ 文字疊真字 overlay（用戶覺得效果唔好、只適合平面文案）→ 移除（後端 dormant）。
+- ❌ 源圖高清化 upscale（低清救唔返、會亂估字）→ 移除（dormant）。
+- ❌ 超採樣 shot_size 落 Bria（Bria 固定 1MP，反而更糊）→ 移除。
+- ✅ 留低：Bria 保留原相（文字安全）、nano-banana（自然）。
+
+## 超採樣只用於真高清 render
+- 2x render 再 lanczos 縮 → FLUX 全 AI 生成、sharp 疊圖**有效**；Bria（固定解析度）**無效甚至更糊**，故 Bria 唔用。
+
+## UI 收斂（本輪）
+- 移除語氣積木（composer）；背景積木叫返「背景」；生成結果框 + 圖片紀錄卡 + ImageDetailModal **唔顯示文案**（AI Prompt 保留、可改標題）。
+- 圖庫/生成圖/背景 gallery 一致：**全圖 object-contain + 尺寸標籤 + AI生成/引擎徽章**。
+- 多產品（≥3）時背景 → 文字參考（唔當圖片輸入，免過載 nano-banana）。

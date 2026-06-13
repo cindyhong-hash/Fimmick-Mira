@@ -76,7 +76,89 @@ const order = engine === "bria" ? [tryBria, tryNano, tryGpt]
 
 ---
 
-## 4. ⚠️ AI 技術限制（好重要）
+## 4. 素材生成引擎（GenerateAssetModal）
+
+素材生成功能（背景 / 人像 / 插畫）各有預設引擎；加埋「參考風格圖」後可解鎖 **Nano Banana 風格遷移**模式。
+
+### 4a. 預設引擎（純文字生圖，無需參考圖）
+
+| 素材類型 | 預設引擎 | fal.ai endpoint | 強項 | 限制 |
+|---|---|---|---|---|
+| **背景** | **FLUX.1-schnell** | `fal-ai/flux/schnell` | 快（~4s）、場景感強 | 無法保留特定風格 |
+| **人像** | **FLUX.2 pro** | `fal-ai/flux-pro/v1.1-ultra` | 真人寫實、亞裔面孔自然 | 貴、較慢 |
+| **插畫** | **Recraft V3** | `fal-ai/recraft-v3` | 2D 插畫風格準確、SVG 支援 | 唔適合寫實 |
+
+### 4b. Nano Banana 風格遷移（需要參考風格圖）
+
+- **endpoint**：`fal-ai/nano-banana/edit`（同產品合成用同一個 model）
+- **觸發條件**：用戶上傳 / 填入「參考風格圖」URL + 選擇「Nano Banana」引擎。
+- **設計意圖**：利用 nano-banana 的 image-to-image 能力，把參考圖的**視覺風格**（色調、光影質感、氣氛）遷移到新生成畫面。
+
+#### 風格遷移 vs 內容複製 — 關鍵決定
+
+```
+❌ 錯誤用法：叫 nano-banana 複製構圖 / 佈局 / 主體
+✅ 正確用法：只借風格（color palette, lighting, texture, mood），另建全新畫面
+```
+
+為強制「風格遷移、非內容複製」，prompt 寫法：
+
+```
+Create a completely new original image. Use the reference image (first image)
+ONLY as a style guide — adopt its color palette, lighting quality, texture and overall
+mood/atmosphere. Do NOT copy the reference image's composition, layout, or subject matter.
+New scene: <sceneDescription>. The result must be aesthetically similar but entirely
+different in content.
+```
+
+#### 參考圖分析（vision model → styleDesc）
+
+`describeReferenceStyle(imageUrl, host)` 呼叫 vision model（`OPENROUTER_VISION_MODEL`），只分析：
+- ① 主色調與配色方案
+- ② 光線氛圍與打光方式  
+- ③ 整體質感與材質感
+- ④ 情緒氣氛
+
+**刻意排除**：構圖、佈局、畫面內容（避免影響用戶描述的構圖自主性）。
+
+分析結果用於：
+1. **✨潤色**：注入 `polishBriefToChinese` 的 `styleHint` 讓擴寫描述融入參考風格。
+2. **全 AI 生成**（非 Nano 路徑）：prepend `【參考圖風格】` 到 brief 再翻英餵 FLUX。
+
+#### 程式碼對應
+
+| 函數 / 端點 | 位置 | 說明 |
+|---|---|---|
+| `describeReferenceStyle` | `lib/generate.ts` | Vision model 讀圖，回傳繁中風格描述（max 80字，僅色調/光影/質感/情緒，不含構圖） |
+| `falSceneFromRef` | `lib/generate.ts` | Nano Banana 風格遷移生成，ref 圖先 resize → JPEG data URI |
+| `polishBriefToChinese` | `lib/generate.ts` | 接受 `styleDesc?` 注入風格參考至 polish prompt；輸出 100 字內 |
+| `POST /api/library/polish` | `app/api/library/polish/route.ts` | 接 `refImageUrl?`，先分析再潤色 |
+| `POST /api/library/generate` | `app/api/library/generate/route.ts` | `useNano = engine==="nano" && !!refImageUrl`；路由到 `falSceneFromRef` 或標準 FLUX |
+| `POST /api/library/describe` | `app/api/library/describe/route.ts` | 多模式讀圖：`kind=brief`（20–30字生成初稿）/ `kind=background`（20字場景）/ 預設（20字主體）；接 `genType` 調整提示 |
+
+### 4c. AI 讀圖填描述初稿（describe?kind=brief）
+
+用戶貼上或上傳參考風格圖後，vision model 自動分析並填入 20–30 字的描述初稿，供用戶修改或直接潤色。
+
+**觸發方式（三種）：**
+
+| 觸發 | 行為 | 是否覆蓋現有描述 |
+|---|---|---|
+| URL 欄 `onBlur`（貼完網址離開） | 自動靜默呼叫 | 描述為空時才填，有描述不覆蓋 |
+| 上傳圖片成功後 | 自動靜默呼叫 | 同上 |
+| 點「重新讀圖」按鈕（`RefreshCw` icon，藍色）| 手動強制觸發 | 一律覆蓋（force=true） |
+
+**一鍵「讀圖 → 潤色」：**
+- 有參考圖 + 描述為空時，直接按「潤色」：自動先讀圖填初稿，再對初稿進行潤色，一步完成。
+- 有參考圖 + 描述已有內容：直接潤色（帶入 styleDesc 風格參考）。
+
+**Loading 狀態分離：**
+- `refDescribing`（讀圖中）與 `polishing`（潤色中）獨立 state。
+- 讀圖進行中，label 旁顯示獨立 spinner「讀圖中…」；按鈕本身文字不變，讓用戶仍可看到「重新讀圖」按鈕在哪。
+
+---
+
+## 6. ⚠️ AI 技術限制（好重要）
 
 1. **圖片入面嘅文字係「畫」出嚟嘅像素，唔係文字資料** → 重畫型模型（nano-banana / GPT）對**中文**特別差，會扭曲/亂筆。Force「繁中/UTF-8 output」**無用**（圖冇編碼可言）。
 2. **保留文字嘅唯一可靠方法 = 保留產品原像素**（Bria）或**疊真字體**（只適合平面海報文案，唔適合貼上斜面/弧面產品標籤）。
@@ -87,7 +169,7 @@ const order = engine === "bria" ? [tryBria, tryNano, tryGpt]
 
 ---
 
-## 5. 實務建議
+## 7. 實務建議
 
 - **日常主力**：nano-banana（自然、可多產品）。
 - **產品標籤/中文要清楚**：揀 **Bria 保留文字**（單圖）。
@@ -96,7 +178,7 @@ const order = engine === "bria" ? [tryBria, tryNano, tryGpt]
 
 ---
 
-## 6. 點解唔轉用其他生圖模型（DALL-E / Midjourney / FLUX / SD 3.5）
+## 8. 點解唔轉用其他生圖模型（DALL-E / Midjourney / FLUX / SD 3.5）
 
 > 常見問題：「轉用 ChatGPT / Midjourney / FLUX 會唔會解決產品中文字走樣？」**唔會。**
 

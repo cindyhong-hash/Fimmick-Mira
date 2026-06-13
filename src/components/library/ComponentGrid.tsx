@@ -12,8 +12,10 @@
 import { useEffect, useState, useCallback, useImperativeHandle, forwardRef } from "react";
 import {
   ArrowRightCircle, LayoutTemplate, Palette, MessageSquare,
-  Image as ImageIcon, LayoutGrid, Plus, Trash2, Sparkles, Wand2,
+  Image as ImageIcon, LayoutGrid, Plus, Trash2, Wand2,
+  Paperclip, UserRound, Package, Sparkles,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import type { StyleComponent, ComponentCategory, PromptSlots, GalleryItem, ImageDetail } from "@/types/library";
 import { CATEGORY_META, getColors, engineLabel } from "@/types/library";
 import { ColorCards } from "./ColorCards";
@@ -59,7 +61,7 @@ function ComponentCard({
       {img ? (
         <div className="relative">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={img} alt={comp.name} loading="lazy" decoding="async" className={`w-full object-cover ${comp.type === "BACKGROUND" ? "aspect-square" : "h-32"}`} />
+          <img src={img} alt={comp.name} loading="lazy" decoding="async" className={`w-full ${comp.type === "BACKGROUND" ? "aspect-square object-contain bg-gray-100" : "h-32 object-cover"}`} />
           <div className="absolute inset-0 bg-gradient-to-b from-black/60 to-black/10" />
           <span className={`absolute top-2 left-2 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color} ${meta.border} border`}>{meta.label}</span>
           <div className="absolute top-2 left-2 right-2 mt-6">
@@ -134,24 +136,28 @@ function GalleryTile({ item, onOpen, onDelete }: {
       {dims && (
         <span className="absolute bottom-2 right-2 text-[10px] font-medium bg-black/55 text-white px-1.5 py-0.5 rounded shadow pointer-events-none">{dims}</span>
       )}
-      {item.kind === "generated" ? (
-        <div className="absolute top-2 left-2 flex items-center gap-1 pointer-events-none">
-          <span className="flex items-center gap-1 text-[10px] font-semibold bg-violet-600 text-white px-1.5 py-0.5 rounded-full shadow whitespace-nowrap">
-            <Sparkles className="h-2.5 w-2.5" />AI生成
-          </span>
-          {engineLabel(item.paramsJson) && (
-            <span className="text-[10px] font-medium bg-black/55 text-white px-1.5 py-0.5 rounded-full shadow whitespace-nowrap">{engineLabel(item.paramsJson)}</span>
-          )}
-        </div>
-      ) : item.kind === "material" ? (
-        <span className="absolute top-2 left-2 flex items-center gap-1 text-[10px] font-semibold bg-amber-500 text-white px-1.5 py-0.5 rounded-full shadow pointer-events-none">
-          背景
-        </span>
-      ) : (
-        <span className="absolute top-2 left-2 flex items-center gap-1 text-[10px] font-semibold bg-emerald-600 text-white px-1.5 py-0.5 rounded-full shadow pointer-events-none">
-          上傳
-        </span>
-      )}
+      {/* 統一標籤：類型 icon pill；AI 生成圖另加 model 標（背景亦標 AI生成，一致呈現）。 */}
+      {(() => {
+        const meta = FILTER_META[tileFilterKey(item)];
+        const Icon = meta.Icon;
+        const model = item.kind === "generated"
+          ? engineLabel(item.paramsJson)
+          : item.kind === "material"
+            ? (item.mode ? (engineLabel(JSON.stringify({ mode: item.mode })) ?? "AI生成") : "AI生成")
+            : null;
+        return (
+          <div className="absolute top-2 left-2 flex items-center gap-1 pointer-events-none">
+            <span className={`flex items-center gap-1 text-[10px] font-semibold ${meta.cls} text-white px-1.5 py-0.5 rounded-full shadow whitespace-nowrap`}>
+              <Icon className="h-2.5 w-2.5" />{meta.label}
+            </span>
+            {model && (
+              <span className="flex items-center gap-0.5 text-[10px] font-medium bg-black/55 text-white px-1.5 py-0.5 rounded-full shadow whitespace-nowrap">
+                <Sparkles className="h-2.5 w-2.5" />{model}
+              </span>
+            )}
+          </div>
+        );
+      })()}
       {/* Delete button */}
       <button
         onClick={(e) => {
@@ -171,7 +177,41 @@ function GalleryTile({ item, onOpen, onDelete }: {
 // ─── Main ────────────────────────────────────────────────────────────────────
 export type ComponentGridHandle = { refresh: () => void };
 
-type GalleryFilter = "ALL" | "material" | "uploaded" | "generated";
+type GalleryFilter = "ALL" | "uploaded" | "material" | "person" | "illustration" | "product";
+
+// 用 lucide icon（取代 emoji）+ 每類一個底色（pill 用 cls，filter 選中用 activeCls）。
+const FILTER_META: Record<GalleryFilter, { label: string; Icon: LucideIcon; cls: string; activeCls: string }> = {
+  ALL:          { label: "全部",     Icon: LayoutGrid, cls: "bg-gray-700",   activeCls: "bg-violet-600 text-white border-violet-600" },
+  uploaded:     { label: "參考圖",   Icon: Paperclip,  cls: "bg-blue-500",   activeCls: "bg-blue-500 text-white border-blue-500" },
+  material:     { label: "背景",     Icon: ImageIcon,  cls: "bg-teal-600",   activeCls: "bg-teal-600 text-white border-teal-600" },
+  person:       { label: "人像",     Icon: UserRound,  cls: "bg-rose-500",   activeCls: "bg-rose-500 text-white border-rose-500" },
+  illustration: { label: "插畫",     Icon: Palette,    cls: "bg-amber-500",  activeCls: "bg-amber-500 text-white border-amber-500" },
+  product:      { label: "產品成圖", Icon: Package,    cls: "bg-violet-600", activeCls: "bg-violet-600 text-white border-violet-600" },
+};
+
+/** Generated tiles split by genType (stored in paramsJson): person / illustration / 其餘=product。 */
+function generatedKind(item: GalleryItem): "person" | "illustration" | "product" | null {
+  if (item.kind !== "generated") return null;
+  try {
+    const g = JSON.parse(item.paramsJson ?? "{}").genType;
+    return g === "person" ? "person" : g === "illustration" ? "illustration" : "product";
+  } catch { return "product"; }
+}
+
+/** 每格對應嘅 filter 類型 key（決定類型標籤色/icon）。 */
+function tileFilterKey(item: GalleryItem): GalleryFilter {
+  if (item.kind === "uploaded") return "uploaded";
+  if (item.kind === "material") return "material";
+  return generatedKind(item) ?? "product";
+}
+
+/** Does a gallery item match the active filter pill? */
+function matchesGalleryFilter(item: GalleryItem, f: GalleryFilter): boolean {
+  if (f === "ALL") return true;
+  if (f === "uploaded") return item.kind === "uploaded";
+  if (f === "material") return item.kind === "material";
+  return generatedKind(item) === f; // person | illustration | product
+}
 
 type Props = {
   clientId: string | null;
@@ -241,8 +281,13 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
   const injectedIds = new Set(Object.values(injectedSlots).filter(Boolean).map((c) => c!.id));
 
   const openFromCard = (comp: StyleComponent) => {
-    if (comp.previewUrl) onOpenImage({ imageUrl: comp.previewUrl });
-    else onOpenImage({ imageUrl: null, presetComponents: [comp] });
+    if (comp.type === "BACKGROUND") {
+      onOpenImage({ imageUrl: comp.previewUrl ?? null, prompt: comp.aiPromptText || null, presetComponents: [comp], regenerateParams: JSON.stringify({ genType: "material" }) });
+    } else if (comp.previewUrl) {
+      onOpenImage({ imageUrl: comp.previewUrl });
+    } else {
+      onOpenImage({ imageUrl: null, presetComponents: [comp] });
+    }
   };
   const openFromGallery = (item: GalleryItem) => {
     if (item.kind === "generated") {
@@ -252,6 +297,8 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
         slotComps = Object.values(p.slots ?? {}).filter(Boolean) as StyleComponent[];
       } catch { /* ignore */ }
       onOpenImage({ imageUrl: item.imageUrl, presetComponents: slotComps, copyText: item.copyText, subject: item.subject, regenerateParams: item.paramsJson, prompt: item.prompt, libraryImageId: item.libraryImageId });
+    } else if (item.kind === "material") {
+      onOpenImage({ imageUrl: item.imageUrl, prompt: item.aiPromptText || null, regenerateParams: JSON.stringify({ genType: "material" }) });
     } else {
       onOpenImage({ imageUrl: item.imageUrl });
     }
@@ -294,13 +341,13 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
           {onOpenGenerateAsset && (activeTab === "GALLERY" || activeTab === "ALL" || activeTab === "BACKGROUND") && (
             <button onClick={onOpenGenerateAsset}
               className="flex items-center gap-1.5 text-xs font-medium bg-violet-600 text-white px-3 py-2 rounded-lg hover:bg-violet-700 transition-colors">
-              <Wand2 className="h-3.5 w-3.5" />背景生成
+              <Wand2 className="h-3.5 w-3.5" />素材生成
             </button>
           )}
           {onOpenQuickAdd && (
             <button onClick={onOpenQuickAdd}
               className="flex items-center gap-1.5 text-xs font-medium bg-gray-900 text-white px-3 py-2 rounded-lg hover:bg-gray-700 transition-colors">
-              <Plus className="h-3.5 w-3.5" />加入素材
+              <Plus className="h-3.5 w-3.5" />上傳參考圖
             </button>
           )}
         </div>
@@ -313,13 +360,15 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
         <>
           {/* Gallery filter pills */}
           <div className="flex gap-1.5 flex-wrap">
-            {(["ALL", "material", "uploaded", "generated"] as GalleryFilter[]).map((f) => {
-              const label = f === "ALL" ? "全部" : f === "material" ? "🟠 背景" : f === "uploaded" ? "🟢 上傳" : "🟣 AI生成";
-              const cnt = f === "ALL" ? gallery.length : gallery.filter((g) => g.kind === f).length;
+            {(["ALL", "uploaded", "material", "person", "illustration", "product"] as GalleryFilter[]).map((f) => {
+              const meta = FILTER_META[f];
+              const Icon = meta.Icon;
+              const cnt = gallery.filter((g) => matchesGalleryFilter(g, f)).length;
+              const active = galleryFilter === f;
               return (
                 <button key={f} onClick={() => setGalleryFilter(f)}
-                  className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${galleryFilter === f ? "bg-gray-900 text-white border-gray-900" : "bg-white text-gray-500 border-gray-200 hover:border-gray-400"}`}>
-                  {label} <span className="opacity-60">{cnt}</span>
+                  className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border transition-colors ${active ? meta.activeCls : "bg-white text-gray-500 border-gray-200 hover:border-gray-400"}`}>
+                  <Icon className="h-3 w-3" />{meta.label} <span className="opacity-60">{cnt}</span>
                 </button>
               );
             })}
@@ -330,7 +379,7 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
               {gallery
-                .filter((item) => galleryFilter === "ALL" || item.kind === galleryFilter)
+                .filter((item) => matchesGalleryFilter(item, galleryFilter))
                 .map((item) => (
                   <GalleryTile key={`${item.kind}-${item.imageUrl}`} item={item}
                     onOpen={openFromGallery} onDelete={handleDeleteGalleryItem} />
@@ -373,7 +422,7 @@ function EmptyState({ onOpenQuickAdd, text, hint }: {
 }) {
   return (
     <div className="text-center py-20 text-gray-400">
-      <div className="text-4xl mb-3">📦</div>
+      <Package className="h-10 w-10 mb-3 text-gray-300 mx-auto" />
       <div className="text-sm">{text}</div>
       <div className="text-xs mt-1 mb-5">{hint}</div>
       {onOpenQuickAdd && (

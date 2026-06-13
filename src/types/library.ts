@@ -133,6 +133,10 @@ export type GalleryItem =
       componentIds: string[];
       name: string;
       createdAt: string;
+      /** AI-generated background only: the description used to generate it. */
+      aiPromptText?: string;
+      /** AI-generated background only: the engine mode (e.g. "flux-scene"). */
+      mode?: string;
     }
   | {
       kind: "generated";
@@ -172,6 +176,10 @@ export function engineLabel(paramsJson?: string | null): string | null {
       "paste-text": "疊圖",
       "sharp": "疊圖",
       "flux": "FLUX",
+      "flux-scene": "FLUX.1",
+      "flux2-person": "FLUX.2 pro",
+      "recraft-illustration": "Recraft V3",
+      "nano-banana": "Nano Banana",
     };
     return map[mode] ?? mode;
   } catch {

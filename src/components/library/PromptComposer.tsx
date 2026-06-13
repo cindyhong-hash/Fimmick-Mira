@@ -8,7 +8,7 @@
 import { useState, useEffect } from "react";
 import {
   X, Copy, Check, Sparkles, LayoutTemplate, Palette,
-  Image as ImageIcon, Target, StickyNote, Loader2, Upload, Plus, Trash2, Type, Lock,
+  Image as ImageIcon, Target, StickyNote, Loader2, Upload, Plus, Trash2, Type, Lock, Wand2, RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { PromptSlots, StyleComponent, ComponentCategory, PaletteColor, PaletteRole } from "@/types/library";
@@ -184,6 +184,9 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
   const [genError, setGenError] = useState<string | null>(null);
   const [result, setResult] = useState<{ imageUrl: string; copyText: string } | null>(null);
   const [pickerCategory, setPickerCategory] = useState<ComponentCategory | null>(null);
+  // #2 潤色寫手：擴寫後嘅繁中 brief 覆寫（opt-in，可編輯；null = 用自動產生嘅）。
+  const [polishedBrief, setPolishedBrief] = useState<string | null>(null);
+  const [polishing, setPolishing] = useState(false);
   // Editable compiled prompt override
   const [activePreset, setActivePreset] = useState<string | null>(null);
 
@@ -237,6 +240,8 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
   const autoPrompt = buildChineseBrief({ subject, layoutDesc: effLayoutDesc, toneLabels: effToneLabels, usedColors, notes });
   // Read-only preview: the brief is fully derived from the fields above (no manual edit here).
   const compiledPrompt = autoPrompt;
+  // 潤色後用擴寫版（可編輯）做最終 brief；否則用自動產生嘅。呢個 brief 會存入結果嘅 AI Prompt。
+  const effectiveBrief = polishedBrief ?? compiledPrompt;
   const hasAnyContent = compiledPrompt.length > 0;
   const canGenerate = inputMode === "image" ? productUrls.length > 0 : hasAnyContent;
 
@@ -260,11 +265,48 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
   }
 
   const copyPrompt = async () => {
-    if (!compiledPrompt) return;
-    await navigator.clipboard.writeText(compiledPrompt);
+    if (!effectiveBrief) return;
+    await navigator.clipboard.writeText(effectiveBrief);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  // 合成模式：場景描述（不含主體，避免合成時重畫產品）；含已選背景名（潤色會讀背景）。
+  function buildSceneBrief(): string {
+    const lines: string[] = [];
+    if (effLayoutDesc.trim()) lines.push(`構圖：${effLayoutDesc.trim()}`);
+    if (slots.background?.name) lines.push(`背景：${slots.background.name}`);
+    if (usedColors.length) lines.push(`配色：${usedColors.map((c) => `${c.label} ${c.hex}`).join("、")}`);
+    if (effToneLabels.length) lines.push(`風格語氣：${effToneLabels.join("、")}`);
+    if (notes.trim()) lines.push(`其他要求：${notes.trim()}`);
+    return lines.join("\n");
+  }
+  // 潤色來源：合成→場景 brief；文字→完整 brief（補上背景名，令潤色會讀背景文字）。
+  function buildPolishSource(): string {
+    if (composite) return buildSceneBrief();
+    return slots.background?.name ? `${effectiveBrief}\n背景：${slots.background.name}` : effectiveBrief;
+  }
+
+  // #2 潤色寫手：擴寫目前 brief → 可編輯覆寫。
+  async function polishBrief() {
+    const source = buildPolishSource();
+    if (!source.trim()) return;
+    setPolishing(true);
+    setGenError(null);
+    try {
+      const res = await fetch("/api/library/polish", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ brief: source }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "潤色失敗");
+      setPolishedBrief(data.brief ?? source);
+    } catch (e: unknown) {
+      setGenError(e instanceof Error ? e.message : "潤色失敗");
+    } finally {
+      setPolishing(false);
+    }
+  }
 
 
   async function uploadProduct(file: File) {
@@ -343,8 +385,10 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
           productImageUrls: composite ? productUrls : undefined,
           productImageUrl: composite ? productUrls[0] : undefined,
           composite: composite && productUrls.length > 0,
-          // Always send the (Chinese) brief — server translates it to an English FLUX prompt.
-          customPrompt: composite ? undefined : compiledPrompt,
+          // 文字模式：送繁中 brief（潤色後 or 自動）→ server 翻英生圖，並存入結果 AI Prompt。
+          customPrompt: composite ? undefined : effectiveBrief,
+          // 合成模式：若用咗潤色，把擴寫後嘅「場景描述」作為合成場景覆寫（唔含主體，避免重畫產品）。
+          sceneOverride: composite ? (polishedBrief ?? undefined) : undefined,
         }),
       });
       const data = await res.json();
@@ -418,29 +462,46 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
             className={`w-full rounded-lg border px-3 py-2 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-400 transition ${
               inputMode === "text" ? "border-gray-200" : "border-gray-100 bg-gray-100 text-gray-400 cursor-not-allowed"}`} />
 
-          {/* Product image area (1–3 photos) — disabled (greyed) when in text mode */}
-          <div className={inputMode === "image" ? "" : "opacity-40 pointer-events-none select-none"}>
+          {/* 文字模式提示：人像 / 插畫 已移至「素材生成」 */}
+          {inputMode === "text" && (
+            <p className="text-[10px] text-gray-400 leading-snug pt-0.5">
+              產品文字 + 積木 → 生成場景圖（FLUX）。需要「真人 / 2D 插畫 / 純背景」請用右上「素材生成」。
+            </p>
+          )}
+
+          {/* Product image area (1–3 photos) — full-width card (like a slot block); greyed in text mode */}
+          <div className={`rounded-xl border p-3 transition-all ${
+            inputMode === "image" ? "border-violet-200 bg-violet-50/30" : "border-dashed border-gray-200 bg-gray-50 opacity-40 pointer-events-none select-none"}`}>
             <input id="composer-product" type="file" accept="image/*" className="hidden"
               onChange={(e) => { if (e.target.files?.[0]) uploadProduct(e.target.files[0]); e.currentTarget.value = ""; }} />
-            <div className="flex flex-wrap gap-2">
-              {productUrls.map((url) => (
-                <div key={url} className="relative w-24 h-24 rounded-md border bg-[repeating-conic-gradient(#f3f4f6_0_25%,#fff_0_50%)] bg-[length:12px_12px]">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={url} alt="product" className="w-full h-full object-contain rounded-md" />
-                  <button onClick={() => removeProduct(url)} title="移除"
-                    className="absolute -top-1.5 -right-1.5 p-1 rounded-full bg-white text-gray-400 hover:text-red-500 border shadow-sm transition-colors">
-                    <Trash2 className="h-3 w-3" />
+            {productUrls.length === 0 ? (
+              // 空狀態：整個盒做 dropzone（全幅可點，唔再有死框）
+              <button onClick={() => document.getElementById("composer-product")?.click()} disabled={productUploading || inputMode !== "image"}
+                className="w-full flex flex-col items-center justify-center gap-1.5 py-8 text-xs text-gray-500 border-2 border-dashed border-gray-300 rounded-lg hover:border-violet-400 hover:text-violet-600 hover:bg-violet-50/40 transition-colors">
+                {productUploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Upload className="h-5 w-5" />}
+                {productUploading ? "上傳中…" : "點此上傳產品圖（可加最多 3 件）"}
+              </button>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {productUrls.map((url) => (
+                  <div key={url} className="relative w-24 h-24 rounded-md border bg-[repeating-conic-gradient(#f3f4f6_0_25%,#fff_0_50%)] bg-[length:12px_12px]">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={url} alt="product" className="w-full h-full object-contain rounded-md" />
+                    <button onClick={() => removeProduct(url)} title="移除"
+                      className="absolute -top-1.5 -right-1.5 p-1 rounded-full bg-white text-gray-400 hover:text-red-500 border shadow-sm transition-colors">
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+                {productUrls.length < MAX_PRODUCTS && (
+                  <button onClick={() => document.getElementById("composer-product")?.click()} disabled={productUploading || inputMode !== "image"}
+                    className="w-24 h-24 flex flex-col items-center justify-center gap-1 text-[11px] text-gray-500 border-2 border-dashed border-gray-200 rounded-md hover:border-violet-300 hover:text-violet-500 transition-colors">
+                    {productUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                    {productUploading ? "上傳中…" : `加產品 (${productUrls.length}/${MAX_PRODUCTS})`}
                   </button>
-                </div>
-              ))}
-              {productUrls.length < MAX_PRODUCTS && (
-                <button onClick={() => document.getElementById("composer-product")?.click()} disabled={productUploading || inputMode !== "image"}
-                  className="w-24 h-24 flex flex-col items-center justify-center gap-1 text-[11px] text-gray-500 border-2 border-dashed border-gray-200 rounded-md hover:border-violet-300 hover:text-violet-500 transition-colors">
-                  {productUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                  {productUploading ? "上傳中…" : `加產品圖 (${productUrls.length}/${MAX_PRODUCTS})`}
-                </button>
-              )}
-            </div>
+                )}
+              </div>
+            )}
             {productUrls.length > 0 && (
               <div className="flex items-center gap-2 mt-2">
                 <button onClick={describeProduct} disabled={describing}
@@ -517,25 +578,56 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
             className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm resize-none placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-400 transition" />
         </div>
 
-        {/* Compiled prompt — editable */}
+        {/* Compiled prompt — 唯讀預覽，或潤色後可編輯 */}
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-semibold text-gray-500 flex items-center gap-1.5">
-              <Lock className="h-3 w-3" />設計描述預覽（唯讀 · 自動產生，請在上方欄位修改）
+              {polishedBrief !== null
+                ? <><Wand2 className="h-3 w-3 text-violet-500" />已潤色設計描述（可直接編輯，生成時會存入結果 AI Prompt）</>
+                : <><Lock className="h-3 w-3" />設計描述預覽（唯讀 · 自動產生，請在上方欄位修改）</>}
             </span>
-            <button onClick={copyPrompt} disabled={!hasAnyContent}
-              className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border transition-all shrink-0 ${
-                hasAnyContent ? (copied ? "bg-emerald-50 border-emerald-300 text-emerald-700" : "bg-white border-gray-200 text-gray-600 hover:border-gray-400")
-                : "opacity-30 cursor-not-allowed border-gray-200 text-gray-400"}`}>
-              {copied ? <><Check className="h-3 w-3" />已複製</> : <><Copy className="h-3 w-3" />複製</>}
-            </button>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {/* ✨潤色：手寫指令 → 擴寫成更豐富嘅中文 brief。合成模式潤色「場景描述」（含背景），文字模式潤色整段 brief。 */}
+              {(() => {
+                const canPolish = (composite ? buildSceneBrief().trim() : effectiveBrief.trim()).length > 0;
+                return (
+                  <button onClick={polishBrief} disabled={!canPolish || polishing}
+                    className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border transition-all ${
+                      canPolish && !polishing ? "bg-violet-50 border-violet-300 text-violet-700 hover:bg-violet-100"
+                      : "opacity-40 cursor-not-allowed border-gray-200 text-gray-400"}`}
+                    title={composite ? "把場景描述擴寫成更完整的中文 brief（不含產品，可再編輯）" : "把目前描述擴寫成更完整的中文設計 brief（可再編輯）"}>
+                    {polishing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />}
+                    {polishing ? "潤色中…" : "✨潤色"}
+                  </button>
+                );
+              })()}
+              {polishedBrief !== null && (
+                <button onClick={() => setPolishedBrief(null)}
+                  className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:text-red-500 hover:border-red-200 transition-all"
+                  title="還原成自動產生的描述">
+                  <RotateCcw className="h-3 w-3" />還原
+                </button>
+              )}
+              <button onClick={copyPrompt} disabled={!hasAnyContent}
+                className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border transition-all ${
+                  hasAnyContent ? (copied ? "bg-emerald-50 border-emerald-300 text-emerald-700" : "bg-white border-gray-200 text-gray-600 hover:border-gray-400")
+                  : "opacity-30 cursor-not-allowed border-gray-200 text-gray-400"}`}>
+                {copied ? <><Check className="h-3 w-3" />已複製</> : <><Copy className="h-3 w-3" />複製</>}
+              </button>
+            </div>
           </div>
-          {/* Read-only display (NOT an input) — muted, caption-like so it never looks editable */}
-          <div className="w-full rounded-lg bg-gray-100/70 px-3 py-2.5 text-[11px] text-gray-500 leading-relaxed whitespace-pre-wrap select-text">
-            {compiledPrompt || (
-              <span className="text-gray-400">選取積木或輸入主體後，這裡會自動組裝繁中設計描述；生成時自動翻譯成英文 prompt 餵圖像模型。</span>
-            )}
-          </div>
+          {polishedBrief !== null ? (
+            // 潤色後：可編輯 textarea，用戶可微調再生圖
+            <textarea value={polishedBrief} onChange={(e) => setPolishedBrief(e.target.value)} rows={6}
+              className="w-full rounded-lg border border-violet-200 bg-violet-50/40 px-3 py-2.5 text-[12px] text-gray-700 leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-violet-300 whitespace-pre-wrap" />
+          ) : (
+            // Read-only display (NOT an input) — muted, caption-like so it never looks editable
+            <div className="w-full rounded-lg bg-gray-100/70 px-3 py-2.5 text-[11px] text-gray-500 leading-relaxed whitespace-pre-wrap select-text">
+              {compiledPrompt || (
+                <span className="text-gray-400">選取積木或輸入主體後，這裡會自動組裝繁中設計描述；生成時自動翻譯成英文 prompt 餵圖像模型。也可手寫描述後按「✨潤色」擴寫。</span>
+              )}
+            </div>
+          )}
           {/* Composite info — NOT part of the brief / not translated, just explains what will happen */}
           {(composite || (slots.background && (slots.background.data?.imageUrl || slots.background.previewUrl))) && (
             <div className="rounded-lg bg-violet-50 border border-violet-100 px-3 py-2 space-y-0.5">

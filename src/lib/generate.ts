@@ -40,6 +40,11 @@ const FAL_EDIT_MODEL = process.env.FAL_EDIT_MODEL ?? "fal-ai/nano-banana/edit";
 const FAL_REMBG_MODEL = process.env.FAL_REMBG_MODEL ?? "fal-ai/birefnet";
 // fal.ai upscaler — opt-in "源圖高清化" for low-res product photos (faithful, low creativity).
 const FAL_UPSCALE_MODEL = process.env.FAL_UPSCALE_MODEL ?? "fal-ai/clarity-upscaler";
+// ── 文字→圖：按「生成類型」揀模型（人物/插畫，獨立生成，唔經產品合成）──
+// 真人寫實：FLUX.2 [pro]（prompt 服從度高、真人/打光/文字較強，~$0.03/MP）。
+const FAL_FLUX2_MODEL = process.env.FAL_FLUX2_MODEL ?? "fal-ai/flux-2-pro";
+// 2D 插畫：Recraft V3（插畫/風格化專用，style=digital_illustration，$0.04/張）。
+const FAL_RECRAFT_MODEL = process.env.FAL_RECRAFT_MODEL ?? "fal-ai/recraft/v3/text-to-image";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -58,7 +63,10 @@ export interface GenerateImageInput {
   width?: number;
   height?: number;
   seed?: number;
+  /** 生圖模型路由："flux-2-pro"（真人）/ "recraft"（插畫）/ undefined（預設 FLUX.1 schnell 場景）。 */
   model?: string;
+  /** Recraft 風格：realistic_image | digital_illustration | vector_illustration。 */
+  style?: string;
 }
 
 export interface GeneratedImage {
@@ -174,6 +182,63 @@ export async function translateBriefToEnglishPrompt(brief: string): Promise<stri
   }
 }
 
+/**
+ * 潤色寫手：把用戶手寫、簡短或零碎嘅設計指令，擴寫成更完整、有畫面感嘅繁體中文設計 brief。
+ * 回傳嘅文字俾用戶喺 UI 編輯後再生圖（opt-in，唔自動套用）。保留原意、唔虛構品牌事實。
+ * 無 API key 時原樣回傳（graceful fallback）。
+ */
+export async function polishBriefToChinese(input: { brief: string; genType?: string; styleDesc?: string }): Promise<string> {
+  const text = input.brief.trim();
+  if (!text) return "";
+  if (!OPENROUTER_API_KEY || OPENROUTER_API_KEY === "your-openrouter-api-key-here") return text;
+  const typeHint =
+    input.genType === "person" ? "這是一張「真人寫實」行銷圖，請著重描述人物（年齡、表情、動作、穿著、互動）與場景。"
+    : input.genType === "illustration" ? "這是一張「2D 插畫風」行銷圖，請著重描述插畫風格、線條、色塊與角色造型。"
+    : "這是一張產品 / 場景行銷圖，請著重描述主體擺位、背景場景與質感。";
+  const styleHint = input.styleDesc
+    ? `\n\n【參考圖風格分析】${input.styleDesc}\n請在擴寫時融入以上風格特徵（色調、光影、質感氣氛），不要參考構圖或佈局，保留用戶原意，只補充具體畫面細節。`
+    : "";
+  const sys =
+    "你是一位資深美術指導兼 AI 生圖 prompt 寫手。你會把用戶手寫、簡短或零碎的設計指令，" +
+    "擴寫成一段更完整、具體、有畫面感的繁體中文設計描述，用來生成行銷圖片。\n\n" +
+    "【規則】\n" +
+    "1. 保留用戶原意與所有已給的具體細節（主體、顏色、文字、風格），只補充畫面細節：構圖、光線、氛圍、背景、材質、鏡頭角度。\n" +
+    "2. 嚴禁虛構品牌事實、功效、價格，或加入用戶沒提到的標語文字。\n" +
+    "3. 一律繁體中文（台灣用語），100字內（含標點），簡潔有創意，留空間給用戶和 AI 修改，不要過度鋪排。\n" +
+    "4. 只輸出擴寫後的中文設計描述，不要解釋、不要英文、不要加標題。";
+  const user = `${typeHint}${styleHint}\n\n用戶原始指令：\n${text}\n\n擴寫後的中文設計描述：`;
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "http://localhost:3000",
+        "X-Title": "Marketing Tool",
+      },
+      body: JSON.stringify({
+        model: OPENROUTER_TEXT_MODEL,
+        max_tokens: 500,
+        messages: [
+          { role: "system", content: sys },
+          { role: "user", content: user },
+        ],
+      }),
+      signal: AbortSignal.timeout(45_000),
+    });
+    if (!res.ok) {
+      console.error("[polishBrief] OpenRouter error", res.status, await res.text().catch(() => ""));
+      return text;
+    }
+    const data = await res.json();
+    const out = (data.choices?.[0]?.message?.content ?? "").trim();
+    return out || text;
+  } catch (err) {
+    console.error("[polishBrief] failed:", err instanceof Error ? err.message : err);
+    return text;
+  }
+}
+
 // ─── Copy generation ──────────────────────────────────────────────────────────
 
 export async function generateCopy(input: GenerateCopyInput): Promise<{ copyText: string }> {
@@ -181,20 +246,24 @@ export async function generateCopy(input: GenerateCopyInput): Promise<{ copyText
   return generateCopyInApp(input);
 }
 
+// 角色（persona）放正式 system role：模型對 system 指令遵從度較高、較穩定，
+// 唔會被 user 內容沖淡。措辭、語言規定、輸出格式都收喺呢度。
+const COPY_SYSTEM =
+  "你是一位資深社群媒體文案師，專為台灣品牌寫 Facebook / Instagram 貼文文案。" +
+  "你擅長用最少字數打中受眾痛點、製造點擊慾，語感自然、貼地、不浮誇、不堆砌形容詞。\n\n" +
+  "【語言規定】一律用繁體中文・台灣用語，嚴禁簡體字或英文（專有名詞除外）。\n" +
+  "【輸出格式｜只回傳以下三行，不要任何解釋、標籤或多餘文字】\n" +
+  "主標題：（10字以內，要有鉤子）\n" +
+  "副標題：（20-30字，補充賣點或情境）\n" +
+  "CTA：（5字以內，行動呼籲）";
+
 function buildCopyPrompt(i: GenerateCopyInput): string {
-  return `你是一位資深社群媒體文案師。請根據以下條件，寫一段適合 Facebook / Instagram 貼文的文案。
+  return `請根據以下條件寫文案：
 
 主體 / 主題：${i.subject?.trim() || "（未指定）"}
 語氣風格：${i.toneAiPrompt || i.toneLabels?.join("、") || "標準、自然"}
 其他注意事項：${i.notes?.trim() || "無"}
-禁忌事項：${i.taboos?.length ? i.taboos.join("、") : "無"}
-
-請輸出（一律用繁體中文・台灣用語，不可簡體或英文）：
-主標題：（10字以內）
-副標題：（20-30字）
-CTA：（5字以內）
-
-只回傳文案內容，不要加任何解釋。`;
+禁忌事項：${i.taboos?.length ? i.taboos.join("、") : "無"}`;
 }
 
 async function generateCopyInApp(input: GenerateCopyInput): Promise<{ copyText: string }> {
@@ -214,7 +283,10 @@ async function generateCopyInApp(input: GenerateCopyInput): Promise<{ copyText: 
       body: JSON.stringify({
         model: OPENROUTER_TEXT_MODEL,
         max_tokens: 400,
-        messages: [{ role: "user", content: buildCopyPrompt(input) }],
+        messages: [
+          { role: "system", content: COPY_SYSTEM },
+          { role: "user", content: buildCopyPrompt(input) },
+        ],
       }),
       signal: AbortSignal.timeout(45_000),
     });
@@ -255,12 +327,19 @@ export async function generateImage(input: GenerateImageInput): Promise<Generate
 async function generateImageInApp(input: GenerateImageInput): Promise<GeneratedImage> {
   const seed = input.seed ?? Math.floor(Math.random() * 1_000_000_000);
 
-  // 1st priority: fal.ai FLUX.1-schnell
+  // 1st priority: fal.ai. 按「生成類型」(input.model) 揀模型；prem 模型失敗就回落 schnell。
   if (FAL_KEY) {
     try {
+      if (input.model === "flux-2-pro") return await falFlux2Pro(input, seed);
+      if (input.model === "recraft") return await falRecraft(input, seed);
       return await falAiImage(input, seed);
     } catch (e) {
       console.error("[generateImage] fal.ai failed:", e instanceof Error ? e.message : e);
+      // 真人/插畫模型失敗 → 回落 schnell（總好過冇圖），再失敗先去 HF。
+      if (input.model) {
+        try { return await falAiImage(input, seed); }
+        catch (e2) { console.error("[generateImage] fal schnell fallback failed:", e2 instanceof Error ? e2.message : e2); }
+      }
     }
   }
 
@@ -492,6 +571,65 @@ export async function falUpscale(imageDataUri: string, factor = 2): Promise<Buff
   return Buffer.from(await r.arrayBuffer());
 }
 
+/**
+ * Analyze a reference image with the vision model and return a Traditional-Chinese style description
+ * covering composition, color palette, lighting and overall visual mood. Used to enrich generation prompts.
+ */
+export async function describeReferenceStyle(imageUrl: string, host: string): Promise<string> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return "";
+  try {
+    const abs = imageUrl.startsWith("http") ? imageUrl : `${host}${imageUrl}`;
+    const imgRes = await fetch(abs, { signal: AbortSignal.timeout(30_000) });
+    if (!imgRes.ok) return "";
+    const base64 = Buffer.from(await imgRes.arrayBuffer()).toString("base64");
+    const mediaType = imgRes.headers.get("content-type") ?? "image/jpeg";
+    const model = process.env.OPENROUTER_VISION_MODEL ?? "openai/gpt-5.4-nano";
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", "HTTP-Referer": host, "X-Title": "Marketing Tool" },
+      body: JSON.stringify({
+        model, max_tokens: 200,
+        messages: [{ role: "user", content: [
+          { type: "image_url", image_url: { url: `data:${mediaType};base64,${base64}` } },
+          { type: "text", text: "用繁體中文描述此圖的視覺風格：①主色調與配色方案 ②光線氛圍與打光方式 ③整體質感與材質感 ④情緒氣氛。最多80字。不要描述構圖、佈局或畫面內容，只描述可遷移的風格特徵，供AI生圖風格參考。" },
+        ]}],
+      }),
+      signal: AbortSignal.timeout(45_000),
+    });
+    if (!res.ok) return "";
+    const data = await res.json();
+    return (data.choices?.[0]?.message?.content ?? "").trim();
+  } catch { return ""; }
+}
+
+/**
+ * Generate a NEW scene using nano-banana with a reference image as style guidance.
+ * The reference image's composition / mood / lighting is used as visual inspiration.
+ */
+export async function falSceneFromRef(i: { refDataUri: string; sceneDescription: string; aspectRatio?: string }): Promise<GeneratedImage> {
+  if (!FAL_KEY) throw new Error("FAL_KEY 未設定，無法用 Nano Banana");
+  // Use the reference image ONLY for style cues (color palette, lighting mood, texture, atmosphere).
+  // Do NOT copy its subject matter, composition, or layout — create an entirely new image.
+  const prompt = `Create a completely new original image. Use the reference image (first image) ONLY as a style guide — adopt its color palette, lighting quality, texture and overall mood/atmosphere. Do NOT copy the reference image's composition, layout, or subject matter. New scene to create: ${i.sceneDescription}. The result must be a fresh creation that feels aesthetically similar to the reference but is entirely different in content. Photorealistic, high quality, no text, no watermarks.`;
+  const res = await fetch(`https://fal.run/${FAL_EDIT_MODEL}`, {
+    method: "POST",
+    headers: { Authorization: `Key ${FAL_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt, image_urls: [i.refDataUri], num_images: 1, ...(i.aspectRatio ? { aspect_ratio: i.aspectRatio } : {}) }),
+    signal: AbortSignal.timeout(90_000),
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new Error(`Nano Banana 場景生成錯誤 ${res.status}: ${t.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const url = data.images?.[0]?.url ?? data.image?.url;
+  if (!url) throw new Error("Nano Banana 回應無圖片 URL");
+  const imgRes = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+  if (!imgRes.ok) throw new Error(`Nano Banana 圖片下載失敗：${imgRes.status}`);
+  return { buffer: Buffer.from(await imgRes.arrayBuffer()), contentType: imgRes.headers.get("content-type") ?? "image/png", seed: 0 };
+}
+
 async function falAiImage(input: GenerateImageInput, seed: number): Promise<GeneratedImage> {
   if (!FAL_KEY) throw new Error("FAL_KEY 未設定");
   const w = input.width ?? 1024;
@@ -515,6 +653,69 @@ async function falAiImage(input: GenerateImageInput, seed: number): Promise<Gene
   if (!imgRes.ok) throw new Error(`fal.ai 圖片下載失敗：${imgRes.status}`);
   const contentType = imgRes.headers.get("content-type") ?? "image/jpeg";
   return { buffer: Buffer.from(await imgRes.arrayBuffer()), contentType, seed };
+}
+
+/** Map a w×h target to fal's image_size enum (shared by FLUX.2 pro / Recraft). */
+function falImageSize(input: GenerateImageInput): string {
+  const w = input.width ?? 1024;
+  const h = input.height ?? 1024;
+  return w > h ? "landscape_4_3" : h > w ? "portrait_4_3" : "square_hd";
+}
+
+/** Download a fal result image URL into a GeneratedImage buffer. */
+async function falFetchImage(url: string, seed: number): Promise<GeneratedImage> {
+  const imgRes = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+  if (!imgRes.ok) throw new Error(`fal 圖片下載失敗：${imgRes.status}`);
+  const contentType = imgRes.headers.get("content-type") ?? "image/jpeg";
+  return { buffer: Buffer.from(await imgRes.arrayBuffer()), contentType, seed };
+}
+
+/** 真人寫實 text→image：FLUX.2 [pro]（fal-ai/flux-2-pro）。 */
+async function falFlux2Pro(input: GenerateImageInput, seed: number): Promise<GeneratedImage> {
+  if (!FAL_KEY) throw new Error("FAL_KEY 未設定");
+  const res = await fetch(`https://fal.run/${FAL_FLUX2_MODEL}`, {
+    method: "POST",
+    headers: { Authorization: `Key ${FAL_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      prompt: input.prompt,
+      image_size: falImageSize(input),
+      seed,
+      output_format: "jpeg",
+      enable_safety_checker: false,
+    }),
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`FLUX.2 pro 錯誤 ${res.status}: ${errText.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const url = data.images?.[0]?.url;
+  if (!url) throw new Error("FLUX.2 pro 回應無圖片 URL");
+  return falFetchImage(url, seed);
+}
+
+/** 2D 插畫 text→image：Recraft V3（style 預設 digital_illustration）。 */
+async function falRecraft(input: GenerateImageInput, seed: number): Promise<GeneratedImage> {
+  if (!FAL_KEY) throw new Error("FAL_KEY 未設定");
+  const res = await fetch(`https://fal.run/${FAL_RECRAFT_MODEL}`, {
+    method: "POST",
+    headers: { Authorization: `Key ${FAL_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      prompt: input.prompt,
+      image_size: falImageSize(input),
+      style: input.style ?? "digital_illustration",
+    }),
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Recraft V3 錯誤 ${res.status}: ${errText.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const url = data.images?.[0]?.url;
+  if (!url) throw new Error("Recraft V3 回應無圖片 URL");
+  return falFetchImage(url, seed);
 }
 
 async function pollinationsImage(input: GenerateImageInput, seed: number): Promise<GeneratedImage> {

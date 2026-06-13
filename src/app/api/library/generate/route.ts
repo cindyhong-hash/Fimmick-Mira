@@ -4,7 +4,7 @@ import path from "path";
 import { randomUUID } from "crypto";
 import sharp from "sharp";
 import { db } from "@/lib/db";
-import { generateImage, generateCopy, compileChineseBrief, translateBriefToEnglishPrompt, falProductShot, gptImageComposite, falImageEdit, falUpscale, type GeneratedImage } from "@/lib/generate";
+import { generateImage, generateCopy, compileChineseBrief, translateBriefToEnglishPrompt, falProductShot, gptImageComposite, falImageEdit, falUpscale, describeReferenceStyle, falSceneFromRef, type GeneratedImage } from "@/lib/generate";
 
 const W = 1024;
 const H = 1024;
@@ -38,7 +38,7 @@ async function loadImageBuffer(url: string, host: string): Promise<Buffer> {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { clientId, subject, slots, palette, notes, seed, productImageUrl, productImageUrls, composite, customPrompt, draftOnly, size, engine, upscaleSource, overlay } = body ?? {};
+    const { clientId, subject, slots, palette, notes, seed, productImageUrl, productImageUrls, composite, customPrompt, draftOnly, size, engine, upscaleSource, overlay, genType, sceneOverride, refImageUrl } = body ?? {};
     // Support 1–3 product photos. New clients send productImageUrls[]; keep productImageUrl for back-compat.
     const productUrls: string[] = (Array.isArray(productImageUrls) && productImageUrls.length
       ? productImageUrls
@@ -107,7 +107,8 @@ export async function POST(request: Request) {
 
       // Keep the user's original Traditional-Chinese brief for storage/display; translate a separate
       // English copy only to feed the image model (which works best in English).
-      const sceneCn = compileChineseBrief({
+      // 潤色後嘅場景描述（不含主體）優先；否則由積木組裝。
+      const sceneCn = (sceneOverride as string | undefined)?.trim() || compileChineseBrief({
         compositionDesc: (slots?.layout?.data?.description as string) || slots?.layout?.aiPromptText,
         backgroundDesc: bgImageUrl ? (slots?.background?.name as string | undefined) : undefined,
         toneLabels: slots?.tone?.data?.toneLabels,
@@ -259,10 +260,32 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "請至少選一個積木、輸入主體，或上傳產品圖" }, { status: 400 });
     }
 
-    // Chinese brief → optimized English FLUX prompt (falls back to brief if no API key).
-    const prompt = await translateBriefToEnglishPrompt(brief);
+    // If a reference image is provided, analyze its style and prepend to the brief.
+    let enrichedBrief = brief;
+    if (refImageUrl) {
+      try {
+        const styleDesc = await describeReferenceStyle(refImageUrl as string, host);
+        if (styleDesc) enrichedBrief = `【參考圖風格】${styleDesc}\n\n【生成描述】${brief}`;
+      } catch (e) { console.error("[reference style] analysis failed:", e instanceof Error ? e.message : e); }
+    }
 
-    const [img] = await Promise.all([generateImage({ prompt, seed, width: outW, height: outH })]);
+    // Chinese brief → optimized English FLUX prompt (falls back to brief if no API key).
+    const prompt = await translateBriefToEnglishPrompt(enrichedBrief);
+
+    // 生成類型 → 揀模型：真人(FLUX.2 pro) / 插畫(Recraft V3) / nano(參考圖風格) / 場景(預設 schnell)。
+    const useNano = engine === "nano" && !!refImageUrl;
+    const genModel = genType === "person" ? "flux-2-pro" : genType === "illustration" ? "recraft" : undefined;
+    const genStyle = genType === "illustration" ? "digital_illustration" : undefined;
+    const genMode = useNano ? "nano-banana" : genType === "person" ? "flux2-person" : genType === "illustration" ? "recraft-illustration" : "flux-scene";
+
+    let img: GeneratedImage;
+    if (useNano) {
+      const refBuf = await loadImageBuffer(refImageUrl as string, host);
+      const refDataUri = `data:image/jpeg;base64,${(await sharp(refBuf).resize(1024, 1024, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer()).toString("base64")}`;
+      img = await falSceneFromRef({ refDataUri, sceneDescription: prompt, aspectRatio });
+    } else {
+      [img] = await Promise.all([generateImage({ prompt, seed, width: outW, height: outH, model: genModel, style: genStyle })]);
+    }
     const ext = img.contentType.includes("png") ? "png" : img.contentType.includes("webp") ? "webp" : "jpg";
     const fitted = await fitToSize(img.buffer);
 
@@ -281,7 +304,7 @@ export async function POST(request: Request) {
         prompt: brief,
         copyText: copy.copyText || null,
         subject: subject ?? null,
-        paramsJson: JSON.stringify({ slots, palette, notes, seed: img.seed, brief, enPrompt: prompt, mode: "flux" }),
+        paramsJson: JSON.stringify({ slots, palette, notes, seed: img.seed, brief, enPrompt: prompt, mode: genMode, genType: genType ?? "scene" }),
       },
     });
 

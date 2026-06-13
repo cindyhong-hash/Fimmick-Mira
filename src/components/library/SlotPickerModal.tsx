@@ -97,7 +97,7 @@ export function SlotPickerModal({ clientId, category, onPick, onClose }: Props) 
             </div>
           ) : filtered.length === 0 ? (
             <div className="text-center py-10 text-sm text-gray-400">
-              {items.length === 0 ? `尚無${meta.label}素材，請先在「加入素材」建立。` : "找不到符合的素材"}
+              {items.length === 0 ? `尚無${meta.label}素材，請先用「上傳參考圖」或「素材生成」建立。` : "找不到符合的素材"}
             </div>
           ) : (
             <div className="grid grid-cols-3 gap-4">

@@ -142,6 +142,87 @@
 
 ---
 
+## Phase 2（2026-06-12 → 06-13）：圖庫 UI 打磨 + 素材生成大升級 + 參考風格圖 + Nano Banana
+
+> 本 session 分兩條主線：① 圖庫/popup UI 一系列修正打磨；② 素材生成功能性升級（參考圖 + 新引擎）。
+
+### 圖庫 UI 打磨（bug 修正）
+
+| 項目 | 問題 | 修正 |
+|---|---|---|
+| **Gallery tile AI tag** | 背景有 Sparkles icon，人像/插畫無 | 所有 AI 素材 tile 一律加 Sparkles icon |
+| **AI Engine label** | 背景 tile 硬編碼顯示「AI生成」 | 改用 `engineLabel()` 讀 `mode`（FLUX.1/FLUX.2 pro/Recraft V3/Nano Banana） |
+| **背景 tag 無 mode** | 舊存法只存 `imageUrl`，無 `mode` | 背景生成儲存時加 `mode: "flux-scene"`；Gallery API 回傳 `aiPromptText` + `mode` |
+| **Popup button 次序** | 次序亂 | 全 3 個 popup 分支統一：下載 → 調整 → 移到… → 刪除 |
+| **背景 popup icon 顏色** | 寫死紫色 | 改按 tag 色同步：背景=teal、人像=rose、插畫=amber、參考圖/上傳=blue、AI生成=violet |
+| **背景 popup 先跳大再縮** | `loading=true` 時先 render max-w-5xl 主 popup，API 返回後縮成 max-w-2xl | 加 `genType: "material"` hint 到 `regenerateParams`；modal 憑此 hint 第一格即 render 正確尺寸 |
+| **背景 popup 不一致** | 圖庫 gallery click vs 組件卡片 click popup 不同 | 兩路均加 `genType: "material"` hint；組件卡片額外加 `presetComponents: [comp]` 即時顯示不閃 |
+| **背景 popup 無 AI Prompt** | 未顯示 | 加 violet 卡（同人像/插畫格式） |
+| **背景 popup 圖片截剪** | `object-cover` 剪走細節 | 改 `object-contain bg-gray-50` |
+
+### 素材生成功能性升級
+
+**「背景生成」→「素材生成」**（`GenerateAssetModal.tsx`）：3 種素材類型
+- **背景**（FLUX.1-schnell）→ 存為 BACKGROUND StyleComponent，可重用於合成
+- **人像**（FLUX.2 pro）→ 存為 LibraryImage（genType=person）
+- **插畫**（Recraft V3）→ 存為 LibraryImage（genType=illustration）
+
+各類型用 `draftOnly` 模式批量生成（唔入庫），選取後才儲存，支援 1–5 張、正方/橫向尺寸。
+
+### 參考風格圖（參考圖 = 只借風格，唔抄構圖）
+
+用戶可加參考圖讓 AI 讀取風格做生成指導：
+
+1. **輸入方式**：貼 URL 或本地上傳（`POST /api/upload`，存 `/uploads/`）
+2. **✨潤色**：按鈕改名「✨ 讀圖潤色」；Polish API 先呼叫 `describeReferenceStyle` 分析風格，再注入 polish prompt（`polishBriefToChinese` 新增 `styleDesc?` 參數）
+3. **生成時**：非 Nano 路徑 → prepend `【參考圖風格】` 到 brief；Nano 路徑 → ref 圖 → JPEG data URI → `falSceneFromRef`
+4. **分析範圍**：只分析色調/光影/質感/情緒氣氛，**刻意排除構圖/佈局**（避免干擾用戶的構圖描述）
+5. **儲存**：`refImageUrl` 記入背景 `data.refImageUrl` 或 LibraryImage `paramsJson.refImageUrl`
+
+### Nano Banana 風格遷移引擎
+
+- **觸發**：有參考圖 + 選 Nano Banana 引擎（三種素材類型均可用）
+- **原理**：`falSceneFromRef`（`fal-ai/nano-banana/edit`），prompt 明確指示只借色調/光影/質感/氣氛，**不複製構圖/內容/主題**
+- **引擎標籤**：FLUX.1 按素材類型顯示正確名稱（背景=FLUX.1、人像=FLUX.2 pro、插畫=Recraft V3）+ 副標「純文字生圖」
+- **Nano 禁用邏輯**：無參考圖時自動 disable，清除參考圖時重置回 flux
+
+### Popup 顯示參考圖
+
+三個 popup 分支（背景/人像插畫/主 popup）均顯示參考圖：
+- 圖片放大：`w-full max-h-64 object-contain`（原 `w-24 h-24`）
+- 若為 http URL → 在圖下顯示可點擊連結（置中，`<a>`）
+
+### 「重新生成/調整」按鈕
+
+**素材生成結果頁**：Results 頂部 + Footer 各加一個「重新生成/調整」按鈕，清空 items 返回設定頁，description / refImageUrl 保留在 state。
+
+**圖庫 popup**（背景/人像/插畫分支）：底部加「重新生成 / 調整（帶入素材生成）」按鈕：
+- 關閉 popup → 切換到「風格組件」tab → 帶預填資料（description + refImageUrl + type + engine）打開 GenerateAssetModal
+- `GenerateAssetModal` 新增 `init?` prop，用 `useState(init?.xxx ?? default)` 初始化
+- `library/page.tsx`：新增 `generateAssetInit` state + `handleOpenGenerateAsset` callback，傳 `mode`（從 paramsJson）和 `onOpenGenerateAsset` 給 ImageDetailModal
+
+### Phase 3（2026-06-13）：AI 讀圖填描述 + 潤色 UX 優化
+
+**核心功能：`describe?kind=brief` — 自動讀圖填描述初稿**
+
+| 觸發點 | 行為 |
+|---|---|
+| URL 欄 `onBlur`（貼完連結離開） | 描述為空時，自動 AI 讀圖填 20–30 字初稿（靜默，不覆蓋） |
+| 上傳圖片成功後 | 同上 |
+| 「重新讀圖」按鈕（藍色 RefreshCw）| 手動觸發，強制覆蓋現有描述 |
+
+**潤色 UX 改進**
+- 有圖無描述時「潤色」可觸發：自動先讀圖填初稿，再對初稿潤色（一鍵兩步）
+- 按鈕 disabled 條件收緊：只有描述和參考圖**均為空**時才 disabled
+- 潤色輸出由「4–6 句」→「100 字內，簡潔有創意，留空間給用戶修改」
+
+**UI 調整**
+- 「重新讀圖」按鈕移至描述欄右上角，與「潤色」並排（原在 label 旁，太細不顯眼）
+- Loading 分離：`refDescribing` state 獨立，label 旁顯示「讀圖中…」spinner，按鈕文字不受影響
+- 潤色按鈕文字統一改為「潤色」（去 emoji，去「讀圖」字眼，讀圖是後台隱式行為）
+
+---
+
 ## API endpoints（累計）
 | Method | Path | 功能 |
 |--------|------|------|
@@ -156,10 +237,11 @@
 | POST | `/api/library/save-image` | 把 draft 圖寫入 LibraryImage（背景生成保留時用） |
 | PATCH | `/api/library/images/[id]` | 更新生成圖：`slots`（改寫 paramsJson）/ `clientId`（搬專案）/ `subject`（改標題）；會 bump createdAt 排到最新 |
 | DELETE | `/api/library/images/[id]` | 刪除生成圖（LibraryImage） |
-| POST | `/api/library/describe` | vision 描述（kind=subject/background → 繁中 + 英文） |
+| POST | `/api/library/describe` | vision 描述；`kind=brief`（20–30字生成初稿，接 `genType`）/ `kind=background`（20字場景）/ 預設（20字主體） |
+| POST | `/api/library/polish` | 潤色繁中 brief；`refImageUrl?`：先分析風格再融入潤色；輸出 100 字內 |
 | POST | `/api/upload` | 上傳圖片到 public/uploads/ |
 
-> `POST /api/library/generate` 進階參數（第三輪）：`engine`（nano/bria/gpt）、`size`（square/landscape）、`productImageUrls[]`（1–3 件）、`preserveText`(舊)/`upscaleSource`/`overlay`（已 dormant）。合成排序見 [AI-ENGINES.md](./AI-ENGINES.md)。
+> `POST /api/library/generate` 進階參數（Phase 2 更新）：`refImageUrl?`（參考風格圖）、`engine`（flux/nano/bria/gpt）、`genType`（background/person/illustration/scene）、`size`（square/landscape）、`productImageUrls[]`（1–3 件，合成模式）、`preserveText`(舊)/`upscaleSource`/`overlay`（dormant）。合成排序見 [AI-ENGINES.md](./AI-ENGINES.md)。
 
 ## 關鍵檔案
 - `src/app/library/page.tsx` — 素材庫頁（2 tabs，統一管理 popup/toast/編輯/重生成）

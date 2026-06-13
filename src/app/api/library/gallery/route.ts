@@ -39,17 +39,24 @@ export async function GET(request: Request) {
 
   const uploadedMap = new Map<
     string,
-    { imageUrl: string; types: string[]; componentIds: string[]; createdAt: Date; name: string }
+    { imageUrl: string; types: string[]; componentIds: string[]; createdAt: Date; name: string; aiPromptText: string; mode: string | null }
   >();
   for (const c of comps) {
     const u = c.previewUrl!;
     if (genUrls.has(u)) continue; // skip: this image is already a LibraryImage (AI生成)
     const entry =
-      uploadedMap.get(u) ?? { imageUrl: u, types: [], componentIds: [], createdAt: c.createdAt, name: c.name };
+      uploadedMap.get(u) ?? { imageUrl: u, types: [], componentIds: [], createdAt: c.createdAt, name: c.name, aiPromptText: c.aiPromptText ?? "", mode: null };
     if (!entry.types.includes(c.type)) entry.types.push(c.type);
     entry.componentIds.push(c.id);
     // The group's representative name + sort time follow the most-recently-edited component.
-    if (c.createdAt >= entry.createdAt) { entry.createdAt = c.createdAt; entry.name = c.name; }
+    if (c.createdAt >= entry.createdAt) {
+      entry.createdAt = c.createdAt; entry.name = c.name;
+      if (c.aiPromptText) entry.aiPromptText = c.aiPromptText;
+    }
+    // Extract mode from data JSON (stored by GenerateAssetModal for AI-generated backgrounds).
+    if (!entry.mode) {
+      try { const d = JSON.parse(c.data ?? "{}"); if (d.mode) entry.mode = d.mode; } catch { /* ignore */ }
+    }
     uploadedMap.set(u, entry);
   }
 
@@ -64,6 +71,7 @@ export async function GET(request: Request) {
         componentIds: e.componentIds,
         name: e.name,
         createdAt: e.createdAt,
+        ...(isMaterial && { aiPromptText: e.aiPromptText || undefined, mode: e.mode || undefined }),
       };
     }),
     ...gens.map((g) => ({

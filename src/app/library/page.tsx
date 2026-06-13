@@ -21,6 +21,7 @@ import { CATEGORY_META } from "@/types/library";
 type Client = { id: string; name: string; _count: { activities: number } };
 type Tab = "assets" | "components";
 type Prefill = { subject?: string; notes?: string; useFlags?: Record<string, boolean> };
+type GenerateAssetInit = { description: string; refImageUrl: string; type: "background" | "person" | "illustration"; engine: "flux" | "nano" };
 
 export default function LibraryPage() {
   const [clients, setClients] = useState<Client[]>([]);
@@ -29,6 +30,7 @@ export default function LibraryPage() {
   const [slots, setSlots] = useState<PromptSlots>({ layout: null, color: null, tone: null, background: null });
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [showGenerateAsset, setShowGenerateAsset] = useState(false);
+  const [generateAssetInit, setGenerateAssetInit] = useState<GenerateAssetInit | null>(null);
   const [quickAddImageUrl, setQuickAddImageUrl] = useState<string | null>(null);
   const [editComponent, setEditComponent] = useState<StyleComponent | null>(null);
   const [prefillComponents, setPrefillComponents] = useState<StyleComponent[] | null>(null);
@@ -67,6 +69,14 @@ export default function LibraryPage() {
 
   const handleClearSlot = useCallback((key: keyof PromptSlots) => {
     setSlots((prev) => ({ ...prev, [key]: null }));
+  }, []);
+
+  // Popup「重新生成/調整」→ 關閉 popup，切到風格組件 tab，帶預填資料打開素材生成。
+  const handleOpenGenerateAsset = useCallback((init: GenerateAssetInit) => {
+    setDetail(null);
+    setGenerateAssetInit(init);
+    setTab("components");
+    setShowGenerateAsset(true);
   }, []);
 
   // Popup「分析此圖加入素材」→ open QuickAdd prefilled with the image
@@ -246,6 +256,11 @@ export default function LibraryPage() {
           subject={detail.subject}
           prompt={detail.prompt}
           libraryImageId={detail.libraryImageId}
+          genType={(() => { try { return JSON.parse(detail.regenerateParams || "{}").genType as string | undefined; } catch { return undefined; } })()}
+          mode={(() => { try { return JSON.parse(detail.regenerateParams || "{}").mode as string | undefined; } catch { return undefined; } })()}
+          refImageUrl={(() => { try { return JSON.parse(detail.regenerateParams || "{}").refImageUrl as string | undefined; } catch { return undefined; } })()}
+          onOpenGenerateAsset={handleOpenGenerateAsset}
+          clients={clients}
           injectedIds={injectedIds}
           onInject={handleInject}
           onAnalyze={handleAnalyze}
@@ -262,9 +277,11 @@ export default function LibraryPage() {
       {showGenerateAsset && (
         <GenerateAssetModal
           clientId={selectedClientId}
-          onClose={() => setShowGenerateAsset(false)}
+          init={generateAssetInit ?? undefined}
+          onClose={() => { setShowGenerateAsset(false); setGenerateAssetInit(null); }}
           onSaved={() => {
             setShowGenerateAsset(false);
+            setGenerateAssetInit(null);
             setReloadKey((k) => k + 1);
             setComponentReloadKey((k) => k + 1);
           }}

@@ -21,6 +21,16 @@ type Props = {
   subject?: string | null;
   prompt?: string | null;
   libraryImageId?: string;
+  /** 生成類型（人像/插畫）→ 純成圖，popup 唔顯示積木/分析。 */
+  genType?: string;
+  /** 生成時的引擎 mode（e.g. "flux-scene", "nano-banana"）— 用於「重新生成」時預填引擎。 */
+  mode?: string;
+  /** 生成時使用的參考風格圖 URL（可能是 /uploads 本地路徑）。 */
+  refImageUrl?: string;
+  /** 從 popup 觸發「重新生成/調整」，傳回預填資料讓父層打開 GenerateAssetModal。 */
+  onOpenGenerateAsset?: (init: { description: string; refImageUrl: string; type: "background" | "person" | "illustration"; engine: "flux" | "nano" }) => void;
+  /** 客戶清單 — 用嚟「移到其他客戶 / 設公用」。 */
+  clients?: { id: string; name: string }[];
   injectedIds?: Set<string>;
   onInject: (comp: StyleComponent) => void;
   onAnalyze?: (imageUrl: string) => void;
@@ -44,6 +54,10 @@ export function ImageDetailModal({
   subject,
   prompt,
   libraryImageId,
+  genType,
+  mode,
+  refImageUrl,
+  clients,
   injectedIds,
   onInject,
   onAnalyze,
@@ -52,6 +66,7 @@ export function ImageDetailModal({
   onDelete,
   onDeleteComponents,
   onRefresh,
+  onOpenGenerateAsset,
   onClose,
 }: Props) {
   const [confirmDel, setConfirmDel] = useState(false);
@@ -88,6 +103,39 @@ export function ImageDetailModal({
     a.remove();
   }
 
+  // 移到其他客戶 / 設公用：generated → PATCH images；component(背景/上傳) → PATCH components。
+  const [reassigning, setReassigning] = useState(false);
+  async function reassign(targetClientId: string | null) {
+    setReassigning(true);
+    try {
+      if (libraryImageId) {
+        await fetch(`/api/library/images/${libraryImageId}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clientId: targetClientId }),
+        });
+      } else if (components.length > 0) {
+        await Promise.all(components.map((c) =>
+          fetch(`/api/components/${c.id}`, {
+            method: "PATCH", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ clientId: targetClientId }),
+          })));
+      }
+      onRefresh?.();
+      onClose();
+    } finally { setReassigning(false); }
+  }
+  // 小型「移到…」下拉（客戶清單 + 公用）。
+  const ReassignSelect = () => (clients && clients.length > 0) ? (
+    <select disabled={reassigning} defaultValue=""
+      onChange={(e) => { const v = e.target.value; if (!v) return; reassign(v === "__public__" ? null : v); }}
+      title="移到其他客戶 / 設公用"
+      className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-600 hover:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-300 disabled:opacity-50">
+      <option value="">移到…</option>
+      <option value="__public__">公用（全部客戶）</option>
+      {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+    </select>
+  ) : null;
+
   // Header 「刪除」 — what it removes depends on the image kind:
   //  • generated (has libraryImageId) → delete the LibraryImage row
   //  • uploaded / 背景素材 (only linked components) → delete all of this image's components
@@ -115,40 +163,128 @@ export function ImageDetailModal({
       .finally(() => setLoading(false));
   }, [imageUrl, presetComponents]);
 
-  // 背景 is a standalone image asset, not an analysed style block.
+  // Ref image: prop takes priority; fallback to bgComp.data for background assets.
   const bgComp = components.find((c) => c.type === "BACKGROUND");
+  const effectiveRefImageUrl = refImageUrl || (bgComp?.data?.refImageUrl as string | undefined);
+  const effectiveMode = mode || (bgComp?.data?.mode as string | undefined);
+  const derivedEngine: "flux" | "nano" = effectiveMode === "nano-banana" ? "nano" : "flux";
   const sorted = [...components]
     .filter((c) => c.type !== "BACKGROUND")
     .sort((a, b) => ORDER.indexOf(a.type) - ORDER.indexOf(b.type));
 
-  // 背景素材 popup: a compact, fixed-square layout — square image on top, buttons below.
-  if (!loading && bgComp && sorted.length === 0) {
-    const injected = injectedIds?.has(bgComp.id) ?? false;
+  // 背景素材 popup：genType==="material" hint 讓 popup 從第一格 render 就用正確框（避免先出主 popup 再縮）。
+  if (genType === "material" || (!loading && bgComp && sorted.length === 0)) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-        <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+        <div className="relative w-full max-w-2xl max-h-[92vh] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-5 py-3.5 border-b shrink-0 gap-3 min-w-0">
             <h2 className="text-sm font-semibold flex items-center gap-1.5 min-w-0 truncate">
               <ScanSearch className="h-4 w-4 text-teal-500 shrink-0" />
-              <span className="truncate">{bgComp.name}</span>
+              <span className="truncate">背景{bgComp ? ` — ${bgComp.name}` : ""}</span>
+            </h2>
+            {!loading && (
+              <div className="flex items-center gap-1.5 shrink-0">
+                {imageUrl && (
+                  <button onClick={handleDownload} title="下載圖片"
+                    className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border whitespace-nowrap bg-white border-gray-200 text-gray-600 hover:border-teal-300 hover:text-teal-600 transition-colors">
+                    <Download className="h-3.5 w-3.5" />下載
+                  </button>
+                )}
+                <ReassignSelect />
+                {canDelete && (
+                  <button
+                    onClick={() => {
+                      if (confirmDel) handleHeaderDelete();
+                      else { setConfirmDel(true); setTimeout(() => setConfirmDel(false), 3000); }
+                    }}
+                    className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border whitespace-nowrap transition-colors
+                      ${confirmDel ? "bg-red-500 text-white border-red-500" : "bg-white border-gray-200 text-gray-500 hover:border-red-300 hover:text-red-500"}`}
+                    title={confirmDel ? "再按確認刪除" : "刪除此背景素材"}>
+                    <Trash2 className="h-3.5 w-3.5" />{confirmDel ? "確認刪除" : "刪除"}
+                  </button>
+                )}
+                <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors shrink-0">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+            {loading && (
+              <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors shrink-0">
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <div className="p-5 overflow-y-auto">
+            {loading ? (
+              <div className="text-sm text-gray-400 py-10 text-center">載入中…</div>
+            ) : imageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={imageUrl} alt={bgComp?.name} className="w-full max-h-[65vh] object-contain rounded-xl border bg-gray-50" />
+            ) : null}
+            {!loading && prompt && (
+              <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 p-3">
+                <div className="text-[11px] font-semibold text-violet-700 mb-1 flex items-center gap-1">
+                  <Sparkles className="h-3 w-3" />AI Prompt
+                </div>
+                <p className="text-[11px] font-mono text-gray-600 leading-relaxed break-all">{prompt}</p>
+              </div>
+            )}
+            {!loading && effectiveRefImageUrl && (
+              <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
+                <div className="text-[11px] font-semibold text-gray-500 mb-2 flex items-center gap-1">
+                  <Sparkles className="h-3 w-3" />參考風格圖
+                </div>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={effectiveRefImageUrl} alt="參考風格圖" className="w-full max-h-64 object-contain rounded-lg border bg-white" />
+                {effectiveRefImageUrl.startsWith("http") && (
+                  <div className="mt-1.5 text-center">
+                    <a href={effectiveRefImageUrl} target="_blank" rel="noopener noreferrer"
+                      className="text-[10px] text-violet-500 hover:text-violet-700 break-all font-mono leading-relaxed underline">
+                      {effectiveRefImageUrl}
+                    </a>
+                  </div>
+                )}
+              </div>
+            )}
+            {!loading && onOpenGenerateAsset && (
+              <button onClick={() => onOpenGenerateAsset({ description: prompt ?? "", refImageUrl: effectiveRefImageUrl ?? "", type: "background", engine: derivedEngine })}
+                className="mt-3 w-full flex items-center justify-center gap-1.5 text-xs font-medium border border-violet-300 text-violet-700 bg-violet-50 px-3 py-2 rounded-xl hover:bg-violet-100 transition-colors">
+                <RefreshCw className="h-3.5 w-3.5" />重新生成 / 調整（帶入素材生成）
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+
+  // 人像 / 插畫：純最終成圖 — 全圖 + AI Prompt，唔顯示積木 / 分析。
+  if (genType === "person" || genType === "illustration") {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+        <div className="relative w-full max-w-2xl max-h-[92vh] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b shrink-0 gap-3 min-w-0">
+            <h2 className="text-sm font-semibold flex items-center gap-1.5 min-w-0 truncate">
+              <ScanSearch className={`h-4 w-4 shrink-0 ${genType === "person" ? "text-rose-500" : "text-amber-500"}`} />
+              <span className="truncate">{genType === "person" ? "人像" : "插畫"}{displaySubject ? ` — ${displaySubject}` : ""}</span>
             </h2>
             <div className="flex items-center gap-1.5 shrink-0">
               {imageUrl && (
                 <button onClick={handleDownload} title="下載圖片"
-                  className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border whitespace-nowrap bg-white border-gray-200 text-gray-600 hover:border-teal-300 hover:text-teal-600 transition-colors">
+                  className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border whitespace-nowrap bg-white border-gray-200 text-gray-600 hover:border-violet-300 hover:text-violet-600 transition-colors">
                   <Download className="h-3.5 w-3.5" />下載
                 </button>
               )}
+              <ReassignSelect />
               {canDelete && (
                 <button
-                  onClick={() => {
-                    if (confirmDel) handleHeaderDelete();
-                    else { setConfirmDel(true); setTimeout(() => setConfirmDel(false), 3000); }
-                  }}
+                  onClick={() => { if (confirmDel) handleHeaderDelete(); else { setConfirmDel(true); setTimeout(() => setConfirmDel(false), 3000); } }}
                   className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border whitespace-nowrap transition-colors
                     ${confirmDel ? "bg-red-500 text-white border-red-500" : "bg-white border-gray-200 text-gray-500 hover:border-red-300 hover:text-red-500"}`}
-                  title={confirmDel ? "再按確認刪除" : "刪除此背景素材"}>
+                  title={confirmDel ? "再按確認刪除" : "刪除此圖"}>
                   <Trash2 className="h-3.5 w-3.5" />{confirmDel ? "確認刪除" : "刪除"}
                 </button>
               )}
@@ -157,19 +293,40 @@ export function ImageDetailModal({
               </button>
             </div>
           </div>
-          <div className="p-5">
+          <div className="p-5 overflow-y-auto">
             {imageUrl && (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={imageUrl} alt={bgComp.name} className="w-full aspect-square object-cover rounded-xl border" />
+              <img src={imageUrl} alt="preview" className="w-full max-h-[64vh] object-contain rounded-xl border bg-gray-50" />
             )}
-            <div className="mt-3 flex items-center gap-2">
-              {/* Delete moved to the header (top); only 帶入生成 remains here. */}
-              <button onClick={() => onInject(bgComp)} disabled={injected}
-                className={`flex-1 flex items-center justify-center gap-1.5 text-sm font-medium py-2 rounded-lg border transition-colors
-                  ${injected ? "bg-gray-100 border-gray-200 text-gray-400" : "bg-teal-50 border-teal-200 text-teal-700 hover:opacity-80"}`}>
-                <ArrowRightCircle className="h-4 w-4" />{injected ? "已帶入" : "帶入生成（背景）"}
+            {prompt && (
+              <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 p-3">
+                <div className="text-[11px] font-semibold text-violet-700 mb-1 flex items-center gap-1"><Sparkles className="h-3 w-3" />AI Prompt</div>
+                <p className="text-[11px] font-mono text-gray-600 leading-relaxed break-all">{prompt}</p>
+              </div>
+            )}
+            {effectiveRefImageUrl && (
+              <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
+                <div className="text-[11px] font-semibold text-gray-500 mb-2 flex items-center gap-1">
+                  <Sparkles className="h-3 w-3" />參考風格圖
+                </div>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={effectiveRefImageUrl} alt="參考風格圖" className="w-full max-h-64 object-contain rounded-lg border bg-white" />
+                {effectiveRefImageUrl.startsWith("http") && (
+                  <div className="mt-1.5 text-center">
+                    <a href={effectiveRefImageUrl} target="_blank" rel="noopener noreferrer"
+                      className="text-[10px] text-violet-500 hover:text-violet-700 break-all font-mono leading-relaxed underline">
+                      {effectiveRefImageUrl}
+                    </a>
+                  </div>
+                )}
+              </div>
+            )}
+            {onOpenGenerateAsset && (
+              <button onClick={() => onOpenGenerateAsset({ description: prompt ?? "", refImageUrl: effectiveRefImageUrl ?? "", type: genType as "person" | "illustration", engine: derivedEngine })}
+                className="mt-3 w-full flex items-center justify-center gap-1.5 text-xs font-medium border border-violet-300 text-violet-700 bg-violet-50 px-3 py-2 rounded-xl hover:bg-violet-100 transition-colors">
+                <RefreshCw className="h-3.5 w-3.5" />重新生成 / 調整（帶入素材生成）
               </button>
-            </div>
+            )}
           </div>
         </div>
       </div>
@@ -180,11 +337,11 @@ export function ImageDetailModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
 
-      <div className="relative w-full max-w-3xl max-h-[88vh] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+      <div className="relative w-full max-w-5xl max-h-[92vh] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b shrink-0 gap-3 min-w-0">
           <h2 className="text-sm font-semibold flex items-center gap-1.5 min-w-0 flex-1">
-            <ScanSearch className="h-4 w-4 text-violet-500 shrink-0" />
+            <ScanSearch className={`h-4 w-4 shrink-0 ${libraryImageId ? "text-violet-500" : "text-blue-500"}`} />
             <span className="shrink-0">圖片風格</span>
             {libraryImageId ? (
               editingTitle ? (
@@ -225,6 +382,7 @@ export function ImageDetailModal({
                 <Pencil className="h-3.5 w-3.5" />調整
               </button>
             )}
+            <ReassignSelect />
             {canDelete && (
               <button
                 onClick={() => {
@@ -263,6 +421,23 @@ export function ImageDetailModal({
                 <p className="text-[11px] font-mono text-gray-600 leading-relaxed break-all">{prompt}</p>
               </div>
             )}
+            {effectiveRefImageUrl && (
+              <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
+                <div className="text-[11px] font-semibold text-gray-500 mb-2 flex items-center gap-1">
+                  <Sparkles className="h-3 w-3" />參考風格圖
+                </div>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={effectiveRefImageUrl} alt="參考風格圖" className="w-full max-h-64 object-contain rounded-lg border bg-white" />
+                {effectiveRefImageUrl.startsWith("http") && (
+                  <div className="mt-1.5 text-center">
+                    <a href={effectiveRefImageUrl} target="_blank" rel="noopener noreferrer"
+                      className="text-[10px] text-violet-500 hover:text-violet-700 break-all font-mono leading-relaxed underline">
+                      {effectiveRefImageUrl}
+                    </a>
+                  </div>
+                )}
+              </div>
+            )}
             {onRegenerate && (
               <button onClick={onRegenerate}
                 className="mt-3 w-full flex items-center justify-center gap-1.5 text-xs font-medium bg-violet-600 text-white px-3 py-2 rounded-lg hover:bg-violet-700 transition-colors">
@@ -280,9 +455,9 @@ export function ImageDetailModal({
                   <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-teal-50 border-teal-200 text-teal-700">背景</span>
                   <span className="text-xs font-semibold text-gray-800 truncate ml-2">{bgComp.name}</span>
                 </div>
-                {Boolean(bgComp.data.imageUrl || bgComp.previewUrl) && (
+                {sorted.length > 0 && Boolean(bgComp.data.imageUrl || bgComp.previewUrl) && (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={(bgComp.data.imageUrl as string) || bgComp.previewUrl!} alt="bg" loading="lazy" decoding="async" className="w-full aspect-square object-cover rounded-lg border mb-2" />
+                  <img src={(bgComp.data.imageUrl as string) || bgComp.previewUrl!} alt="bg" loading="lazy" decoding="async" className="w-full aspect-square object-contain bg-gray-50 rounded-lg border mb-2" />
                 )}
                 <button onClick={() => onInject(bgComp)} disabled={injectedIds?.has(bgComp.id)}
                   className={`w-full flex items-center justify-center gap-1 text-[11px] font-medium py-1.5 rounded-lg border transition-colors
@@ -363,7 +538,7 @@ function ComponentRow({
       )}
       {comp.type === "BACKGROUND" && Boolean(comp.data.imageUrl) && (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={comp.data.imageUrl as string} alt="bg" className="w-full h-20 object-cover rounded-lg border" />
+        <img src={comp.data.imageUrl as string} alt="bg" className="w-full h-20 object-contain bg-gray-50 rounded-lg border" />
       )}
 
       {/* 小說明文字（aiPromptText）唔喺方塊度展示 */}

@@ -1,22 +1,23 @@
 # 功能檢查清單 + 更新紀錄
 
 > 整合版：每次換機、重大改動後照此清單逐項驗證。  
-> 最後更新：**2026-06-11**（繁中生成 + AI 合成 + 素材模型重整）
+> 最後更新：**2026-06-13**（Phase 3：AI 讀圖填描述初稿 + 潤色 UX 優化）
 
 ---
 
-## 🧭 現況 Summary（2026-06-11）
+## 🧭 現況 Summary（2026-06-13）
 
 **素材庫只有 3 種圖**（圖庫 filter）：
 | 分類 | 來源 | 內容 / 用途 |
 |---|---|---|
-| 🟠 **背景** | 背景生成 / 上傳 | 純背景圖（無人/文字/產品），**只用於合成模式**做底圖 |
+| 🟠 **背景** | 素材生成（背景）/ 上傳 | 純背景圖（無人/文字/產品），**只用於合成模式**做底圖 |
 | 🟢 **上傳** | ＋加入素材（分析圖）| 一張圖綁 構圖+配色+語氣（一體，點「調整」一次改） |
-| 🟣 **AI生成** | 生成圖片產出 | LibraryImage |
+| 🟣 **AI生成** | 生成圖片 / 素材生成（人像/插畫）| LibraryImage |
 
 **核心流程**
 - 生成圖片：繁中設計描述（唯讀預覽）→ 生成時自動翻英 → fal FLUX 出圖 + 繁中文案。
-- 產品合成：上傳去背產品圖 → **fal.ai Bria Product Shot** AI 合成（修光融合）→ 失敗 fallback sharp 疊圖。
+- 產品合成：上傳去背產品圖 → **fal.ai nano-banana**（主）/ **Bria Product Shot**（保留文字）/ **GPT image**（測試） → 失敗 fallback sharp 疊圖。
+- **素材生成**：背景（FLUX.1）/ 人像（FLUX.2 pro）/ 插畫（Recraft V3）；有參考圖可選 Nano Banana 風格遷移。
 - 以圖為單位編輯：圖片風格 popup「調整」一次改該圖 構圖/配色/語氣；uncheck 即刪。
 - Layout：/library 收起全域 Sidebar，左欄單一 +「《 返回客戶」。
 
@@ -24,10 +25,13 @@
 | 部分 | API / Model | 備註 |
 |---|---|---|
 | 讀圖分析（加入素材）| **OpenRouter `openai/gpt-4o-mini`**（vision）| `OPENROUTER_VISION_MODEL` |
-| AI 讀圖填主體 | OpenRouter `gpt-4o-mini`（vision）| describe route |
-| 文案 + 繁→英翻譯 | **OpenRouter `gpt-4o-mini`**（text）| `OPENROUTER_TEXT_MODEL`；$0.15/$0.60 per 1M |
-| 出圖（生成圖片 / 背景生成）| **fal.ai FLUX.1-schnell**（主）→ HF FLUX（備）→ Pollinations（停）| `FAL_KEY` / `HF_TOKEN` |
-| 產品合成 | **fal.ai Bria Product Shot**（~$0.04/張，主）→ sharp 疊圖（備）| `FAL_KEY` |
+| AI 讀圖填主體（素材/主體）| OpenRouter `gpt-4o-mini`（vision）| describe route；`kind=subject/background` |
+| **AI 讀圖填描述初稿** | **OpenRouter `gpt-4o-mini`**（vision）| describe route；`kind=brief`（20–30字）；接 `genType` |
+| **參考風格圖分析** | **OpenRouter `gpt-5.4-nano`**（vision）| `describeReferenceStyle`；只分析色調/光影/質感 |
+| 文案 + 繁→英翻譯 + 潤色 | **OpenRouter `gpt-4o-mini`**（text）| `OPENROUTER_TEXT_MODEL`；$0.15/$0.60 per 1M |
+| 出圖（FLUX 系列）| **fal.ai FLUX.1-schnell**（背景）/ **FLUX.2 pro**（人像）/ **Recraft V3**（插畫）→ HF FLUX（備）| `FAL_KEY` |
+| Nano Banana 風格遷移 | **fal.ai `fal-ai/nano-banana/edit`** | 素材生成（需參考圖）+ 產品合成（預設主力）|
+| 產品合成 | nano-banana（主）/ **Bria Product Shot**（保留文字）/ GPT image（測試）→ sharp | `FAL_KEY` |
 | 本機疊圖 fallback | `sharp` | 需透明去背 PNG |
 | 現時無用 | Pollinations / n8n / Anthropic | `GEN_PROVIDER=inapp` |
 
@@ -303,22 +307,92 @@
 
 ---
 
+### Week 5：2026-06-12 ~ 06-13（Phase 2：圖庫打磨 + 素材生成大升級）
+
+#### 圖庫 UI 打磨（bug 修正）
+- [x] Gallery tile：所有 AI 素材（包括人像/插畫）加 Sparkles icon
+- [x] Gallery tile：背景 tag 顯示實際引擎名（FLUX.1/Nano Banana），不再 hardcode「AI生成」
+- [x] 背景儲存時加 `mode: "flux-scene"`；Gallery API 回傳 `aiPromptText` + `mode`
+- [x] GalleryItem type 加 `aiPromptText?` + `mode?`；`engineLabel()` map 加 `"nano-banana"` → `"Nano Banana"`
+- [x] 全 3 個 popup 分支按鈕次序統一：下載 → 調整 → 移到… → 刪除
+- [x] Popup icon 顏色按 tag 色同步（背景=teal、人像=rose、插畫=amber）
+- [x] 背景 popup：加 `genType: "material"` hint 消除先跳框再縮問題
+- [x] 圖庫 click 和組件卡片 click 背景 popup 保持一致（組件卡片加 `presetComponents: [comp]` + hint）
+- [x] 背景 popup 加 AI Prompt 顯示（violet 卡，與人像/插畫格式一致）
+- [x] 背景 popup 圖片改 `object-contain bg-gray-50`（原 object-cover）
+
+#### 素材生成（GenerateAssetModal）
+- [x] 「背景生成」→「素材生成」，支援 3 種類型：背景 / 人像 / 插畫
+- [x] 人像用 FLUX.2 pro、插畫用 Recraft V3、背景用 FLUX.1
+- [x] 每種類型可選「✨潤色」擴寫描述
+
+#### 參考風格圖（Phase 2 核心）
+- [x] 參考圖區塊：URL 輸入 + 本地上傳（`POST /api/upload`）
+- [x] 清除參考圖時自動重置 engine 為 flux
+- [x] 參考圖 preview 顯示（`max-h-48 w-full`）
+- [x] `describeReferenceStyle()`：只分析色調/光影/質感/情緒，排除構圖
+- [x] `POST /api/library/polish` 接 `refImageUrl?`，先分析後潤色
+- [x] 潤色按鈕有參考圖時顯示「✨ 讀圖潤色」
+- [x] `polishBriefToChinese` 新增 `styleDesc?`，注入 styleHint（限風格不含構圖）
+- [x] 生成時：非 Nano 路徑 prepend `【參考圖風格】` 到 brief；Nano 路徑呼叫 `falSceneFromRef`
+- [x] `refImageUrl` 存入背景 `data.refImageUrl` / LibraryImage `paramsJson.refImageUrl`
+
+#### Nano Banana 引擎
+- [x] `falSceneFromRef`：prompt 明確限制「只借風格、不複製構圖/內容」
+- [x] 三種素材類型均可選 Nano Banana（需有參考圖）
+- [x] 無參考圖時 Nano Banana 自動 disable
+- [x] 引擎標籤按素材類型正確顯示：FLUX.2 pro（人像）/ Recraft V3（插畫）/ FLUX.1（背景）
+- [x] 所有 FLUX 引擎副標加「純文字生圖」
+- [x] 切換素材類型時重置 engine 為 flux
+
+#### Popup 顯示參考圖
+- [x] 三個 popup 分支均顯示參考圖（`w-full max-h-64`）
+- [x] http URL 顯示為可點擊連結，置中展示
+- [x] 背景 popup：`effectiveRefImageUrl = refImageUrl prop || bgComp.data.refImageUrl`
+- [x] library/page.tsx 從 paramsJson 提取 `refImageUrl`、`mode` 傳給 ImageDetailModal
+
+#### 重新生成/調整
+- [x] 素材生成結果頁：Results 頂部 + Footer 均加「重新生成/調整」按鈕（清空 items 返回設定頁）
+- [x] 圖庫 popup（背景/人像/插畫）底部加「重新生成 / 調整（帶入素材生成）」按鈕
+- [x] `GenerateAssetModal` 加 `init?` prop，打開時預填 description / refImageUrl / type / engine
+- [x] `library/page.tsx` 加 `generateAssetInit` state + `handleOpenGenerateAsset`（關 popup → 切 tab → 開 modal）
+
+### Week 6：2026-06-13（Phase 3：AI 讀圖填描述 + 潤色 UX）
+
+- [x] `describe/route.ts` 加 `kind="brief"` 模式（20–30字生成初稿，接 `genType` 調提示詞）
+- [x] `GenerateAssetModal`：加 `refDescribing` state（與 `polishing` 獨立）
+- [x] URL 欄 `onBlur`：貼完網址離開後，描述空時自動 AI 讀圖填初稿
+- [x] 上傳圖片成功後：自動 AI 讀圖填初稿（描述非空時靜默不覆蓋）
+- [x] 「重新讀圖」按鈕（藍色 `RefreshCw` icon）：移至描述欄右上角與「潤色」並排，`force=true` 強制覆蓋
+- [x] loading 分離：讀圖中在 label 旁顯示獨立 spinner，按鈕文字不受影響
+- [x] `polish()`：有圖無描述時自動先讀圖再潤色（一鍵兩步）
+- [x] 潤色按鈕 disabled 改為 `!description && !refImageUrl`（有圖無描述也能按）
+- [x] 潤色按鈕文字：去 emoji、去「讀圖」字眼，統一叫「潤色」
+- [x] `polishBriefToChinese` 輸出：「4–6 句」→「100字內，簡潔有創意，留空間給用戶修改」
+- [x] docs：DECISIONS（Phase 3）/ AI-ENGINES（4c 節 + 程式碼對應表）/ FEATURE_LOG（Phase 3 + API 表更新）/ GUIDE（4a 素材生成）/ CHECKLIST 更新
+
+---
+
 ## 🗂️ Backlog（未做，待確認）
 
 ### 優先級高
 - [ ] **用戶自己上傳圖片的分類調整**：目前「上傳」圖庫包含所有 previewUrl 圖片（含分析用參考圖）。需區分「品牌圖庫（用戶主動上傳）」vs「分析參考圖」，並讓用戶可調整分類。
 - [ ] **以文字指令新增素材**：在加入素材或積木選取中，可輸入文字描述（如「暖色系簡約背景」），AI 自動生成素材資料存入。
-- [ ] **生成圖 popup 刪除功能**：目前只能從風格組件的 ALL/子分頁卡片刪除；圖庫 tile 和圖片紀錄 popup 無刪除功能。
 - [ ] **配色 hex 輸入真正改色**：目前 hex 輸入框只是 UI，改色後需更新 slot 中的 palette 資料並重新編譯 prompt。
 
 ### 優先級中
-- [ ] **加入參考連結**：素材/圖片可附來源 URL；或生成台支援貼參考圖網址（AI 描述→併 prompt）
 - [ ] 圖庫 tile 可直接刪除（目前需進子分頁才有刪除）
 - [ ] n8n provider stub 接通（`GEN_PROVIDER=n8n`）
+- [ ] 素材生成：生成時顯示目前用緊哪個引擎 + 預計秒數提示
+- [ ] 參考圖：支援多張參考圖（現只支援 1 張）
 
 ### 優先級低
 - [ ] 真 img2img / 多產品合成（需付費 API）
 - [ ] 生成圖一鍵「分析加入素材庫」（目前需手動進 popup 再按分析）
+
+### ✅ 已從 Backlog 完成（Phase 2）
+- [x] **加入參考圖**：素材生成支援參考圖（URL + 本地上傳），AI 分析風格 → 影響潤色 + 生成
+- [x] **生成圖 popup 刪除功能**：三個 popup 分支均有刪除按鈕（含二次確認）
 
 ---
 

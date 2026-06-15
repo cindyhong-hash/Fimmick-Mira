@@ -16,6 +16,7 @@
 | 文檔 | 內容 | 啱邊個睇 |
 |---|---|---|
 | **[AI-ENGINES.md](./AI-ENGINES.md)** | 所有 AI 模型一覽、各引擎強項/限制、**點手動改生圖排序**、AI 技術限制 | **要改 AI 排序/換模型** |
+| **[FUNCTIONS.md](./FUNCTIONS.md)** | 函數速查：邊個函數做咩、用邊個 model/endpoint/env + API 路由 | **要搵某個生成函數** |
 
 ## 📜 想睇歷史 / 決定
 | 文檔 | 內容 | 啱邊個睇 |
@@ -43,5 +44,5 @@
 ## 一句概覽
 
 社群行銷素材工具，核心係 `/library` 素材庫（**風格組件** + **生成圖片** 兩 tab）。
-產品合成有 **3 個 AI 引擎可揀**（nano-banana 自然 / Bria 保留文字 / GPT 測試）+ 自動 fallback；純文字生圖用 FLUX。
+產品合成有 **3 個 AI 引擎可揀**（**FLUX.2 edit 主力**·中文字最清 / nano-banana 自然 / Seedream 4.5）+ 自動 fallback；純文字生圖用 FLUX；素材生成做 背景/人像/插畫。
 詳情入返上面對應文檔。

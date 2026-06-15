@@ -2,6 +2,19 @@
 
 > 本檔為 in-repo 的完整功能/變更紀錄（換電腦後 Claude 記憶不會跟住走，故記喺呢度）。
 
+## 📅 時間線 Timeline（高層里程碑）
+
+| 日期 | 里程碑 | 重點決定 / 理由 |
+|---|---|---|
+| 2026-06-09 | 接通 AI 生成 | text→image fal FLUX.1-schnell（HF 備援）；繁中 brief → 翻英餵 FLUX |
+| 2026-06-11 | 合成引擎 3 揀 1 + 繁中為主 | 試 GPT（不穩）→ nano-banana 升主力；Bria 保留文字；分析改 gpt-5.4-nano |
+| 2026-06-12~13 | Phase 2/3：素材生成 + 參考風格圖 | 素材生成（背景/人像/插畫）；參考圖只借風格不抄構圖；AI 讀圖填描述初稿 |
+| **2026-06-15** | **合成引擎大改 + 分類/文案升級** | **FLUX.2 edit 升主力**（實測中文字保真遠勝，推翻「只有保留原像素先保到中文」）；加 Seedream 4.5；**退役 Bria/GPT**；Qwen/貼圖收起；合成餵高清原圖；persona 入 system role + 潤色寫手；圖庫 5 類 + 改名；reassign |
+
+> 每個里程碑嘅詳細決定/討論見下面分節同 [DECISIONS.md](./DECISIONS.md)；引擎細節見 [AI-ENGINES.md](./AI-ENGINES.md)；函數速查見 [FUNCTIONS.md](./FUNCTIONS.md)。
+
+---
+
 ## 2026-06-15：合成引擎大改 + 文案/素材/圖庫升級
 
 ### 產品合成引擎重整（實測驅動）

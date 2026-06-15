@@ -13,6 +13,25 @@
 ## 文案：persona 入 system role + opt-in 潤色寫手（2026-06-15）
 - `generateCopy` persona 搬去正式 `system` role（遵從度高、唔被 user 內容沖淡）。
 - 加「✨潤色」：手寫短指令 → 擴寫豐富繁中 brief（可編輯、會讀背景、存入結果 AI Prompt）。翻譯仍用 `gpt-4o-mini`（平、夠用）。
+- **翻譯為何唔轉 nano**：翻譯係細任務（短 brief→英文 prompt），mini 夠用又平；判讀（vision）先用 nano。
+
+## 人像 / 插畫生成引擎揀選（2026-06-15）
+- **人像 = FLUX.2 [pro]**（`fal-ai/flux-2-pro`，~$0.03/MP）：同已用 FLUX 同家族、真人/打光/文字最強。**預設亞裔（台/港）面孔**（prompt 自動加，可關）——因為公司係香港/台灣，受眾以亞裔為主。
+- **插畫 = Recraft V3**（`fal-ai/recraft/v3/text-to-image`，style=`digital_illustration`，$0.04/張）：插畫/風格化專用，2D illustration 呢類最強。
+- **點解唔用 nano/SD/MJ 做人像/插畫**：實測 schnell 畫人/手較弱；Recraft 插畫遠勝。揀選前用真 prompt 實測比對先定。
+
+## 圖庫 / 素材分類重組（2026-06-15）
+- **抽象積木 vs 實際成圖** 分清楚：風格組件（構圖/配色/語氣/背景）= 可重用配方；圖庫成圖（產品/人像/插畫/參考圖）= 實際圖。混晒先頭痛。
+- **人像/插畫 = 純最終成圖**（下載交客戶），**唔做可重用 component** → 最簡單、免改資料模型；靠 `paramsJson.genType` 自動歸類，免 migration。
+- **背景留喺風格組件**（係可重用 backdrop，同構圖/配色/語氣同層）。
+- **改名解撞字**：「加入素材」其實係上傳客戶舊廣告圖 → 改「**上傳參考圖**」；「背景生成」擴成「**素材生成**」（背景/人像/插畫）。
+- 圖庫 filter 5 類：📎參考圖 / 🌄背景 / 🧑人像 / 🎨插畫 / 🟣產品成圖；tile 標籤統一 lucide icon + 有色 pill（取代不對稱「背景無 AI 標、其他有」）。
+- **生成圖片 = 純產品**（移除人像/插畫 selector，歸素材生成），但**保留讀圖 + 文字生成**（同事用產品文字＋積木砌圖嘅流程）。
+
+## 素材歸屬：維持客戶分開 + 加「移到其他客戶／設公用」（2026-06-15）
+- 預設仍綁當前客戶（品牌分得清）；popup 加 reassign 下拉（公用＝clientId null / 各客戶）。
+- 實作：generated 走 `PATCH /api/library/images/[id]`、組件走 `PATCH /api/components/[id]`（兩者本身已支援 clientId re-home）。
+- 理由：解決「想轉專案分類但唔得」嘅痛點，又唔使全部變公用（會混晒品牌）。
 
 ## 生成後端：in-app 可抽換（非 n8n 起步）
 - 文字用已有 OpenRouter key；圖片用免費來源。`GEN_PROVIDER=inapp|n8n` 開關，將來轉 n8n 只改 env。

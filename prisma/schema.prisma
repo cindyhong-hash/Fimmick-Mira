@@ -13,7 +13,7 @@ model Client {
   secondaryColor String?
   logoUrl        String?
   toneLabels         String     @default("[]")
-  taboos             String     @default("[]")
+  commonText         String     @default("")
   pastPostImageUrls  String     @default("[]")
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
@@ -21,16 +21,22 @@ model Client {
 }
 
 model Activity {
-  id                 String            @id @default(cuid())
-  clientId           String
-  client             Client            @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  theme              String
-  focusPoint         String
-  productImageUrl    String
-  referenceImageUrls String            @default("[]")
-  status             String            @default("PENDING")
-  createdAt          DateTime          @default(now())
-  generatedLayouts   GeneratedLayout[]
+  id                   String            @id @default(cuid())
+  clientId             String
+  client               Client            @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  theme                String
+  focusPoint           String
+  titleText            String?           // 畫面上必放的主標題文字
+  subtitleText         String?           // 畫面上必放的副標題文字
+  imagePrompt          String?           // 使用者描述的腦中畫面 prompt
+  productImageUrl      String            @default("")   // backward compat (first image)
+  productImageUrls     String            @default("[]") // 最多 5 張（JSON array）
+  referenceImageUrls   String            @default("[]")
+  selectedComponentIds String            @default("[]") // 選取的風格組件 IDs
+  imageRatio           String            @default("1:1") // 圖片比例
+  status               String            @default("PENDING")
+  createdAt            DateTime          @default(now())
+  generatedLayouts     GeneratedLayout[]
 }
 
 model GeneratedLayout {
@@ -42,6 +48,8 @@ model GeneratedLayout {
   copyText        String
   styleComponents String   @default("{}")
   isSelected      Boolean  @default(false)
+  textBurnedIn    Boolean  @default(false)  // 文字是否已由 AI 燒入圖片
+  savedToLibrary  Boolean  @default(false)  // 是否已加入素材庫（策展）
   createdAt       DateTime @default(now())
 }
 

@@ -19,8 +19,26 @@ export function AssetGrid({ clientId }: Props) {
     setLoading(true);
     const url = clientId ? `/api/assets?clientId=${clientId}` : "/api/assets";
     fetch(url)
-      .then((r) => r.json())
+      .then(async (r) => {
+        // 防止空 body 或非 JSON 回應讓 r.json() 直接 throw
+        const text = await r.text();
+        if (!r.ok || !text) {
+          console.warn(`[AssetGrid] /api/assets failed (${r.status}):`, text.slice(0, 200));
+          return [];
+        }
+        try {
+          const data = JSON.parse(text);
+          return Array.isArray(data) ? data : [];
+        } catch {
+          console.warn("[AssetGrid] /api/assets returned invalid JSON");
+          return [];
+        }
+      })
       .then(setAssets)
+      .catch((e) => {
+        console.warn("[AssetGrid] fetch error:", e);
+        setAssets([]);
+      })
       .finally(() => setLoading(false));
   }, [clientId]);
 

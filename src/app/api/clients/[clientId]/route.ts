@@ -5,7 +5,6 @@ function parseClient(client: Record<string, unknown>) {
   return {
     ...client,
     toneLabels: JSON.parse(client.toneLabels as string),
-    taboos: JSON.parse(client.taboos as string),
     pastPostImageUrls: JSON.parse((client.pastPostImageUrls as string) ?? "[]"),
   };
 }
@@ -25,7 +24,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ cl
   const body = await request.json();
   const updateData: Record<string, unknown> = { ...body };
   if (body.toneLabels) updateData.toneLabels = JSON.stringify(body.toneLabels);
-  if (body.taboos) updateData.taboos = JSON.stringify(body.taboos);
   if (body.pastPostImageUrls) updateData.pastPostImageUrls = JSON.stringify(body.pastPostImageUrls);
 
   const client = await db.client.update({

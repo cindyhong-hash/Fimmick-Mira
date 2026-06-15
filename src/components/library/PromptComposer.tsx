@@ -198,13 +198,12 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
   const [productUploading, setProductUploading] = useState(false);
   // Output size — 正方形 1200×1200 or 橫向 1800×1200.
   const [size, setSize] = useState<"square" | "landscape">("square");
-  // 合成方式引擎：nano（自然，可多產品）/ bria（保留文字，限單圖）/ gpt（GPT-5.4 image，測試用，限單圖）。
-  const [engine, setEngine] = useState<"nano" | "bria" | "gpt">("nano");
+  // 合成方式引擎（全部支援多產品）：flux2edit（主力）/ nano / seedream / qwen / paste（文字保真貼圖）。
+  const [engine, setEngine] = useState<"flux2edit" | "nano" | "seedream" | "qwen" | "paste">("flux2edit");
   const [describing, setDescribing] = useState(false);
   const composite = inputMode === "image" && productUrls.length > 0;
-  // Bria / GPT 係單圖引擎；2 件或以上唔可以揀，自動回落 nano-banana（自然合成）。
-  const canSingle = productUrls.length <= 1;
-  const effEngine: "nano" | "bria" | "gpt" = canSingle ? engine : "nano";
+  // 五個引擎全部支援多產品，毋須單圖限制。
+  const effEngine = engine;
 
   // ── Inline-edit overrides (local; never overwrite the library component) ──
   const [layoutDescOv, setLayoutDescOv] = useState<string | null>(null);
@@ -668,25 +667,21 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
         {inputMode === "image" && (
           <div className="space-y-2">
             <label className="text-xs font-semibold text-gray-500">合成方式</label>
-            <div className="flex gap-1.5">
-              <button type="button" onClick={() => setEngine("nano")}
-                className={`flex-1 text-left text-xs px-3 py-2 rounded-lg border transition-colors ${effEngine === "nano" ? "bg-violet-600 text-white border-violet-600" : "bg-white border-gray-200 text-gray-600 hover:border-gray-300"}`}>
-                <div className="font-semibold">自然合成（nano-banana）</div>
-                <div className={`text-[10px] leading-snug ${effEngine === "nano" ? "text-violet-100" : "text-gray-400"}`}>最自然、可多產品</div>
-              </button>
-              <button type="button" disabled={!canSingle} onClick={() => setEngine("bria")}
-                className={`flex-1 text-left text-xs px-3 py-2 rounded-lg border transition-colors disabled:opacity-45 disabled:cursor-not-allowed ${effEngine === "bria" ? "bg-violet-600 text-white border-violet-600" : "bg-white border-gray-200 text-gray-600 hover:border-gray-300"}`}>
-                <div className="font-semibold">保留文字（Bria）</div>
-                <div className={`text-[10px] leading-snug ${effEngine === "bria" ? "text-violet-100" : "text-gray-400"}`}>融合感稍遜，限單圖</div>
-              </button>
-              <button type="button" disabled={!canSingle} onClick={() => setEngine("gpt")}
-                className={`flex-1 text-left text-xs px-3 py-2 rounded-lg border transition-colors disabled:opacity-45 disabled:cursor-not-allowed ${effEngine === "gpt" ? "bg-violet-600 text-white border-violet-600" : "bg-white border-gray-200 text-gray-600 hover:border-gray-300"}`}>
-                <div className="font-semibold">GPT-5.4 image</div>
-                <div className={`text-[10px] leading-snug ${effEngine === "gpt" ? "text-violet-100" : "text-gray-400"}`}>測試用；限單圖、provider 不穩可能要等</div>
-              </button>
+            <div className="flex gap-1.5 flex-wrap">
+              {([
+                { key: "flux2edit", title: "FLUX.2 edit · 主力", sub: "中文字最清晰；產品多於 1 張時字會微糊" },
+                { key: "nano", title: "nano-banana", sub: "場景最自然；字會糊，適合無產品文字合成" },
+                { key: "seedream", title: "Seedream 4.5", sub: "多圖文字效果優於 FLUX；偶有機率出錯字" },
+              ] as const).map((e) => (
+                <button key={e.key} type="button" onClick={() => setEngine(e.key)}
+                  className={`flex-1 min-w-[30%] text-left text-xs px-3 py-2 rounded-lg border transition-colors ${effEngine === e.key ? "bg-violet-600 text-white border-violet-600" : "bg-white border-gray-200 text-gray-600 hover:border-gray-300"}`}>
+                  <div className="font-semibold">{e.title}</div>
+                  <div className={`text-[10px] leading-snug ${effEngine === e.key ? "text-violet-100" : "text-gray-400"}`}>{e.sub}</div>
+                </button>
+              ))}
             </div>
             <p className="text-[10px] text-gray-400 leading-snug">
-              不加背景圖、由 AI 生成場景會更自然。⚠️ AI 技術限制：產品上的中文小字／說明文字可能模糊或扭曲。
+              主力 FLUX.2 edit 中文字保真最好（已自動餵高清原圖）。三者皆支援多產品；不加背景圖、由 AI 生成場景會更自然。
             </p>
           </div>
         )}

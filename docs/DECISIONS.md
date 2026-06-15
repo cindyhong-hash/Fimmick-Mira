@@ -2,6 +2,18 @@
 
 記低重要決定同理由，方便日後（或換機後）唔使重新諗。
 
+## 產品合成引擎：FLUX.2 edit 主力 → nano / Seedream（2026-06-15，取代舊 Bria 決定）
+- **主力 = FLUX.2 edit**（`fal-ai/flux-2-pro/edit`）。理由：實測用真產品圖（Schick 舒芙），**重畫型模型都保到中文標籤**，FLUX.2 edit 單圖近乎逐隻字清晰，又可換背景、收多圖 —— 推翻舊「只有保留原像素先保到中文」嘅假設。
+- 第二／後備：**nano-banana**（場景最自然，但會重畫產品 → 中文糊，適合無產品文字）、**Seedream 4.5**（多圖文字較好、穩定，偶有錯字）。
+- **合成前餵高清原圖**（2048/1280，唔再降 1024）→ 重畫出嚟嘅字清好多。
+- **退役 Bria + GPT**：Bria 去背差、產品變細；GPT（OpenRouter 影像模型）provider 常 crash／hang。已從 UI 同 `order` 移除。
+- **Qwen edit / 文字保真貼圖**：實測（前者又暗又慢易 timeout、後者融合平）效果不及主力，故 **UI 收起但保留函數**（要 100% 保字先用貼圖）。
+- env：`FAL_FLUX2_EDIT_MODEL` / `FAL_SEEDREAM_EDIT_MODEL` / `FAL_QWEN_EDIT_MODEL`。詳見 `docs/AI-ENGINES.md`。
+
+## 文案：persona 入 system role + opt-in 潤色寫手（2026-06-15）
+- `generateCopy` persona 搬去正式 `system` role（遵從度高、唔被 user 內容沖淡）。
+- 加「✨潤色」：手寫短指令 → 擴寫豐富繁中 brief（可編輯、會讀背景、存入結果 AI Prompt）。翻譯仍用 `gpt-4o-mini`（平、夠用）。
+
 ## 生成後端：in-app 可抽換（非 n8n 起步）
 - 文字用已有 OpenRouter key；圖片用免費來源。`GEN_PROVIDER=inapp|n8n` 開關，將來轉 n8n 只改 env。
 - 理由：最快令功能 work；n8n 要起服務、維護、debug 較煩，留待之後。

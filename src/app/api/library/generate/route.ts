@@ -4,7 +4,7 @@ import path from "path";
 import { randomUUID } from "crypto";
 import sharp from "sharp";
 import { db } from "@/lib/db";
-import { generateImage, generateCopy, compileChineseBrief, translateBriefToEnglishPrompt, falProductShot, gptImageComposite, falImageEdit, falUpscale, describeReferenceStyle, falSceneFromRef, type GeneratedImage } from "@/lib/generate";
+import { generateImage, generateCopy, compileChineseBrief, translateBriefToEnglishPrompt, falFlux2Edit, falSeedreamEdit, falQwenEdit, falImageEdit, falRemoveBg, falUpscale, describeReferenceStyle, falSceneFromRef, type GeneratedImage } from "@/lib/generate";
 
 const W = 1024;
 const H = 1024;
@@ -117,26 +117,21 @@ export async function POST(request: Request) {
       }) || "簡潔專業棚拍背景、柔光";
       const sceneEn = await translateBriefToEnglishPrompt(sceneCn);
 
-      // Shared inputs as DOWNSCALED JPEG data URIs (≤1024px). Re-encoding a product photo to PNG
-      // bloats it to several MB and made the multi-image GPT request time out — JPEG keeps the
-      // payload small so the model responds in seconds.
+      // 餵高清原圖：合成前唔再降到 1024（實測高清令標籤/中文字清晰好多）。
+      // 單／雙產品 → 2048；三產品 → 1280（避免多圖 payload 過大令模型 timeout）。
+      const prodMax = productUrls.length >= 3 ? 1280 : 2048;
       const toJpegUri = async (buf: Buffer) =>
         `data:image/jpeg;base64,${(await sharp(buf)
-          .resize(1024, 1024, { fit: "inside", withoutEnlargement: true })
-          .jpeg({ quality: 85 })
+          .resize(prodMax, prodMax, { fit: "inside", withoutEnlargement: true })
+          .jpeg({ quality: 92 })
           .toBuffer()).toString("base64")}`;
       const productDataUris = await Promise.all(productBuffers.map(toJpegUri));
-      const productDataUri = productDataUris[0]; // first product — for single-image engines (GPT/Bria)
       // With 3 products, feeding the background as a 4th image overloads the model — use it as
       // TEXT only (its name is already folded into sceneEn via backgroundDesc).
       let refImageDataUri: string | undefined;
       if (bgImageUrl && productUrls.length < 3) {
         refImageDataUri = await toJpegUri(await loadImageBuffer(bgImageUrl, host));
       }
-
-      // Higher-res product (2048) for Bria — more label detail = sharper text.
-      const toJpegUriHi = async (buf: Buffer) =>
-        `data:image/jpeg;base64,${(await sharp(buf).resize(2048, 2048, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 92 }).toBuffer()).toString("base64")}`;
 
       // Persist a composite result + return the API response.
       const saveComposite = async (img: GeneratedImage, mode: string, promptStr: string, copyText: string | null) => {
@@ -156,12 +151,19 @@ export async function POST(request: Request) {
         return NextResponse.json({ id: row.id, imageUrl, copyText, mode: `ai-composite-${mode}` });
       };
 
-      // ── Text-preserving mode: Bria product-shot (single product only) — keeps the REAL product
-      //    (label/Chinese intact), natural placement, clean matte. Multi-product is blocked in the UI. ──
       // ── Engine selection (user-chosen via 合成方式): try the chosen primary, then fall back. ──
-      //   • nano  — fal nano-banana (natural, multi-product; may garble text)
-      //   • bria  — Bria product-shot (keeps real product/text; single product)
-      //   • gpt   — GPT-5.4 image 2 (testing; single product)
+      //   • flux2edit — FLUX.2 pro edit（主力：中文字保真最好、可換背景、收多產品）
+      //   • nano      — fal nano-banana（自然、多產品；中文字可能糊）
+      //   • seedream  — Seedream 4.5 edit（場景最自然、穩定；取代 GPT）
+      //   • qwen      — Qwen Image Edit Plus（中文字專家，較慢）
+      //   • paste     — 文字保真貼圖（rembg 真像素貼上，字 100% 不糊；融合感較平）
+      const tryFlux2Edit = async () => {
+        const [img, copy] = await Promise.all([
+          falFlux2Edit({ productDataUris, refImageDataUri, sceneDescription: sceneEn, aspectRatio }),
+          generateCopy(copyInput),
+        ]);
+        return saveComposite(img, "flux2-edit", `[AI 合成] ${sceneCn}`, copy.copyText);
+      };
       const tryNano = async () => {
         const [img, copy] = await Promise.all([
           falImageEdit({ productDataUris, refImageDataUri, sceneDescription: sceneEn, aspectRatio }),
@@ -169,36 +171,55 @@ export async function POST(request: Request) {
         ]);
         return saveComposite(img, "fal-edit", `[AI 合成] ${sceneCn}`, copy.copyText);
       };
-      const tryGpt = async () => {
+      const trySeedream = async () => {
         const [img, copy] = await Promise.all([
-          gptImageComposite({ productDataUri, sceneDescription: sceneEn, aspectRatio }),
+          falSeedreamEdit({ productDataUris, refImageDataUri, sceneDescription: sceneEn, aspectRatio }),
           generateCopy(copyInput),
         ]);
-        return saveComposite(img, "gpt-image", `[AI 合成] ${sceneCn}`, copy.copyText);
+        return saveComposite(img, "seedream-edit", `[AI 合成] ${sceneCn}`, copy.copyText);
       };
-      const tryBria = async () => {
+      const tryQwen = async () => {
         const [img, copy] = await Promise.all([
-          falProductShot({ productDataUri: await toJpegUriHi(productBuffers[0]), refImageDataUri, sceneDescription: bgImageUrl ? undefined : sceneEn }),
+          falQwenEdit({ productDataUris, refImageDataUri, sceneDescription: sceneEn, aspectRatio }),
           generateCopy(copyInput),
         ]);
-        return saveComposite(img, "bria-preserve", `[保留文字合成] ${sceneCn}`, copy.copyText);
+        return saveComposite(img, "qwen-edit", `[AI 合成] ${sceneCn}`, copy.copyText);
+      };
+      // 文字保真：rembg 攞每件產品真像素 → 貼落 AI/所選背景（唔重畫 → 中文字 100% 清晰）。
+      const tryPaste = async () => {
+        const cutouts = await Promise.all(productBuffers.map(async (b) =>
+          falRemoveBg(`data:image/png;base64,${(await sharp(b).png().toBuffer()).toString("base64")}`)));
+        const backdrop = bgImageUrl
+          ? await loadImageBuffer(bgImageUrl, host)
+          : (await generateImage({ prompt: sceneEn, seed, width: outW, height: outH })).buffer;
+        const base = await sharp(backdrop).resize(outW, outH, { fit: "cover" }).toBuffer();
+        const k = cutouts.length;
+        const layers = [];
+        for (let idx = 0; idx < k; idx++) {
+          const prod = await sharp(cutouts[idx])
+            .resize({ width: Math.round(outW * (k === 1 ? 0.6 : 0.42)), height: Math.round(outH * (k === 1 ? 0.72 : 0.58)), fit: "inside" })
+            .png().toBuffer();
+          const pm = await sharp(prod).metadata();
+          const slot = outW / k;
+          layers.push({
+            input: prod,
+            left: Math.max(0, Math.round(slot * idx + (slot - (pm.width ?? 0)) / 2)),
+            top: Math.max(0, Math.round(outH * 0.93 - (pm.height ?? 0))),
+          });
+        }
+        const out = await sharp(base).composite(layers).png().toBuffer();
+        const copy = await generateCopy(copyInput);
+        return saveComposite({ buffer: out, contentType: "image/png", seed: 0 }, "paste-text", `[文字保真貼圖] ${sceneCn}`, copy.copyText);
       };
       // ╔══════════════════════════════════════════════════════════════════════════════════╗
-      // ║ 手動改「AI 生圖引擎排序」就改呢個 `order`。                                          ║
-      // ║ ────────────────────────────────────────────────────────────────────────────────  ║
-      // ║ • 每一行係一個 engine 選擇對應嘅「嘗試次序」(array)。                                ║
-      // ║   第 1 個 = 主力；失敗（出錯／timeout）就順序試下一個；全部失敗先去下面 sharp 疊圖。 ║
-      // ║ • 三個可用嘗試：tryNano（nano-banana）、tryBria（Bria 保留文字）、tryGpt（GPT image）。║
-      // ║                                                                                     ║
-      // ║ 例：想 nano-banana 永遠優先、GPT 永不參與 → 全部改成 [tryNano, tryBria]。            ║
-      // ║ 例：想預設改用 Bria → 把最後一行（else 分支）改成 [tryBria, tryNano, tryGpt]。       ║
-      // ║ 例：加一個新引擎 → 喺上面寫多個 tryXXX() helper，再加入呢度嘅 array。                ║
-      // ║ 注意：tryBria / tryGpt 係「單圖」引擎（只用 productBuffers[0]），多產品時 UI 已禁用； ║
-      // ║       但佢哋仍可做 fallback（只會用第一件產品）。詳見 docs/AI-ENGINES.md。           ║
+      // ║ 「AI 生圖引擎排序」：改下面 `order`。第 1 個=主力，失敗順序試下一個，全失敗先 sharp 疊圖。║
+      // ║  helper：tryFlux2Edit（主力）、tryNano、trySeedream、tryQwen、tryPaste。詳見 docs/AI-ENGINES.md。║
       // ╚══════════════════════════════════════════════════════════════════════════════════╝
-      const order = engine === "bria" ? [tryBria, tryNano, tryGpt]
-        : engine === "gpt" ? [tryGpt, tryNano, tryBria]
-        : [tryNano, tryGpt, tryBria];   // 預設（engine 未指定 / "nano"）：nano-banana 行先
+      const order = engine === "nano" ? [tryNano, tryFlux2Edit]
+        : engine === "seedream" ? [trySeedream, tryFlux2Edit, tryNano]
+        : engine === "qwen" ? [tryQwen, tryFlux2Edit, tryNano]
+        : engine === "paste" ? [tryPaste, tryFlux2Edit]
+        : [tryFlux2Edit, tryNano];   // 預設 / "flux2edit"：FLUX.2 edit 主力 → Nano 後備
       for (const attempt of order) {
         try { return await attempt(); }
         catch (e) { console.error("[composite] engine attempt failed, trying next:", e instanceof Error ? e.message : e); }

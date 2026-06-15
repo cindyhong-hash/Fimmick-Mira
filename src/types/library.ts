@@ -170,10 +170,14 @@ export function engineLabel(paramsJson?: string | null): string | null {
     if (!mode) return null;
     const map: Record<string, string> = {
       "fal-edit": "Nano Banana",
+      "flux2-edit": "FLUX.2 edit",
+      "seedream-edit": "Seedream 4.5",
+      "qwen-edit": "Qwen edit",
       "bria-preserve": "Bria",
       "bria": "Bria",
       "gpt-image": "GPT image",
-      "paste-text": "疊圖",
+      "gpt-image-mini": "GPT image mini",
+      "paste-text": "文字保真",
       "sharp": "疊圖",
       "flux": "FLUX",
       "flux-scene": "FLUX.1",

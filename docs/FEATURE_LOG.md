@@ -2,6 +2,41 @@
 
 > 本檔為 in-repo 的完整功能/變更紀錄（換電腦後 Claude 記憶不會跟住走，故記喺呢度）。
 
+## 2026-06-15：合成引擎大改 + 文案/素材/圖庫升級
+
+### 產品合成引擎重整（實測驅動）
+- **FLUX.2 edit 升做主力**（`fal-ai/flux-2-pro/edit`，`FAL_FLUX2_EDIT_MODEL`）：實測用真產品圖（Schick 舒芙），單圖中文字保真度遠勝 nano/Bria，幾乎逐隻清晰，仲可換背景、收多圖。
+- **加 Seedream 4.5 edit**（`fal-ai/bytedance/seedream/v4.5/edit`）：場景最自然、穩定、多圖文字優於 FLUX（偶有錯字）。
+- **退役 Bria + GPT**：Bria 去背差/產品變細；GPT provider 常 crash。已從 UI/排序移除。
+- **Qwen edit + 文字保真貼圖**：函數/排序保留，但實測效果不及，**UI 收起**（`qwen`/`paste` engine 值仍可用）。
+- **合成前餵高清原圖**：唔再降到 1024（單/雙產品 2048、三產品 1280，q92）→ 字清好多。
+- UI「合成方式」3 揀 1：FLUX.2 edit·主力 / nano-banana / Seedream 4.5，全部支援多產品。
+- 對應：`src/lib/generate.ts`（`falFlux2Edit`/`falSeedreamEdit`/`falQwenEdit` + 共用 `buildProductEditPrompt`）、`route.ts`（`order` + `tryPaste`）、`PromptComposer.tsx`、`types/library.ts`（`engineLabel`）。
+
+### 文案 persona 入 system role（#1）
+- `generateCopy` 把 persona/語言規定/輸出格式由 user message 搬入正式 `system` role（`COPY_SYSTEM`）→ 更守字數、少堆砌、語感更貼地。
+
+### 文案潤色寫手（#2）
+- `polishBriefToChinese` + `POST /api/library/polish`：手寫短指令 → 擴寫成豐富繁中 brief，回傳可編輯 textarea（opt-in）。
+- 潤色後 brief 存入結果 AI Prompt；潤色會讀已選背景名；合成模式潤「場景描述」（不含主體，經 `sceneOverride` 餵合成）。
+- 後續（並行）加：參考風格圖分析（`describeReferenceStyle`）注入潤色。
+
+### 素材生成（原「背景生成」改名）
+- 三類分頁：背景（FLUX.1→組件）/ 人像（FLUX.2 pro→圖庫成圖，預設亞裔台港）/ 插畫（Recraft V3→圖庫成圖）。
+- 張數 1–5；每類 ✨潤色。
+
+### 圖庫分類 + 統一標籤
+- filter：📎參考圖 / 🌄背景 / 🧑人像 / 🎨插畫 / 🟣產品成圖（人像/插畫靠 `paramsJson.genType` 自動歸類，免 migration）。
+- tile 標籤統一：lucide icon + 有色類型 pill + model 標（背景亦標 AI生成）；filter 選中色非黑。
+- 改名：「加入素材」→「上傳參考圖」、「背景生成」→「素材生成」。
+
+### popup + reassign
+- 人像/插畫/背景 popup 統一大圖（object-contain，唔 crop）；人像/插畫唔顯示積木箱。
+- 加「移到其他客戶／設公用」reassign（generated 走 images PATCH、組件走 components PATCH）。
+- 生成圖片：移除人像/插畫 selector（歸素材生成），保留讀圖 + 文字生成；加產品圖改全幅可點 dropzone。
+
+---
+
 ## 素材庫重構（接通 AI 生成 + 統一圖庫）
 
 ### 接通圖片 + 文案生成（in-app，可抽換）

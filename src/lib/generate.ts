@@ -33,9 +33,17 @@ const FAL_KEY = process.env.FAL_KEY;
 // gpt-5.4-image-2: better composite quality than gpt-5-image-mini (mini was cheaper/faster but
 // the output quality was not good enough). All OpenAI image models on OpenRouter are intermittent.
 const OPENROUTER_IMAGE_MODEL = process.env.OPENROUTER_IMAGE_MODEL ?? "openai/gpt-5.4-image-2";
+// GPT 影像合成 fallback：gpt crash 時先試呢個較穩較平嘅 mini，再先到 nano/flux2。
+export const OPENROUTER_IMAGE_MODEL_FALLBACK = process.env.OPENROUTER_IMAGE_MODEL_FALLBACK ?? "openai/gpt-5-image-mini";
 // fal.ai image-editing model (Gemini "nano-banana"): reliable, ~8s, accepts MULTIPLE input images
 // (product + the actual background), so it can use the chosen background — not just a text scene.
 const FAL_EDIT_MODEL = process.env.FAL_EDIT_MODEL ?? "fal-ai/nano-banana/edit";
+// fal.ai FLUX.2 [pro] edit — 產品合成主力：實測中文字保真度遠勝 nano/bria，仍可換背景/多參考圖。
+const FAL_FLUX2_EDIT_MODEL = process.env.FAL_FLUX2_EDIT_MODEL ?? "fal-ai/flux-2-pro/edit";
+// fal.ai Seedream 4.5 edit — 取代 GPT：場景最自然、穩定不 crash、中文字同級、收多圖。
+const FAL_SEEDREAM_EDIT_MODEL = process.env.FAL_SEEDREAM_EDIT_MODEL ?? "fal-ai/bytedance/seedream/v4.5/edit";
+// fal.ai Qwen Image Edit Plus — 中文字專家（autoregressive），收多圖；較慢，用較少 steps。
+const FAL_QWEN_EDIT_MODEL = process.env.FAL_QWEN_EDIT_MODEL ?? "fal-ai/qwen-image-edit-plus";
 // fal.ai background-removal (transparent PNG cutout) — used by the text-preserving paste pipeline.
 const FAL_REMBG_MODEL = process.env.FAL_REMBG_MODEL ?? "fal-ai/birefnet";
 // fal.ai upscaler — opt-in "源圖高清化" for low-res product photos (faithful, low creativity).
@@ -422,6 +430,7 @@ export interface GptCompositeInput {
   refImageDataUri?: string;     // optional generated-background reference
   sceneDescription?: string;    // scene steer (used always; English works best)
   aspectRatio?: string;         // "1:1" | "3:2" — output aspect
+  model?: string;               // override OpenRouter image model (e.g. mini fallback)
 }
 
 export async function gptImageComposite(i: GptCompositeInput): Promise<GeneratedImage> {
@@ -448,7 +457,7 @@ export async function gptImageComposite(i: GptCompositeInput): Promise<Generated
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${OPENROUTER_API_KEY}`, "Content-Type": "application/json", "X-Title": "Marketing Tool" },
-    body: JSON.stringify({ model: OPENROUTER_IMAGE_MODEL, modalities: ["image", "text"], messages: [{ role: "user", content }] }),
+    body: JSON.stringify({ model: i.model ?? OPENROUTER_IMAGE_MODEL, modalities: ["image", "text"], messages: [{ role: "user", content }] }),
     // All OpenAI image models on OpenRouter (gpt-5-image-mini / gpt-5-image / gpt-5.4-image-2) are
     // intermittent — sometimes ~1s, sometimes hang for minutes. 60s gives the responsive windows a
     // better chance; otherwise it falls back to the next engine.
@@ -518,6 +527,115 @@ export async function falImageEdit(i: FalEditInput): Promise<GeneratedImage> {
   if (!url) throw new Error("fal 影像編輯回應無圖片 URL");
   const imgRes = await fetch(url, { signal: AbortSignal.timeout(60_000) });
   if (!imgRes.ok) throw new Error(`fal 編輯圖片下載失敗：${imgRes.status}`);
+  return { buffer: Buffer.from(await imgRes.arrayBuffer()), contentType: imgRes.headers.get("content-type") ?? "image/png", seed: 0 };
+}
+
+/**
+ * 產品合成主力：fal FLUX.2 [pro] edit（fal-ai/flux-2-pro/edit）。
+ * 實測：中文字／標籤保真度遠勝 nano-banana 同 Bria；仍可換背景（文字場景或參考背景圖）、收多張產品。
+ * 同 falImageEdit 一樣收 image_urls（產品[+背景]），prompt 指定擺位與保留標籤。
+ */
+export async function falFlux2Edit(i: FalEditInput): Promise<GeneratedImage> {
+  if (!FAL_KEY) throw new Error("FAL_KEY 未設定，無法用 FLUX.2 edit");
+  const products = i.productDataUris.filter(Boolean);
+  if (!products.length) throw new Error("falFlux2Edit: 無產品圖");
+  const n = products.length;
+  const subj = n === 1 ? "the product shown in the FIRST image" : `the ${n} products shown in the first ${n} images`;
+  const arrange = n === 1 ? "place it naturally" : "arrange them together naturally side by side";
+  const keep = n === 1
+    ? "Keep the product's exact shape, colour, label text (including all Chinese characters) and proportions 100% unchanged — do not redraw or restyle the label."
+    : "Keep EACH product's exact shape, colour, label text (including all Chinese characters) and proportions 100% unchanged; do not merge, duplicate or restyle them.";
+  const where = i.refImageDataUri
+    ? "into the scene shown in the LAST image"
+    : `into this scene: ${i.sceneDescription?.trim() || "a clean professional studio with soft natural light"}`;
+  const prompt = `Take ${subj} and ${arrange} ${where}. Relight to match the scene, add a realistic soft shadow and subtle reflection, and correct perspective so it sits believably. ${keep} Photorealistic, no added text or logo.`;
+  const image_urls = i.refImageDataUri ? [...products, i.refImageDataUri] : products;
+
+  const res = await fetch(`https://fal.run/${FAL_FLUX2_EDIT_MODEL}`, {
+    method: "POST",
+    headers: { Authorization: `Key ${FAL_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt, image_urls, image_size: i.aspectRatio === "3:2" ? "landscape_4_3" : "square_hd" }),
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new Error(`FLUX.2 edit 錯誤 ${res.status}: ${t.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const url = data.images?.[0]?.url ?? data.image?.url;
+  if (!url) throw new Error("FLUX.2 edit 回應無圖片 URL");
+  const imgRes = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+  if (!imgRes.ok) throw new Error(`FLUX.2 edit 圖片下載失敗：${imgRes.status}`);
+  return { buffer: Buffer.from(await imgRes.arrayBuffer()), contentType: imgRes.headers.get("content-type") ?? "image/png", seed: 0 };
+}
+
+/** 共用：產品合成 edit prompt（多圖排位 + 強調保留中文標籤）。 */
+function buildProductEditPrompt(i: FalEditInput): string {
+  const n = i.productDataUris.filter(Boolean).length;
+  const subj = n === 1 ? "the product shown in the FIRST image" : `the ${n} products shown in the first ${n} images`;
+  const arrange = n === 1 ? "place it naturally" : "arrange them together naturally side by side";
+  const keep = n === 1
+    ? "Keep the product's exact shape, colour, label text (including all Chinese characters) and proportions 100% unchanged — do not redraw or restyle the label."
+    : "Keep EACH product's exact shape, colour, label text (including all Chinese characters) and proportions 100% unchanged; do not merge, duplicate or restyle them.";
+  const where = i.refImageDataUri
+    ? "into the scene shown in the LAST image"
+    : `into this scene: ${i.sceneDescription?.trim() || "a clean professional studio with soft natural light"}`;
+  return `Take ${subj} and ${arrange} ${where}. Relight to match the scene, add a realistic soft shadow and subtle reflection, and correct perspective so it sits believably. ${keep} Photorealistic, no added text or logo.`;
+}
+
+/**
+ * GPT 替代之一：fal Seedream 4.5 edit — 場景最自然、穩定、收多圖、中文字同 FLUX 同級。
+ */
+export async function falSeedreamEdit(i: FalEditInput): Promise<GeneratedImage> {
+  if (!FAL_KEY) throw new Error("FAL_KEY 未設定，無法用 Seedream edit");
+  const products = i.productDataUris.filter(Boolean);
+  if (!products.length) throw new Error("falSeedreamEdit: 無產品圖");
+  const image_urls = i.refImageDataUri ? [...products, i.refImageDataUri] : products;
+  const res = await fetch(`https://fal.run/${FAL_SEEDREAM_EDIT_MODEL}`, {
+    method: "POST",
+    headers: { Authorization: `Key ${FAL_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt: buildProductEditPrompt(i), image_urls, image_size: i.aspectRatio === "3:2" ? "landscape_4_3" : "square_hd" }),
+    signal: AbortSignal.timeout(180_000),
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new Error(`Seedream edit 錯誤 ${res.status}: ${t.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const url = data.images?.[0]?.url ?? data.image?.url;
+  if (!url) throw new Error("Seedream edit 回應無圖片 URL");
+  const imgRes = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+  if (!imgRes.ok) throw new Error(`Seedream edit 圖片下載失敗：${imgRes.status}`);
+  return { buffer: Buffer.from(await imgRes.arrayBuffer()), contentType: imgRes.headers.get("content-type") ?? "image/png", seed: 0 };
+}
+
+/**
+ * GPT 替代之二：fal Qwen Image Edit Plus — 中文字專家；收多圖。較慢，故用較少 steps + acceleration。
+ */
+export async function falQwenEdit(i: FalEditInput): Promise<GeneratedImage> {
+  if (!FAL_KEY) throw new Error("FAL_KEY 未設定，無法用 Qwen edit");
+  const products = i.productDataUris.filter(Boolean);
+  if (!products.length) throw new Error("falQwenEdit: 無產品圖");
+  const image_urls = i.refImageDataUri ? [...products, i.refImageDataUri] : products;
+  const res = await fetch(`https://fal.run/${FAL_QWEN_EDIT_MODEL}`, {
+    method: "POST",
+    headers: { Authorization: `Key ${FAL_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      prompt: buildProductEditPrompt(i), image_urls,
+      image_size: i.aspectRatio === "3:2" ? "landscape_4_3" : "square_hd",
+      num_inference_steps: 30, acceleration: "regular", output_format: "jpeg",
+    }),
+    signal: AbortSignal.timeout(280_000),
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new Error(`Qwen edit 錯誤 ${res.status}: ${t.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const url = data.images?.[0]?.url ?? data.image?.url;
+  if (!url) throw new Error("Qwen edit 回應無圖片 URL");
+  const imgRes = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+  if (!imgRes.ok) throw new Error(`Qwen edit 圖片下載失敗：${imgRes.status}`);
   return { buffer: Buffer.from(await imgRes.arrayBuffer()), contentType: imgRes.headers.get("content-type") ?? "image/png", seed: 0 };
 }
 

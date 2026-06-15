@@ -9,10 +9,12 @@
 
 | 用途 | 模型 / 服務 | 喺邊度設定 | 強項 | 限制 |
 |---|---|---|---|---|
-| **產品合成（主力）** | fal.ai **nano-banana**（Google Gemini 2.5 Flash Image，`fal-ai/nano-banana/edit`）| `FAL_EDIT_MODEL` | 快（~8s）、穩、**收多張圖**（多產品 + 真背景圖）、自動去背+打光+透視 | **會重畫產品 → 產品上中文/小字易走樣** |
-| **產品合成（保留文字）** | fal.ai **Bria product-shot**（`fal-ai/bria/product-shot`）| 函數內 | **保留產品原像素**（標籤/中文唔被重畫）、自然擺位（automatic）、商用授權 | **單圖**（只食 1 件產品）、~25s、融合感稍遜 |
-| **產品合成（測試）** | OpenRouter **GPT-5.4 image 2**（`openai/gpt-5.4-image-2`）| `OPENROUTER_IMAGE_MODEL` | 順嗰陣質素好 | **provider 極不穩定**（時秒回、時 hang 幾分鐘）、單圖、會重畫文字 |
+| **產品合成（主力）** | fal.ai **FLUX.2 [pro] edit**（`fal-ai/flux-2-pro/edit`）| `FAL_FLUX2_EDIT_MODEL` | **中文字保真最好**（實測單圖幾乎逐隻清晰）、可換背景/真背景圖、**收多圖**、場景自然 | 多於 1 張產品時細字會微糊（生成式先天限制）|
+| **產品合成（自然）** | fal.ai **nano-banana**（Gemini，`fal-ai/nano-banana/edit`）| `FAL_EDIT_MODEL` | 快（~8s）、穩、收多圖、場景最自然 | **會重畫產品 → 中文/小字易糊**，適合無產品文字之合成 |
+| **產品合成（Seedream）** | fal.ai **Seedream 4.5 edit**（`fal-ai/bytedance/seedream/v4.5/edit`）| `FAL_SEEDREAM_EDIT_MODEL` | 場景最自然、穩定、收多圖；多圖文字優於 FLUX | 偶有機率出錯字、~1分鐘 |
+| **產品合成（後端保留，UI 隱藏）** | **Qwen Image Edit Plus**（`fal-ai/qwen-image-edit-plus`）/ **文字保真貼圖**（rembg 真像素疊圖）| `FAL_QWEN_EDIT_MODEL` / 函數內 | Qwen=中文字專家；貼圖=字 100% 不糊 | Qwen 慢易 timeout；貼圖融合感平。實測效果不及上述，故 UI 收起（函數仍在）|
 | **產品合成（最後備援）** | `sharp` 機械疊圖 | 函數內 | 一定出到（本機）| 需透明去背 PNG、無打光、最「死版」 |
+| **〔已退役〕Bria product-shot / GPT image** | — | — | — | Bria 去背差、產品變細；GPT provider 極不穩定常 crash。**已從 UI/排序移除**（被 FLUX.2 edit + Seedream 取代）|
 | **純文字生圖**（文字主體 / 背景生成）| fal.ai **FLUX.1-schnell**（`fal-ai/flux/schnell`）→ HF FLUX 備援 → Pollinations（停）| `HF_IMAGE_MODEL` 等 | 快、平、prompt 跟得好 | 文字（尤其中文）一樣弱 |
 | **去背** | fal.ai **birefnet**（`fal-ai/birefnet`）| `FAL_REMBG_MODEL` | 快（~1-2s）、乾淨 alpha | — |
 | **升頻（dormant）** | fal.ai **clarity-upscaler** | `FAL_UPSCALE_MODEL` | 銳化 | 低清源頭救唔返、會亂估字（已停用）|
@@ -24,20 +26,25 @@
 
 ## 2. 合成引擎：三揀一 + 自動 fallback
 
-UI「合成方式」可揀 3 個（`src/components/library/PromptComposer.tsx`）：
+UI「合成方式」可揀 3 個（`src/components/library/PromptComposer.tsx`），**全部支援多產品**：
 
 | 揀 | engine 值 | 行為 |
 |---|---|---|
-| **自然合成（nano-banana）**（預設）| `nano` | 最自然、可多產品；文字可能走樣 |
-| **保留文字（Bria）** | `bria` | 保留產品/中文；**限單圖**（2 件或以上自動禁用 → 回落 nano）|
-| **GPT-5.4 image** | `gpt` | 測試用；單圖；provider 不穩可能等到 60s 先 fallback |
+| **FLUX.2 edit · 主力**（預設）| `flux2edit` | 中文字最清晰；產品多於 1 張時字會微糊 |
+| **nano-banana** | `nano` | 場景最自然；字會糊，適合無產品文字合成 |
+| **Seedream 4.5** | `seedream` | 多圖文字效果優於 FLUX；偶有機率出錯字 |
+
+> 另有 `qwen`（Qwen edit）同 `paste`（文字保真貼圖）兩個後端引擎，實測效果不及上述，**UI 已收起**（函數/排序仍保留，將來想要返開返 UI 按鈕即可）。
+
+**高清輸入**：合成前產品圖**唔再降到 1024**，改餵高清（單／雙產品 2048、三產品 1280，q92）。實測令標籤/中文字清晰好多。
 
 後端（route.ts）會按你揀嘅 `engine` **先試主力，失敗就順序試下一個**，全部失敗先去 sharp 疊圖：
 
 ```
-engine = "nano" → [nano, gpt, bria]   ← 預設
-engine = "bria" → [bria, nano, gpt]
-engine = "gpt"  → [gpt,  nano, bria]
+engine = "flux2edit" → [flux2edit, nano]            ← 預設
+engine = "nano"      → [nano, flux2edit]
+engine = "seedream"  → [seedream, flux2edit, nano]
+（隱藏）qwen → [qwen, flux2edit, nano]；paste → [paste, flux2edit]
 （以上全失敗 → sharp 疊圖）
 ```
 
@@ -45,29 +52,32 @@ engine = "gpt"  → [gpt,  nano, bria]
 
 ## 3. 🔧 點手動改「AI 生圖引擎排序」
 
-排序由 `src/app/api/library/generate/route.ts` 入面個 **`order`** 變數決定（搜 `手動改` 就搵到，有大段框住嘅註解）：
+排序由 `src/app/api/library/generate/route.ts` 入面個 **`order`** 變數決定（搜 `生圖引擎排序` 就搵到，有大段框住嘅註解）：
 
 ```ts
-const order = engine === "bria" ? [tryBria, tryNano, tryGpt]
-  : engine === "gpt" ? [tryGpt, tryNano, tryBria]
-  : [tryNano, tryGpt, tryBria];   // ← 預設分支
+const order = engine === "nano" ? [tryNano, tryFlux2Edit]
+  : engine === "seedream" ? [trySeedream, tryFlux2Edit, tryNano]
+  : engine === "qwen" ? [tryQwen, tryFlux2Edit, tryNano]
+  : engine === "paste" ? [tryPaste, tryFlux2Edit]
+  : [tryFlux2Edit, tryNano];   // ← 預設 / "flux2edit"
 ```
 
 - **每行 = 一個 engine 對應嘅嘗試次序**；第 1 個係主力，跟住順序 fallback。
-- 三個現成 helper：`tryNano`（nano-banana）、`tryBria`（Bria 保留文字）、`tryGpt`（GPT image）。
+- 現成 helper：`tryFlux2Edit`（主力）、`tryNano`、`trySeedream`、`tryQwen`、`tryPaste`。
 
 **常見改法：**
 
 | 想點 | 點改 |
 |---|---|
-| nano 永遠優先、唔用 GPT | 三行全部 → `[tryNano, tryBria]` |
-| 預設改用 Bria | 最後一行（else）→ `[tryBria, tryNano, tryGpt]` |
+| 預設改用 Seedream | 最後一行（else）→ `[trySeedream, tryFlux2Edit, tryNano]` |
+| 把 Qwen / 貼圖重新放返 UI | 喺 `PromptComposer.tsx` 嘅引擎選項 array 加返 `qwen` / `paste` 兩格 |
 | 完全唔用某引擎 | 喺 array 度刪走嗰個 `tryXXX` |
-| 加新引擎 | 喺上面照 `tryNano` 寫多個 `tryXyz()` helper，再加入 array |
+| 加新引擎 | 喺上面照 `tryFlux2Edit` 寫多個 `tryXyz()` helper，再加入 array |
 
 **換模型**（唔改排序，只換某引擎用邊個 model）：改 `src/lib/generate.ts` 頂部嘅常數，或喺 `.env.local` 覆寫：
+- FLUX.2 edit → `FAL_FLUX2_EDIT_MODEL`
 - nano-banana → `FAL_EDIT_MODEL`
-- GPT image → `OPENROUTER_IMAGE_MODEL`
+- Seedream → `FAL_SEEDREAM_EDIT_MODEL`；Qwen → `FAL_QWEN_EDIT_MODEL`
 - 去背 → `FAL_REMBG_MODEL`
 - 文字生圖 → `HF_IMAGE_MODEL`
 - 分析/文案 → `OPENROUTER_VISION_MODEL` / `OPENROUTER_TEXT_MODEL`
@@ -85,8 +95,8 @@ const order = engine === "bria" ? [tryBria, tryNano, tryGpt]
 | 素材類型 | 預設引擎 | fal.ai endpoint | 強項 | 限制 |
 |---|---|---|---|---|
 | **背景** | **FLUX.1-schnell** | `fal-ai/flux/schnell` | 快（~4s）、場景感強 | 無法保留特定風格 |
-| **人像** | **FLUX.2 pro** | `fal-ai/flux-pro/v1.1-ultra` | 真人寫實、亞裔面孔自然 | 貴、較慢 |
-| **插畫** | **Recraft V3** | `fal-ai/recraft-v3` | 2D 插畫風格準確、SVG 支援 | 唔適合寫實 |
+| **人像** | **FLUX.2 pro** | `fal-ai/flux-2-pro`（`FAL_FLUX2_MODEL`）| 真人寫實、預設亞裔（台/港）面孔（prompt 自動加，可關）| 貴、較慢 |
+| **插畫** | **Recraft V3** | `fal-ai/recraft/v3/text-to-image`（`FAL_RECRAFT_MODEL`，style=`digital_illustration`）| 2D 插畫風格準確 | 唔適合寫實 |
 
 ### 4b. Nano Banana 風格遷移（需要參考風格圖）
 
@@ -160,20 +170,21 @@ different in content.
 
 ## 6. ⚠️ AI 技術限制（好重要）
 
-1. **圖片入面嘅文字係「畫」出嚟嘅像素，唔係文字資料** → 重畫型模型（nano-banana / GPT）對**中文**特別差，會扭曲/亂筆。Force「繁中/UTF-8 output」**無用**（圖冇編碼可言）。
-2. **保留文字嘅唯一可靠方法 = 保留產品原像素**（Bria）或**疊真字體**（只適合平面海報文案，唔適合貼上斜面/弧面產品標籤）。
-3. **超採樣（2x render 再縮）只對「真高清 render」有效**（FLUX / sharp 疊圖）；對 **Bria 固定 ~1MP** 反效果（佢只會放大自己張低清 → 更糊），所以 Bria **唔用** shot_size。
+1. **圖片入面嘅文字係「畫」出嚟嘅像素，唔係文字資料** → 重畫型模型會「重繪」標籤。但**唔係所有重畫型都一樣差**：實測 **FLUX.2 edit** 對中文標籤保真度極高（單圖幾乎逐隻清晰），**Seedream 4.5** 同級，而 **nano-banana / GPT** 就明顯走樣。Force「繁中/UTF-8 output」無用（圖冇編碼可言），但**揀啱模型 + 餵高清原圖**就救到大部分情況。
+2. **多產品會令細字變糊**：呢個係生成式先天限制（每件分到嘅注意力/解析度少咗），FLUX / Seedream / Qwen 都會。要 **100% 保字** 唯一方法仍係**保留產品原像素**（「文字保真貼圖」= rembg 真像素疊圖，UI 已收起但函數仍在）或疊真字體。
+3. **餵高清原圖好重要**：合成前唔好降到 1024（已改成 2048/1280）。源頭高清 → 重畫型模型出嚟嘅字清好多。
 4. **源頭低清救唔返**：AI 放大細字只會「仍然糊」或「清但變錯字」，垃圾入垃圾出。
-5. **OpenAI 影像模型（OpenRouter）全部 intermittent**：gpt-5.4-image-2 / gpt-5-image / gpt-5-image-mini 都係時快時 hang，唔適合做穩定主力（要穩可考慮直連 OpenAI 官方 API）。
+5. **已退役 GPT / Bria**：OpenAI 影像模型（gpt-5.4-image-2 等）全部 intermittent、常 crash；Bria 去背差、產品變細。兩者已從 UI/排序移除。
 6. **多圖上限**：nano-banana 食「3 產品 + 1 背景 = 4 圖」會過載 → 揀 3 件產品時，背景**改用文字參考**（唔當圖片輸入）。
 
 ---
 
 ## 7. 實務建議
 
-- **日常主力**：nano-banana（自然、可多產品）。
-- **產品標籤/中文要清楚**：揀 **Bria 保留文字**（單圖）。
-- **GPT**：撞順風先試，睇佢質素，唔好當主力。
+- **日常主力 / 中文標籤要清楚**：**FLUX.2 edit**（預設）。單圖中文字保真最好。
+- **純場景、無產品文字**：nano-banana（最自然）。
+- **多圖 / 想另一種場景風格**：Seedream 4.5（多圖文字較好，但偶有錯字）。
+- **多產品細字要 100% 清**：用「文字保真貼圖」（要喺 UI 開返，或直接行 `paste` 引擎）。
 - **重點宣傳大字**：與其靠 AI 畫，不如將來用「平面疊真字」（海報文案層，永遠清晰）。
 
 ---
@@ -187,10 +198,10 @@ different in content.
 | 類型 | 例子 | 會唔會保留你產品標籤 |
 |---|---|---|
 | **純文字生圖**（text-to-image）| DALL-E 3、Midjourney、FLUX、SD 3.5 | ❌ 完全唔會（由零畫，連產品＋中文都自己亂作，比現狀更差）|
-| **圖像編輯／重繪** | nano-banana、GPT image、FLUX Kontext | ⚠️ 收你張圖但會**重繪 → 中文走樣**（即現狀）|
-| **產品保留合成** | **Bria product-shot**、去背+疊圖 | ✅ 保留產品原像素、文字完好 |
+| **圖像編輯／重繪** | **FLUX.2 edit ✅**、Seedream 4.5 ✅、nano-banana ⚠️、GPT ⚠️ | 收你張圖重繪。**但 FLUX.2 edit / Seedream 對中文保真度高**（實測單圖近乎完美）；nano/GPT 就走樣 |
+| **產品保留合成** | 去背+疊圖（「文字保真貼圖」）| ✅ 保留產品原像素、文字 100% 完好（融合感較平）|
 
-➡️ **純文字生圖模型解決唔到文字問題**，反而失去「用你產品相」嘅能力。真正解中文 = **保留原像素**（Bria）或**疊真字**（海報文案層）。
+➡️ 更新（本 session 實測）：以前以為「重畫型一定救唔到中文」，但 **FLUX.2 edit / Seedream 4.5 重畫都保到中文**，已成為主力。要 100% 保字先需要「保留原像素」（貼圖）。純文字生圖模型（DALL-E/MJ/SD）依然解決唔到，且失去「用你產品相」嘅能力。
 
 ### 各模型參考（純生圖用途；價錢約數、會浮動）
 

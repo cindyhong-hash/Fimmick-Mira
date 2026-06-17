@@ -38,6 +38,7 @@
 | `polishBriefToChinese` | ✨潤色：短指令 → 豐富繁中 brief（接 `styleDesc?`）| OpenRouter text | 同上 |
 | `describeReferenceStyle` | 參考圖風格分析（只色調/光影/質感，不含構圖）| OpenRouter vision | `OPENROUTER_VISION_MODEL`（gpt-5.4-nano）|
 | `compileChineseBrief` | 由積木砌繁中 brief | — | — |
+| `falRelightComposite` | #4 系列圖「AI 融合打光」（貼好後 relight，opt-in，有 drift 風險）| FLUX.2 edit | `FAL_FLUX2_EDIT_MODEL` |
 
 ---
 
@@ -48,7 +49,8 @@
 | `POST /api/library/generate` | 合成 / 純文字生成 / `draftOnly` 預覽 | 合成餵高清原圖（2048/1280）；`engine` 決定 `order`；`genType`→生圖模型；`sceneOverride`=潤色後場景；`refImageUrl`=參考圖 |
 | `POST /api/library/polish` | 潤色 | 接 `brief` + `genType?` + `refImageUrl?`（有圖先 `describeReferenceStyle` 注入風格）|
 | `POST /api/library/describe` | AI 讀圖 | `kind=brief`（20–30字初稿）/ `background` / 預設主體；接 `genType` |
-| `POST /api/library/save-image` | 存 draft 入 LibraryImage | 人像/插畫 選取後存（`paramsJson.genType`）|
+| `POST /api/library/template-paste` | #4 固定模板系列：去背產品貼固定背景固定位置 | `placement{scale,x,y}` + 接地/投射陰影 + 可選 `harmonize`（AI relight）；`size` 支援 1800×1200 |
+| `POST /api/library/save-image` | 存 draft 入 LibraryImage | 人像/插畫/合成 draft 選取後存（`paramsJson.genType`/`mode`）|
 | `PATCH /api/library/images/[id]` | 改生成圖 | `slots` / `copyText` / `subject` / **`clientId`（reassign 移專案）** |
 | `PATCH /api/components/[id]` | 改組件 | 含 `clientId` re-home（背景/參考圖 reassign）|
 | `POST /api/components/analyze` | 讀圖抽 構圖/配色/語氣/背景 | vision；繁中、硬字數上限 |

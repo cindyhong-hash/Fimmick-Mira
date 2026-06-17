@@ -184,6 +184,17 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
   const [genError, setGenError] = useState<string | null>(null);
   const [result, setResult] = useState<{ imageUrl: string; copyText: string } | null>(null);
   const [pickerCategory, setPickerCategory] = useState<ComponentCategory | null>(null);
+  // #3 多輸出（合成）：一次生 N 張 draft（唔即刻入庫）→ 揀邊張保留。
+  const [count, setCount] = useState(1);
+  // draft 各自帶用咗嘅產品圖（系列圖時每張得一件）。
+  const [drafts, setDrafts] = useState<{ imageUrl: string; copyText: string; mode: string; selected: boolean; productImageUrls: string[] }[] | null>(null);
+  const [savingDrafts, setSavingDrafts] = useState(false);
+  // #4 系列圖：固定模板貼圖（方案 A）—— 每件產品貼喺固定背景嘅固定位置/尺寸，100% 一致。
+  const [seriesMode, setSeriesMode] = useState(false);
+  // 擺位：scale=產品高度佔比，x/y=產品中心（0–1）。可拖預覽 + 滑桿調大小。
+  const [placement, setPlacement] = useState({ scale: 0.6, x: 0.5, y: 0.62 });
+  // AI 融合打光（opt-in）：貼好後 relight，更自然但有少少 drift 風險。
+  const [harmonize, setHarmonize] = useState(false);
   // #2 潤色寫手：擴寫後嘅繁中 brief 覆寫（opt-in，可編輯；null = 用自動產生嘅）。
   const [polishedBrief, setPolishedBrief] = useState<string | null>(null);
   const [polishing, setPolishing] = useState(false);
@@ -361,43 +372,103 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
     }
   }
 
+  const buildPalette = () => effRows.map((r) => ({ hex: r.hex, role: r.role, label: r.label, use: r.enabled }));
+  // Build effective slots reflecting the inline edits (so copy/tone uses the latest values).
+  const buildEffectiveSlots = (): PromptSlots => ({
+    layout: slots.layout ? { ...slots.layout, data: { ...slots.layout.data, description: effLayoutDesc } } : null,
+    background: slots.background, // image-only asset, used as-is in 合成 mode
+    color: slots.color ? { ...slots.color, data: { ...slots.color.data, colors: enabledColors } } : null,
+    tone: slots.tone ? { ...slots.tone, data: { ...slots.tone.data, toneLabels: effToneLabels } } : null,
+  });
+
   async function handleGenerate() {
     if (!canGenerate) return;
     setGenerating(true);
     setGenError(null);
     setResult(null);
+    setDrafts(null);
     try {
-      const palette = effRows.map((r) => ({ hex: r.hex, role: r.role, label: r.label, use: r.enabled }));
-      // Build effective slots reflecting the inline edits (so copy/tone uses the latest values).
-      const effectiveSlots: PromptSlots = {
-        layout: slots.layout ? { ...slots.layout, data: { ...slots.layout.data, description: effLayoutDesc } } : null,
-        background: slots.background, // image-only asset, used as-is in 合成 mode
-        color: slots.color ? { ...slots.color, data: { ...slots.color.data, colors: enabledColors } } : null,
-        tone: slots.tone ? { ...slots.tone, data: { ...slots.tone.data, toneLabels: effToneLabels } } : null,
+      const palette = buildPalette();
+      const effectiveSlots = buildEffectiveSlots();
+      const baseBody = {
+        clientId, subject, slots: effectiveSlots, palette, notes, size,
+        engine: composite ? effEngine : undefined,
+        productImageUrls: composite ? productUrls : undefined,
+        productImageUrl: composite ? productUrls[0] : undefined,
+        composite: composite && productUrls.length > 0,
+        // 文字模式：送繁中 brief（潤色後 or 自動）→ server 翻英生圖，並存入結果 AI Prompt。
+        customPrompt: composite ? undefined : effectiveBrief,
+        // 合成模式：若用咗潤色，把擴寫後嘅「場景描述」作為合成場景覆寫（唔含主體，避免重畫產品）。
+        sceneOverride: composite ? (polishedBrief ?? undefined) : undefined,
       };
-      const res = await fetch("/api/library/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clientId, subject, slots: effectiveSlots, palette, notes, size,
-          engine: composite ? effEngine : undefined,
-          productImageUrls: composite ? productUrls : undefined,
-          productImageUrl: composite ? productUrls[0] : undefined,
-          composite: composite && productUrls.length > 0,
-          // 文字模式：送繁中 brief（潤色後 or 自動）→ server 翻英生圖，並存入結果 AI Prompt。
-          customPrompt: composite ? undefined : effectiveBrief,
-          // 合成模式：若用咗潤色，把擴寫後嘅「場景描述」作為合成場景覆寫（唔含主體，避免重畫產品）。
-          sceneOverride: composite ? (polishedBrief ?? undefined) : undefined,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "生成失敗");
-      setResult({ imageUrl: data.imageUrl, copyText: data.copyText ?? "" });
-      onGenerated?.();
+      const postJson = (body: Record<string, unknown>) =>
+        fetch("/api/library/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
+      const post = (extra: Record<string, unknown>) => postJson({ ...baseBody, ...extra });
+
+      // #4 系列圖 = 固定模板貼圖：共用背景 + 固定 placement，每件產品去背貼上 → 100% 一致。
+      if (composite && seriesMode && productUrls.length >= 2) {
+        let sharedBg = (slots.background?.data?.imageUrl as string | undefined) || undefined;
+        if (!sharedBg) {
+          const bgPrompt = `${buildSceneBrief() || "簡潔專業棚拍背景、柔光"}，純背景場景，無產品、無人物、無文字`;
+          const bgRes = await postJson({ clientId, customPrompt: bgPrompt, size, draftOnly: true });
+          sharedBg = bgRes.imageUrl;
+          if (!sharedBg) throw new Error("共用背景生成失敗，請重試");
+        }
+        const results = await Promise.allSettled(productUrls.map((p) =>
+          fetch("/api/library/template-paste", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ bgImageUrl: sharedBg, productImageUrl: p, placement, size, harmonize }) }).then((r) => r.json())));
+        const ok = results
+          .map((r, i) => r.status === "fulfilled" && r.value?.imageUrl
+            ? { imageUrl: r.value.imageUrl as string, copyText: "", mode: "paste-template", selected: true, productImageUrls: [productUrls[i]] }
+            : null)
+          .filter((x): x is NonNullable<typeof x> => !!x);
+        if (!ok.length) throw new Error("系列圖全部生成失敗，請重試");
+        setDrafts(ok);
+      } else if (composite && count > 1) {
+        // #3 合成多輸出：平行生 N 張 draft（同一組產品）→ 揀。
+        const results = await Promise.allSettled(Array.from({ length: count }, () => post({ draftOnly: true })));
+        const ok = results
+          .filter((r): r is PromiseFulfilledResult<{ imageUrl: string; copyText?: string; mode?: string }> => r.status === "fulfilled" && !!r.value?.imageUrl)
+          .map((r) => ({ imageUrl: r.value.imageUrl, copyText: r.value.copyText ?? "", mode: r.value.mode ?? "flux2-edit", selected: true, productImageUrls: productUrls }));
+        if (!ok.length) throw new Error("全部生成失敗，請重試");
+        setDrafts(ok);
+      } else {
+        const data = await post({});
+        if (data.error) throw new Error(data.error);
+        setResult({ imageUrl: data.imageUrl, copyText: data.copyText ?? "" });
+        onGenerated?.();
+      }
     } catch (e: unknown) {
       setGenError(e instanceof Error ? e.message : "生成失敗，請重試");
     } finally {
       setGenerating(false);
+    }
+  }
+
+  // #3 揀完 draft → 逐張存入圖庫（save-image，建 LibraryImage）。
+  async function saveDrafts() {
+    const sel = (drafts ?? []).filter((d) => d.selected);
+    if (!sel.length) return;
+    setSavingDrafts(true);
+    setGenError(null);
+    try {
+      const palette = buildPalette();
+      const effectiveSlots = buildEffectiveSlots();
+      const promptStr = `[AI 合成] ${(polishedBrief || compiledPrompt || subject || "").trim()}`;
+      await Promise.all(sel.map((d) =>
+        fetch("/api/library/save-image", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            clientId, imageUrl: d.imageUrl, subject, prompt: promptStr, copyText: d.copyText,
+            paramsJson: JSON.stringify({ slots: effectiveSlots, palette, notes, productImageUrl: d.productImageUrls[0], productImageUrls: d.productImageUrls, composite: true, mode: d.mode }),
+          }),
+        })));
+      setDrafts(null);
+      onGenerated?.();
+    } catch (e: unknown) {
+      setGenError(e instanceof Error ? e.message : "儲存失敗，請重試");
+    } finally {
+      setSavingDrafts(false);
     }
   }
 
@@ -683,22 +754,95 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
             <p className="text-[10px] text-gray-400 leading-snug">
               主力 FLUX.2 edit 中文字保真最好（已自動餵高清原圖）。三者皆支援多產品；不加背景圖、由 AI 生成場景會更自然。
             </p>
+
+            {/* #4 固定模板系列：≥2 件產品先有意義 */}
+            {productUrls.length >= 2 && (
+              <>
+                <label className="flex items-start gap-2 text-xs text-gray-600 cursor-pointer pt-1">
+                  <button type="button" onClick={() => setSeriesMode((v) => !v)}
+                    className={`mt-0.5 w-4 h-4 rounded border flex items-center justify-center shrink-0 ${seriesMode ? "bg-violet-600 border-violet-600" : "border-gray-300 bg-white"}`}>
+                    {seriesMode && <Check className="h-3 w-3 text-white" />}
+                  </button>
+                  <span className="leading-snug">
+                    <b>固定模板系列</b>：每件產品貼喺固定背景嘅固定位置／大小（{productUrls.length} 件 → {productUrls.length} 張，100% 一致、真像素、零腦補）
+                    {!slots.background && <span className="text-gray-400">；未揀背景會自動鎖一個共用 AI 背景</span>}
+                  </span>
+                </label>
+
+                {/* 擺位編輯器：拖預覽定位置 + 滑桿調大小 */}
+                {seriesMode && (
+                  <div className="rounded-xl border border-violet-200 bg-violet-50/40 p-3 space-y-2">
+                    <div className="text-[11px] font-semibold text-violet-700">擺位（拖產品定位置・滑桿調大小）—— 所有產品共用</div>
+                    <div
+                      className={`relative w-full mx-auto rounded-lg overflow-hidden border bg-gray-100 select-none touch-none ${size === "landscape" ? "max-w-[360px] aspect-[3/2]" : "max-w-[280px] aspect-square"}`}
+                      style={slots.background?.data?.imageUrl ? { backgroundImage: `url(${slots.background.data.imageUrl as string})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}
+                      onPointerDown={(e) => {
+                        const box = e.currentTarget.getBoundingClientRect();
+                        const move = (cx: number, cy: number) => setPlacement((p) => ({ ...p, x: Math.min(1, Math.max(0, (cx - box.left) / box.width)), y: Math.min(1, Math.max(0, (cy - box.top) / box.height)) }));
+                        move(e.clientX, e.clientY);
+                        const onMove = (ev: PointerEvent) => move(ev.clientX, ev.clientY);
+                        const onUp = () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+                        window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
+                      }}>
+                      {!slots.background?.data?.imageUrl && (
+                        <div className="absolute inset-0 flex items-center justify-center text-[10px] text-gray-400 text-center px-2">未揀背景<br/>生成時自動鎖共用 AI 背景</div>
+                      )}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={productUrls[0]} alt="placement" draggable={false}
+                        className="absolute object-contain pointer-events-none drop-shadow-lg"
+                        style={{ height: `${placement.scale * 100}%`, left: `${placement.x * 100}%`, top: `${placement.y * 100}%`, transform: "translate(-50%, -50%)" }} />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-[11px] text-gray-500 whitespace-nowrap">大小 {Math.round(placement.scale * 100)}%</label>
+                      <input type="range" min={20} max={90} value={Math.round(placement.scale * 100)}
+                        onChange={(e) => setPlacement((p) => ({ ...p, scale: Number(e.target.value) / 100 }))}
+                        className="flex-1 accent-violet-600" />
+                    </div>
+                    <label className="flex items-start gap-2 text-[11px] text-gray-600 cursor-pointer">
+                      <button type="button" onClick={() => setHarmonize((v) => !v)}
+                        className={`mt-0.5 w-4 h-4 rounded border flex items-center justify-center shrink-0 ${harmonize ? "bg-violet-600 border-violet-600" : "border-gray-300 bg-white"}`}>
+                        {harmonize && <Check className="h-3 w-3 text-white" />}
+                      </button>
+                      <span className="leading-snug">AI 融合打光（貼好後 relight 令光影更自然；每張多一次 AI、有少少 drift 風險、文字可能被郁）</span>
+                    </label>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* #3 生成數量：一次出多張俾你揀（系列模式時隱藏，張數＝產品件數）*/}
+            {!(seriesMode && productUrls.length >= 2) && (
+              <div className="flex items-center gap-3 pt-1">
+                <label className="text-xs font-semibold text-gray-500 whitespace-nowrap">生成數量</label>
+                <div className="flex gap-1.5">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <button key={n} type="button" onClick={() => setCount(n)}
+                      className={`w-8 h-8 rounded-lg border text-sm font-medium transition-colors ${count === n ? "bg-violet-600 text-white border-violet-600" : "bg-white border-gray-200 text-gray-600 hover:border-violet-300"}`}>
+                      {n}
+                    </button>
+                  ))}
+                </div>
+                {count > 1 && <span className="text-[10px] text-gray-400">出 {count} 張揀（成本 ×{count}）</span>}
+              </div>
+            )}
           </div>
         )}
 
         {/* Generate */}
-        <Button onClick={handleGenerate} disabled={!canGenerate || generating}
+        <Button onClick={handleGenerate} disabled={!canGenerate || generating || savingDrafts}
           className="w-full gap-2 bg-violet-600 hover:bg-violet-700 text-white disabled:opacity-40">
-          {generating
-            ? <><Loader2 className="h-4 w-4 animate-spin" />{composite ? "合成中…" : "生成中…（約 10–40 秒）"}</>
-            : <><Sparkles className="h-4 w-4" />{composite ? "合成產品圖到背景" : "用此 Prompt 生成新圖"}</>}
+          {(() => {
+            const series = composite && seriesMode && productUrls.length >= 2;
+            if (generating) return <><Loader2 className="h-4 w-4 animate-spin" />{series ? `生成系列中…（${productUrls.length} 張）` : composite ? `合成中…${count > 1 ? `（${count} 張）` : ""}` : "生成中…（約 10–40 秒）"}</>;
+            return <><Sparkles className="h-4 w-4" />{series ? `生成系列 ${productUrls.length} 張` : composite ? (count > 1 ? `合成 ${count} 張俾你揀` : "合成產品圖到背景") : "用此 Prompt 生成新圖"}</>;
+          })()}
         </Button>
 
         {genError && (
           <div className="text-xs text-red-500 bg-red-50 border border-red-200 rounded-lg px-3 py-2">⚠️ {genError}</div>
         )}
 
-        {/* Result */}
+        {/* Result（單張）*/}
         {result && (
           <div className="rounded-xl border border-violet-200 bg-violet-50/50 p-3 flex gap-3 items-center">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -707,7 +851,40 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
               <div className="text-xs font-semibold text-violet-700 flex items-center gap-1">
                 <Check className="h-3.5 w-3.5" />完成，已加入圖片紀錄
               </div>
-              {/* 文案唔再喺度展示 */}
+            </div>
+          </div>
+        )}
+
+        {/* #3 多張 draft：揀邊張保留 */}
+        {drafts && (
+          <div className="rounded-xl border border-violet-200 bg-violet-50/40 p-3 space-y-3">
+            <div className="text-xs font-semibold text-violet-700">
+              點擊選取要保留的圖（已選 {drafts.filter((d) => d.selected).length}/{drafts.length}）
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+              {drafts.map((d, i) => (
+                <div key={d.imageUrl}
+                  onClick={() => setDrafts((prev) => prev!.map((x, idx) => idx === i ? { ...x, selected: !x.selected } : x))}
+                  className={`relative rounded-lg border-2 overflow-hidden cursor-pointer transition-all ${d.selected ? "border-violet-500 shadow-md" : "border-gray-200 opacity-50"}`}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={d.imageUrl} alt="draft" className="w-full aspect-square object-contain bg-white" />
+                  {d.selected && (
+                    <span className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-violet-600 flex items-center justify-center shadow">
+                      <Check className="h-3 w-3 text-white" />
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setDrafts(null)} disabled={savingDrafts}
+                className="px-3 py-2 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-100 transition-colors disabled:opacity-50">
+                取消
+              </button>
+              <button onClick={saveDrafts} disabled={savingDrafts || !drafts.some((d) => d.selected)}
+                className="flex-1 py-2 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700 disabled:opacity-50 flex items-center justify-center gap-1.5 transition-colors">
+                {savingDrafts ? <><Loader2 className="h-4 w-4 animate-spin" />儲存中…</> : <><Check className="h-4 w-4" />保留 {drafts.filter((d) => d.selected).length} 張 → 圖庫</>}
+              </button>
             </div>
           </div>
         )}

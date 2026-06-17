@@ -178,6 +178,7 @@ export function engineLabel(paramsJson?: string | null): string | null {
       "gpt-image": "GPT image",
       "gpt-image-mini": "GPT image mini",
       "paste-text": "文字保真",
+      "paste-template": "固定模板",
       "sharp": "疊圖",
       "flux": "FLUX",
       "flux-scene": "FLUX.1",

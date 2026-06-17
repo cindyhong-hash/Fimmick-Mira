@@ -138,6 +138,8 @@ export async function POST(request: Request) {
         const sized = await applyTextOverlay(await fitToSize(img.buffer), copyText);
         const ext = overlay?.enabled ? "png" : (img.contentType.includes("webp") ? "webp" : img.contentType.includes("jpeg") ? "jpg" : "png");
         const imageUrl = await saveBuffer(sized, ext);
+        // draftOnly（多輸出預覽）：只存檔，唔入庫；client 揀完先 save-image。回傳 bare mode 供 client 砌 paramsJson。
+        if (draftOnly) return NextResponse.json({ imageUrl, copyText, mode });
         const row = await db.libraryImage.create({
           data: {
             clientId: clientId ?? null,

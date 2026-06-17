@@ -33,6 +33,16 @@
 - 實作：generated 走 `PATCH /api/library/images/[id]`、組件走 `PATCH /api/components/[id]`（兩者本身已支援 clientId re-home）。
 - 理由：解決「想轉專案分類但唔得」嘅痛點，又唔使全部變公用（會混晒品牌）。
 
+## 系列圖一致性：固定模板貼圖（方案 A），非生成式（2026-06-17）
+- **問題**：要做 campaign 系列（每張一件產品、共用背景、產品大小/位置固定），但生成式 edit 模型（FLUX.2 / nano / Seedream）**每次都重畫成個畫面** → 產品大小/位置每次唔同、會腦補加樽/道具、比例會崩。即使餵同一張背景都係咁。**結構性限制，prompt 救唔到。**
+- **決定**：系列圖改用 **固定模板貼圖**（`POST /api/library/template-paste`）：rembg 產品 → 貼喺固定背景嘅固定位置/尺寸（決定性 sharp 合成）。100% 一致、真像素文字、零腦補。
+- **陰影/打光**（用戶回饋「純貼太死太硬」）→ 採 **C 混合**：
+  - 永遠加 **接地接觸陰影（橢圓）+ 柔投射陰影**（解決浮空，一致、cheap、無 AI）。
+  - 可選 **「AI 融合打光」toggle**（`harmonize` → `falRelightComposite` FLUX.2 edit relight）：更自然但**有 drift 風險**（實測會腦補小字、文字可能被郁），預設關。
+- 共用背景：揀咗用嗰張；冇揀自動生（**FLUX.1 schnell**）。擺位：拖預覽 + 滑桿，全系列共用。支援 1800×1200。
+- **未解 / 下一步**（見 CHECKLIST backlog）：**遮罩式 harmonize**（relight 時 mask 保護產品像素，自然 grounding 但唔郁文字）；**placement-aware 背景**（叫 AI 預留產品位 + 指定光向，建議用 FLUX.2 pro 生背景）。
+- **退場計劃**：若兩個改進都救唔到「自然又一致」，就**移除 template-paste / harmonize、封存 code、註解 #4**（系列圖功能），返到 #2/#3。
+
 ## 生成後端：in-app 可抽換（非 n8n 起步）
 - 文字用已有 OpenRouter key；圖片用免費來源。`GEN_PROVIDER=inapp|n8n` 開關，將來轉 n8n 只改 env。
 - 理由：最快令功能 work；n8n 要起服務、維護、debug 較煩，留待之後。

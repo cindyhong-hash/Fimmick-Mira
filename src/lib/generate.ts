@@ -640,6 +640,35 @@ export async function falQwenEdit(i: FalEditInput): Promise<GeneratedImage> {
 }
 
 /**
+ * AI 融合打光（模板貼圖可選）：把已貼好嘅 composite 餵 FLUX.2 edit，只融合光影、加真實陰影/反光，
+ * 強制保持產品位置/大小/標籤不變。比純貼圖自然，但係生成式 → 有少少 drift 風險（opt-in）。
+ */
+export async function falRelightComposite(compositeDataUri: string, aspectRatio?: string): Promise<GeneratedImage> {
+  if (!FAL_KEY) throw new Error("FAL_KEY 未設定，無法 AI 融合打光");
+  const prompt =
+    "This image is a product already placed on a background. Blend the product into the scene so it looks naturally photographed: " +
+    "match the scene's lighting direction on the product, add a realistic soft contact shadow and subtle reflection. " +
+    "Keep the product's EXACT position, size, shape, colour and all label text (including Chinese characters) 100% unchanged — " +
+    "do NOT move, resize, redraw the label, add or remove any object. Only harmonize lighting and shadow. Photorealistic.";
+  const res = await fetch(`https://fal.run/${FAL_FLUX2_EDIT_MODEL}`, {
+    method: "POST",
+    headers: { Authorization: `Key ${FAL_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt, image_urls: [compositeDataUri], image_size: aspectRatio === "3:2" ? "landscape_4_3" : "square_hd" }),
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new Error(`融合打光錯誤 ${res.status}: ${t.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const url = data.images?.[0]?.url ?? data.image?.url;
+  if (!url) throw new Error("融合打光回應無圖片 URL");
+  const imgRes = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+  if (!imgRes.ok) throw new Error(`融合打光圖下載失敗：${imgRes.status}`);
+  return { buffer: Buffer.from(await imgRes.arrayBuffer()), contentType: imgRes.headers.get("content-type") ?? "image/png", seed: 0 };
+}
+
+/**
  * Background removal via fal.ai (default fal-ai/birefnet) → transparent-PNG cutout buffer.
  * Used by the text-preserving paste pipeline so the product's real pixels (incl. Chinese label)
  * are pasted unchanged onto an AI background — never redrawn.

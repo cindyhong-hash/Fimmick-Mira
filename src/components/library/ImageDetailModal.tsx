@@ -8,7 +8,7 @@
  * the generated copy and offers 「分析此圖加入素材」.
  */
 import { useEffect, useState } from "react";
-import { X, ArrowRightCircle, Sparkles, ScanSearch, Pencil, RefreshCw, Trash2, Download, Check, Loader2 } from "lucide-react";
+import { X, ArrowRightCircle, Sparkles, ScanSearch, Pencil, RefreshCw, Trash2, Download, Check, Loader2, Image as ImageIcon } from "lucide-react";
 import type { StyleComponent, ComponentCategory } from "@/types/library";
 import { CATEGORY_META, getColors } from "@/types/library";
 import { ColorCards } from "./ColorCards";
@@ -27,6 +27,8 @@ type Props = {
   mode?: string;
   /** 生成時使用的參考風格圖 URL（可能是 /uploads 本地路徑）。 */
   refImageUrl?: string;
+  /** 合成時用咗嘅產品來源圖（喺 popup 顯示返）。 */
+  sourceImages?: string[];
   /** 從 popup 觸發「重新生成/調整」，傳回預填資料讓父層打開 GenerateAssetModal。 */
   onOpenGenerateAsset?: (init: { description: string; refImageUrl: string; type: "background" | "person" | "illustration"; engine: "flux" | "nano" }) => void;
   /** 客戶清單 — 用嚟「移到其他客戶 / 設公用」。 */
@@ -57,6 +59,7 @@ export function ImageDetailModal({
   genType,
   mode,
   refImageUrl,
+  sourceImages,
   clients,
   injectedIds,
   onInject,
@@ -449,6 +452,21 @@ export function ImageDetailModal({
 
           {/* Linked components — 構圖/配色/語氣 + 背景（合成會直接用到，所以顯示出嚟）。 */}
           <div className="space-y-3">
+            {/* 來源產品圖：合成時用咗邊張（如有）。 */}
+            {sourceImages && sourceImages.length > 0 && (
+              <div className="rounded-xl border border-violet-200 bg-violet-50 p-3">
+                <div className="text-[11px] font-semibold text-violet-700 mb-2 flex items-center gap-1">
+                  <ImageIcon className="h-3 w-3" />來源產品圖（{sourceImages.length}）
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {sourceImages.map((u) => (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img key={u} src={u} alt="source product" loading="lazy" decoding="async"
+                      className="w-32 h-32 object-contain rounded-lg border bg-white" />
+                  ))}
+                </div>
+              </div>
+            )}
             {!loading && bgComp && (
               <div className="rounded-xl border border-teal-200 bg-teal-50 p-3">
                 <div className="flex items-center justify-between mb-2">

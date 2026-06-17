@@ -5,6 +5,31 @@
 
 ---
 
+## 0. 確切型號 / 版本（用緊邊個就係邊個）
+
+> 想一眼知「實際 call 緊邊個模型嘅邊個版本」就睇呢度。fal endpoint 喺 `src/lib/generate.ts` 頂部常數，可用 `.env.local` 覆寫。
+
+| 功能 | 確切模型・版本 | 供應商 | fal endpoint（實際 call）| env 覆寫 |
+|---|---|---|---|---|
+| 產品合成 · 主力 | **FLUX.2 [pro]**（edit/多參考）| Black Forest Labs | `fal-ai/flux-2-pro/edit` | `FAL_FLUX2_EDIT_MODEL` |
+| 產品合成 · 自然 | **Nano Banana = Google Gemini 2.5 Flash Image**（**標準版，唔係 Pro / 唔係 Gemini 3**）| Google（經 fal）| `fal-ai/nano-banana/edit` | `FAL_EDIT_MODEL` |
+| 產品合成 · Seedream | **Seedream 4.5**（edit）| ByteDance | `fal-ai/bytedance/seedream/v4.5/edit` | `FAL_SEEDREAM_EDIT_MODEL` |
+| 產品合成 · Qwen（UI 隱藏）| **Qwen-Image-Edit Plus（2509）** | Alibaba | `fal-ai/qwen-image-edit-plus` | `FAL_QWEN_EDIT_MODEL` |
+| 純文字生圖 · 場景/背景 | **FLUX.1 [schnell]** | Black Forest Labs | `fal-ai/flux/schnell` | `HF_IMAGE_MODEL`（HF 備援）|
+| 素材生成 · 人像 | **FLUX.2 [pro]**（text-to-image）| Black Forest Labs | `fal-ai/flux-2-pro` | `FAL_FLUX2_MODEL` |
+| 素材生成 · 插畫 | **Recraft V3**（style=digital_illustration）| Recraft | `fal-ai/recraft/v3/text-to-image` | `FAL_RECRAFT_MODEL` |
+| 去背（rembg）| **BiRefNet** | （經 fal）| `fal-ai/birefnet` | `FAL_REMBG_MODEL` |
+| 升頻（dormant）| **Clarity Upscaler** | （經 fal）| `fal-ai/clarity-upscaler` | `FAL_UPSCALE_MODEL` |
+| #4 AI 融合打光（opt-in）| **FLUX.2 [pro]** edit | Black Forest Labs | `fal-ai/flux-2-pro/edit` | `FAL_FLUX2_EDIT_MODEL` |
+| 文案（text）| **GPT-4o mini** | OpenAI（經 OpenRouter）| `openai/gpt-4o-mini` | `OPENROUTER_TEXT_MODEL` |
+| 圖片分析 / 讀圖（vision）| **GPT-5.4 nano** | OpenAI（經 OpenRouter）| `openai/gpt-5.4-nano` | `OPENROUTER_VISION_MODEL` |
+| 〔已退役〕GPT 影像合成 | GPT-5.4 image 2 / GPT-5 image mini | OpenAI（經 OpenRouter）| `openai/gpt-5.4-image-2` | `OPENROUTER_IMAGE_MODEL` |
+| 〔已退役〕Bria product-shot | Bria | （經 fal）| `fal-ai/bria/product-shot` | — |
+
+> **特別答**：產品合成嘅「nano-banana」= **Google Gemini 2.5 Flash Image（標準 Nano Banana）**，**唔係** 近期嘅「Nano Banana Pro / Gemini 3 Pro Image」。想升 Pro 就改 `FAL_EDIT_MODEL` 去對應 fal endpoint（會貴啲）。
+
+---
+
 ## 1. 一覽表
 
 | 用途 | 模型 / 服務 | 喺邊度設定 | 強項 | 限制 |

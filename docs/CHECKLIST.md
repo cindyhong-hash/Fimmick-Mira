@@ -378,10 +378,12 @@
 
 ## 🗂️ Backlog（未做，待確認）
 
-### 優先級高
-- [ ] **🔜 下次先做：#4 系列圖「遮罩式 harmonize」**：AI 融合打光時用 mask 保護產品像素，只 relight 周圍（陰影/反光/邊緣融合）→ 自然 grounding 但**唔郁標籤文字**（解決現時 harmonize 會腦補小字/郁文字嘅 drift）。
-- [ ] **#4 placement-aware 背景**：叫 AI 生背景時**預留產品位 + 指定光向**（建議用 FLUX.2 pro，跟構圖指令較準）→ 貼上去更自然、陰影方向 match。
-- [ ] **⚠️ #4 退場計劃**：若上述兩個改進都救唔到「自然又一致」，就**移除 `template-paste` / `falRelightComposite`、封存 code、註解掉系列圖 UI（#4）**，返到 #2/#3。
+### 優先級高 —— #4 系列圖（報告期間已收起，`SHOW_SERIES_TEMPLATE=false`）
+- [ ] **🔜 下次先做：攞返 #4 出嚟繼續做** → flip `SHOW_SERIES_TEMPLATE = true`（`src/types/library.ts`）；UI + 圖庫成圖一齊復原。
+- [ ] **#4 placement-aware 背景（用 FLUX.2）**：生背景時**固定產品位置留空、其餘被場景元素填滿**（非產品）。用戶已測 FLUX.2 效果＋光感自然好多 → 用 FLUX.2 pro 生背景 + 指定留位/光向。
+- [ ] **#4 遮罩式 harmonize**：AI 融合打光時 mask 保護產品像素，只 relight 周圍 → 自然 grounding 但**唔郁中文字**（解 `falRelightComposite` drift）。
+- [ ] **⚠️ #4 退場計劃**：若點整都唔自然又一致，就**移除 `template-paste` / `falRelightComposite`、封存 code、註解 #4 UI**，返到 #2/#3。
+- [ ] **圖庫加「AI 引擎」filter**：俾用戶按引擎（FLUX.2 edit / nano / Seedream / 固定模板…）篩選生成圖（`engineLabel` / `paramsJson.mode` 已有資料）。
 - [ ] **用戶自己上傳圖片的分類調整**：目前「上傳」圖庫包含所有 previewUrl 圖片（含分析用參考圖）。需區分「品牌圖庫（用戶主動上傳）」vs「分析參考圖」，並讓用戶可調整分類。
 - [ ] **以文字指令新增素材**：在加入素材或積木選取中，可輸入文字描述（如「暖色系簡約背景」），AI 自動生成素材資料存入。
 - [ ] **配色 hex 輸入真正改色**：目前 hex 輸入框只是 UI，改色後需更新 slot 中的 palette 資料並重新編譯 prompt。

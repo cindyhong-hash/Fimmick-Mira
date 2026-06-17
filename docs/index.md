@@ -9,6 +9,7 @@
 | 文檔 | 內容 | 啱邊個睇 |
 |---|---|---|
 | **[GUIDE-新手使用.md](./GUIDE-新手使用.md)** | 由開機到生成第一張圖、兩種生成方式、⚠️ AI 限制、常見情況點揀 | **第一次用嘅人** |
+| **[DEMO.md](./DEMO.md)** | 按製作順序嘅 demo 流程（report 用；#4 已收起）| **要做 demo / 報告** |
 | [SETUP.md](./SETUP.md) | 環境變數、token、啟動指令、初始化 DB | 裝機 / 跑起個 app |
 | [MIGRATION.md](./MIGRATION.md) | 換電腦要手動帶嘅嘢（.env.local / dev.db / uploads） | 換機 |
 

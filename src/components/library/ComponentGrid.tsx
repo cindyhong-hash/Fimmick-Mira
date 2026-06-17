@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { StyleComponent, ComponentCategory, PromptSlots, GalleryItem, ImageDetail } from "@/types/library";
-import { CATEGORY_META, getColors, engineLabel } from "@/types/library";
+import { CATEGORY_META, getColors, engineLabel, SHOW_SERIES_TEMPLATE } from "@/types/library";
 import { ColorCards } from "./ColorCards";
 
 type FilterTab = "GALLERY" | "ALL" | ComponentCategory;
@@ -189,6 +189,12 @@ const FILTER_META: Record<GalleryFilter, { label: string; Icon: LucideIcon; cls:
   product:      { label: "產品成圖", Icon: Package,    cls: "bg-violet-600", activeCls: "bg-violet-600 text-white border-violet-600" },
 };
 
+/** #4 系列圖成圖（mode=paste-template）—— 報告期間隱藏。 */
+function isSeriesTemplate(item: GalleryItem): boolean {
+  if (item.kind !== "generated") return false;
+  try { return JSON.parse(item.paramsJson ?? "{}").mode === "paste-template"; } catch { return false; }
+}
+
 /** Generated tiles split by genType (stored in paramsJson): person / illustration / 其餘=product。 */
 function generatedKind(item: GalleryItem): "person" | "illustration" | "product" | null {
   if (item.kind !== "generated") return null;
@@ -253,7 +259,9 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
       .then(([comps, gal]) => {
         if (!active) return;
         setComponents(Array.isArray(comps) ? comps : []);
-        setGallery(Array.isArray(gal) ? gal : []);
+        // 報告期間隱藏 #4 系列圖成圖（SHOW_SERIES_TEMPLATE=false）。
+        const galArr: GalleryItem[] = Array.isArray(gal) ? gal : [];
+        setGallery(SHOW_SERIES_TEMPLATE ? galArr : galArr.filter((g) => !isSeriesTemplate(g)));
       })
       .catch(() => {})
       .finally(() => { if (active) setLoading(false); });

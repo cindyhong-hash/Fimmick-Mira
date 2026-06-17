@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { PromptSlots, StyleComponent, ComponentCategory, PaletteColor, PaletteRole } from "@/types/library";
-import { CATEGORY_META, getColors, PALETTE_ROLES } from "@/types/library";
+import { CATEGORY_META, getColors, PALETTE_ROLES, SHOW_SERIES_TEMPLATE } from "@/types/library";
 import { ColorCards } from "./ColorCards";
 import { SlotPickerModal } from "./SlotPickerModal";
 import { INDUSTRY_PRESETS } from "@/types/presets";
@@ -755,8 +755,8 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
               主力 FLUX.2 edit 中文字保真最好（已自動餵高清原圖）。三者皆支援多產品；不加背景圖、由 AI 生成場景會更自然。
             </p>
 
-            {/* #4 固定模板系列：≥2 件產品先有意義 */}
-            {productUrls.length >= 2 && (
+            {/* #4 固定模板系列：≥2 件產品先有意義（報告期間用 SHOW_SERIES_TEMPLATE 收起）*/}
+            {SHOW_SERIES_TEMPLATE && productUrls.length >= 2 && (
               <>
                 <label className="flex items-start gap-2 text-xs text-gray-600 cursor-pointer pt-1">
                   <button type="button" onClick={() => setSeriesMode((v) => !v)}

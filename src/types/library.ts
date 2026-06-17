@@ -1,5 +1,11 @@
 // ─── Library / Asset types ────────────────────────────────────────────────────
 
+/**
+ * Feature flag：#4 系列圖（固定模板貼圖）。報告期間暫時收起（UI + 圖庫隱藏其成圖）。
+ * 將來想攞返出嚟繼續做：改 true 即可（UI 同圖庫一齊復原）。對應 mode = "paste-template"。
+ */
+export const SHOW_SERIES_TEMPLATE = false;
+
 export type ComponentCategory = "COMPOSITION" | "COLOR_SCHEME" | "COPY_TONE" | "BACKGROUND";
 
 export type SlotKey = "layout" | "color" | "tone" | "background";

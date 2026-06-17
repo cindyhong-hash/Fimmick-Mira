@@ -4,5 +4,13 @@
 > 老闆 repo 嘅 main = 對應下面最新嗰行嘅 `main@<sha>`（只含程式碼 + 用戶指南）。
 > 內部文檔（FEATURE_LOG / DECISIONS / CHECKLIST / FUNCTIONS / AI-ENGINES / DEMO …）**唔分享**，只留俾自己。
 
+## ⚠️ 部署注意（決定咗：先 push code，URL 遲啲再做）
+本 app 寫圖去本機 `public/uploads/` + 用 SQLite `prisma/dev.db` →
+- **Vercel 部署唔到**（serverless 檔案系統唯讀/即棄，生成圖同 DB 唔會存）。
+- 要 URL 俾老闆嘅可行路：
+  - **本機 + Cloudflare Tunnel**（免費、0 改 code、機開住先用）—— demo/短期最快。
+  - **Render / Railway**（~US$6/月，持久 disk、always-on）—— code 唔使改。
+  - **改雲（Supabase/Neon storage+Postgres）→ 先上到 Vercel**（= backlog #1，工程量中～大）。
+
 ## 已分享版本
 <!-- script 會 append 喺呢度下面 -->

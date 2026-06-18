@@ -290,7 +290,7 @@ export function GenerateAssetModal({ clientId, onClose, onSaved, init }: Props) 
               <input
                 type="url"
                 value={refImageUrl}
-                onChange={(e) => { setRefImageUrl(e.target.value); if (engine === "nano" && !e.target.value.trim()) setEngine("flux"); }}
+                onChange={(e) => setRefImageUrl(e.target.value)}
                 onBlur={(e) => {
                   const url = e.target.value.trim();
                   if (url.startsWith("http")) handleDescribeRef(url, false);
@@ -305,7 +305,7 @@ export function GenerateAssetModal({ clientId, onClose, onSaved, init }: Props) 
                 {refUploading ? "上傳中…" : "上傳"}
               </button>
               {refImageUrl.trim() && (
-                <button onClick={() => { setRefImageUrl(""); if (engine === "nano") setEngine("flux"); }}
+                <button onClick={() => setRefImageUrl("")}
                   className="px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs text-gray-500 hover:bg-gray-50 transition-colors whitespace-nowrap">
                   清除
                 </button>
@@ -330,12 +330,11 @@ export function GenerateAssetModal({ clientId, onClose, onSaved, init }: Props) 
                 <div className="font-semibold">{fluxLabel.name}</div>
                 <div className={`text-[10px] ${engine === "flux" ? "text-violet-100" : "text-gray-400"}`}>{fluxLabel.sub}</div>
               </button>
-              <button onClick={() => refImageUrl.trim() && setEngine("nano")}
-                disabled={!refImageUrl.trim()}
-                title={!refImageUrl.trim() ? "需要先填寫參考風格圖" : "以參考圖色調、光影、質感做風格遷移生成"}
-                className={`flex-1 text-xs px-3 py-2 rounded-lg border transition-colors ${engine === "nano" ? "bg-violet-600 text-white border-violet-600" : !refImageUrl.trim() ? "opacity-40 cursor-not-allowed bg-white border-gray-200 text-gray-400" : "bg-white border-gray-200 text-gray-600 hover:border-violet-300"}`}>
+              <button onClick={() => setEngine("nano")}
+                title={refImageUrl.trim() ? "以參考圖色調、光影、質感做風格遷移生成" : "純文字生圖（有參考圖時自動轉風格遷移）"}
+                className={`flex-1 text-xs px-3 py-2 rounded-lg border transition-colors ${engine === "nano" ? "bg-violet-600 text-white border-violet-600" : "bg-white border-gray-200 text-gray-600 hover:border-violet-300"}`}>
                 <div className="font-semibold">Nano Banana</div>
-                <div className={`text-[10px] ${engine === "nano" ? "text-violet-100" : "text-gray-400"}`}>參考圖風格遷移（需有參考圖）</div>
+                <div className={`text-[10px] ${engine === "nano" ? "text-violet-100" : "text-gray-400"}`}>{refImageUrl.trim() ? "參考圖風格遷移" : "純文字生圖"}</div>
               </button>
             </div>
           </div>

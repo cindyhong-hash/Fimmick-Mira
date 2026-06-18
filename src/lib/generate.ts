@@ -38,6 +38,8 @@ export const OPENROUTER_IMAGE_MODEL_FALLBACK = process.env.OPENROUTER_IMAGE_MODE
 // fal.ai image-editing model (Gemini "nano-banana"): reliable, ~8s, accepts MULTIPLE input images
 // (product + the actual background), so it can use the chosen background — not just a text scene.
 const FAL_EDIT_MODEL = process.env.FAL_EDIT_MODEL ?? "fal-ai/nano-banana/edit";
+// fal.ai nano-banana text-to-image（非 edit）— 無參考圖時的純文字生圖路徑。
+const FAL_NANO_T2I_MODEL = process.env.FAL_NANO_T2I_MODEL ?? "fal-ai/nano-banana";
 // fal.ai FLUX.2 [pro] edit — 產品合成主力：實測中文字保真度遠勝 nano/bria，仍可換背景/多參考圖。
 const FAL_FLUX2_EDIT_MODEL = process.env.FAL_FLUX2_EDIT_MODEL ?? "fal-ai/flux-2-pro/edit";
 // fal.ai Seedream 4.5 edit — 取代 GPT：場景最自然、穩定不 crash、中文字同級、收多圖。
@@ -768,6 +770,29 @@ export async function falSceneFromRef(i: { refDataUri: string; sceneDescription:
   if (!res.ok) {
     const t = await res.text().catch(() => "");
     throw new Error(`Nano Banana 場景生成錯誤 ${res.status}: ${t.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const url = data.images?.[0]?.url ?? data.image?.url;
+  if (!url) throw new Error("Nano Banana 回應無圖片 URL");
+  const imgRes = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+  if (!imgRes.ok) throw new Error(`Nano Banana 圖片下載失敗：${imgRes.status}`);
+  return { buffer: Buffer.from(await imgRes.arrayBuffer()), contentType: imgRes.headers.get("content-type") ?? "image/png", seed: 0 };
+}
+
+/**
+ * Pure text→image via nano-banana（非 edit）。無參考圖時用，行 fal-ai/nano-banana。
+ */
+export async function falNanoTextToImage(i: { prompt: string; aspectRatio?: string }): Promise<GeneratedImage> {
+  if (!FAL_KEY) throw new Error("FAL_KEY 未設定，無法用 Nano Banana");
+  const res = await fetch(`https://fal.run/${FAL_NANO_T2I_MODEL}`, {
+    method: "POST",
+    headers: { Authorization: `Key ${FAL_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt: i.prompt, num_images: 1, ...(i.aspectRatio ? { aspect_ratio: i.aspectRatio } : {}) }),
+    signal: AbortSignal.timeout(90_000),
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new Error(`Nano Banana 文字生圖錯誤 ${res.status}: ${t.slice(0, 200)}`);
   }
   const data = await res.json();
   const url = data.images?.[0]?.url ?? data.image?.url;

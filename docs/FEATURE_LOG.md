@@ -11,8 +11,30 @@
 | 2026-06-12~13 | Phase 2/3：素材生成 + 參考風格圖 | 素材生成（背景/人像/插畫）；參考圖只借風格不抄構圖；AI 讀圖填描述初稿 |
 | **2026-06-15** | **合成引擎大改 + 分類/文案升級** | **FLUX.2 edit 升主力**（實測中文字保真遠勝，推翻「只有保留原像素先保到中文」）；加 Seedream 4.5；**退役 Bria/GPT**；Qwen/貼圖收起；合成餵高清原圖；persona 入 system role + 潤色寫手；圖庫 5 類 + 改名；reassign |
 | **2026-06-17** | **來源圖顯示 + 多輸出 + 系列圖（固定模板）** | #2 popup 顯示來源產品圖；#3 合成一次出 1–5 張揀；#4 系列圖 = **固定模板貼圖**（接地+投射陰影、可選 AI 融合打光、1800×1200）—— 因生成式（FLUX/nano/Seedream）做唔到「固定元素+固定產品大小」 |
+| **2026-06-18** | **popup 帶入生成 + Nano 純文字生圖** | 背景 popup 加「帶入生成圖片（作背景）」；「圖片風格」popup 加「全部帶入生成圖片」一鍵 inject 構圖/配色/語氣/背景 + 跳 tab；主 popup 按 `libraryImageId` 分**「參考圖 / 產品成圖」**（參考圖右欄頂「全部帶入」；產品成圖右欄頂不放掣、「重新生成」留左下）；**Nano Banana 解除「需參考圖」限制**：有參考圖→edit 風格遷移、無→`fal-ai/nano-banana` 純文字生圖（後端自動切）|
 
 > 每個里程碑嘅詳細決定/討論見下面分節同 [DECISIONS.md](./DECISIONS.md)；引擎細節見 [AI-ENGINES.md](./AI-ENGINES.md)；函數速查見 [FUNCTIONS.md](./FUNCTIONS.md)。
+
+---
+
+## 2026-06-18：popup 帶入生成 + Nano 純文字生圖
+
+### 背景 popup「帶入生成圖片（作背景）」
+- 背景素材 popup（`ImageDetailModal` 背景分支）底部加全寬主掣，`onInject(bgComp)` 將背景塞入 `PromptComposer` 背景積木；原「重新生成/調整（帶入素材生成）」掣保留做次按鈕。兩個用途並存。
+
+### 「圖片風格」popup「全部帶入生成圖片」
+- 成圖/參考圖 popup 積木欄頂加一鍵主掣，`onInjectAll([構圖,配色,語氣,背景])` 一次過 set 晒對應 slot + 切去「生成圖片」tab + 關 popup + toast（`page.tsx` `handleInjectAll`）。
+- 解決：之前左欄「載入原參數」掣只有生成圖先有（參考圖無）、per-card 帶入㩒咗唔跳 tab 似冇反應 → 似「冇生成導入掣」。per-card「帶入生成」掣保留做精細控制。
+
+### 主 popup 按 `libraryImageId` 分「參考圖 / 產品成圖」
+- 主 branch 標題唔再一律「圖片風格」：**冇 `libraryImageId` → 「參考圖」**（brand 圖，icon 藍）；**有 `libraryImageId` → 「產品成圖」**（生成圖，icon 紫）。
+- 右欄頂主掣：**只有參考圖**顯示「全部帶入生成圖片」（`onInjectAll`）。
+- **產品成圖**：右欄頂**不放掣**；「重新生成 / 調整（載入原參數到生成台）」（`onRegenerate`）留喺圖下面（左下原位）；亦**唔顯示**「全部帶入生成圖片」。背景 / 人像 / 插畫分支唔受影響。
+
+### Nano Banana 解除「需參考圖」限制（純文字生圖 + 風格遷移自動切）
+- **後端**（`generate/route.ts`）：`useNano = engine==="nano"`；`useNanoEdit = useNano && !!refImageUrl`。有參考圖→`falSceneFromRef`（`fal-ai/nano-banana/edit`）；無→新 helper `falNanoTextToImage`（`fal-ai/nano-banana`，env `FAL_NANO_T2I_MODEL`）。
+- **前端**（`GenerateAssetModal`）：Nano 引擎掣任何時候都揀得（拆走 `disabled`），副標題按有冇參考圖顯示「參考圖風格遷移」/「純文字生圖」；移走清空參考圖時強制切返 flux 嘅邏輯。
+- **理由**：之前「冇參考圖揀 nano 會靜靜雞 fall 返 FLUX 呃人」；而家後端真係按參考圖揀啱 model。Nano t2i 同 FLUX.1 功能重疊但出品風格不同，值得 A/B。
 
 ---
 

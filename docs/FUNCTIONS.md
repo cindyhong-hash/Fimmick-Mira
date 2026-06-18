@@ -15,7 +15,8 @@
 | `falAiImage` | 場景 / 背景（預設）| FLUX.1 schnell `fal-ai/flux/schnell` | — |
 | `falFlux2Pro` | **人像**（`model:"flux-2-pro"`）| `fal-ai/flux-2-pro` | `FAL_FLUX2_MODEL` |
 | `falRecraft` | **插畫**（`model:"recraft"`, style=digital_illustration）| `fal-ai/recraft/v3/text-to-image` | `FAL_RECRAFT_MODEL` |
-| `falSceneFromRef` | 素材生成「參考圖風格遷移」（nano，只借風格唔抄構圖）| `fal-ai/nano-banana/edit` | `FAL_EDIT_MODEL` |
+| `falSceneFromRef` | 素材生成 Nano「參考圖風格遷移」（**有參考圖**，只借風格唔抄構圖）| `fal-ai/nano-banana/edit` | `FAL_EDIT_MODEL` |
+| `falNanoTextToImage` | 素材生成 Nano 純文字生圖（**無參考圖**時自動走呢個）| `fal-ai/nano-banana` | `FAL_NANO_T2I_MODEL` |
 
 ### 產品合成（edit / 重畫型；全部收多圖 `image_urls`）
 | 函數 | UI 名 | 模型 / endpoint | env | 備註 |

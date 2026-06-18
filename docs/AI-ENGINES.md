@@ -13,6 +13,7 @@
 |---|---|---|---|---|
 | 產品合成 · 主力 | **FLUX.2 [pro]**（edit/多參考）| Black Forest Labs | `fal-ai/flux-2-pro/edit` | `FAL_FLUX2_EDIT_MODEL` |
 | 產品合成 · 自然 | **Nano Banana = Google Gemini 2.5 Flash Image**（**標準版，唔係 Pro / 唔係 Gemini 3**）| Google（經 fal）| `fal-ai/nano-banana/edit` | `FAL_EDIT_MODEL` |
+| 素材生成 · Nano 純文字生圖 | **Nano Banana**（text-to-image，無參考圖時用）| Google（經 fal）| `fal-ai/nano-banana` | `FAL_NANO_T2I_MODEL` |
 | 產品合成 · Seedream | **Seedream 4.5**（edit）| ByteDance | `fal-ai/bytedance/seedream/v4.5/edit` | `FAL_SEEDREAM_EDIT_MODEL` |
 | 產品合成 · Qwen（UI 隱藏）| **Qwen-Image-Edit Plus（2509）** | Alibaba | `fal-ai/qwen-image-edit-plus` | `FAL_QWEN_EDIT_MODEL` |
 | 純文字生圖 · 場景/背景 | **FLUX.1 [schnell]** | Black Forest Labs | `fal-ai/flux/schnell` | `HF_IMAGE_MODEL`（HF 備援）|
@@ -113,7 +114,7 @@ const order = engine === "nano" ? [tryNano, tryFlux2Edit]
 
 ## 4. 素材生成引擎（GenerateAssetModal）
 
-素材生成功能（背景 / 人像 / 插畫）各有預設引擎；加埋「參考風格圖」後可解鎖 **Nano Banana 風格遷移**模式。
+素材生成功能（背景 / 人像 / 插畫）各有預設引擎。**Nano Banana 引擎任何時候都揀得**：有參考風格圖 → 走 `/edit` 做**風格遷移**；無參考圖 → 走 `fal-ai/nano-banana` 做**純文字生圖**。後端按 `refImageUrl` 有冇自動切，UI 唔再 disable（2026-06 更新）。
 
 ### 4a. 預設引擎（純文字生圖，無需參考圖）
 
@@ -123,11 +124,11 @@ const order = engine === "nano" ? [tryNano, tryFlux2Edit]
 | **人像** | **FLUX.2 pro** | `fal-ai/flux-2-pro`（`FAL_FLUX2_MODEL`）| 真人寫實、預設亞裔（台/港）面孔（prompt 自動加，可關）| 貴、較慢 |
 | **插畫** | **Recraft V3** | `fal-ai/recraft/v3/text-to-image`（`FAL_RECRAFT_MODEL`，style=`digital_illustration`）| 2D 插畫風格準確 | 唔適合寫實 |
 
-### 4b. Nano Banana 風格遷移（需要參考風格圖）
+### 4b. Nano Banana（風格遷移 / 純文字生圖，按參考圖自動切）
 
-- **endpoint**：`fal-ai/nano-banana/edit`（同產品合成用同一個 model）
-- **觸發條件**：用戶上傳 / 填入「參考風格圖」URL + 選擇「Nano Banana」引擎。
-- **設計意圖**：利用 nano-banana 的 image-to-image 能力，把參考圖的**視覺風格**（色調、光影質感、氣氛）遷移到新生成畫面。
+- **有參考圖** → endpoint `fal-ai/nano-banana/edit`（`FAL_EDIT_MODEL`，同產品合成用同一個 model）；做 image-to-image **風格遷移**，把參考圖的**視覺風格**（色調、光影質感、氣氛）遷移到新畫面。
+- **無參考圖** → endpoint `fal-ai/nano-banana`（`FAL_NANO_T2I_MODEL`）；做 text-to-image **純文字生圖**，功能上同 FLUX.1 重疊（出品風格不同，可 A/B 試）。
+- **切換邏輯**：後端 `useNano = engine==="nano"`，再 `useNanoEdit = useNano && !!refImageUrl` 決定走 edit 定 t2i；UI 引擎掣任何時候都揀得，副標題按有冇參考圖顯示「參考圖風格遷移」/「純文字生圖」。
 
 #### 風格遷移 vs 內容複製 — 關鍵決定
 
@@ -165,10 +166,11 @@ different in content.
 | 函數 / 端點 | 位置 | 說明 |
 |---|---|---|
 | `describeReferenceStyle` | `lib/generate.ts` | Vision model 讀圖，回傳繁中風格描述（max 80字，僅色調/光影/質感/情緒，不含構圖） |
-| `falSceneFromRef` | `lib/generate.ts` | Nano Banana 風格遷移生成，ref 圖先 resize → JPEG data URI |
+| `falSceneFromRef` | `lib/generate.ts` | Nano Banana 風格遷移生成（**有參考圖**），ref 圖先 resize → JPEG data URI |
+| `falNanoTextToImage` | `lib/generate.ts` | Nano Banana 純文字生圖（**無參考圖**），endpoint `FAL_NANO_T2I_MODEL` |
 | `polishBriefToChinese` | `lib/generate.ts` | 接受 `styleDesc?` 注入風格參考至 polish prompt；輸出 100 字內 |
 | `POST /api/library/polish` | `app/api/library/polish/route.ts` | 接 `refImageUrl?`，先分析再潤色 |
-| `POST /api/library/generate` | `app/api/library/generate/route.ts` | `useNano = engine==="nano" && !!refImageUrl`；路由到 `falSceneFromRef` 或標準 FLUX |
+| `POST /api/library/generate` | `app/api/library/generate/route.ts` | `useNano = engine==="nano"`；`useNanoEdit = useNano && !!refImageUrl` → 路由到 `falSceneFromRef`（edit）/ `falNanoTextToImage`（t2i）/ 標準 FLUX |
 | `POST /api/library/describe` | `app/api/library/describe/route.ts` | 多模式讀圖：`kind=brief`（20–30字生成初稿）/ `kind=background`（20字場景）/ 預設（20字主體）；接 `genType` 調整提示 |
 
 ### 4c. AI 讀圖填描述初稿（describe?kind=brief）

@@ -35,6 +35,8 @@ type Props = {
   clients?: { id: string; name: string }[];
   injectedIds?: Set<string>;
   onInject: (comp: StyleComponent) => void;
+  /** 一次過帶入全部積木（構圖/配色/語氣/背景）到生成圖片並切 tab。 */
+  onInjectAll?: (comps: StyleComponent[]) => void;
   onAnalyze?: (imageUrl: string) => void;
   /** Image-based edit: adjust this image's 構圖/配色/語氣 together.
    *  libraryImageId is forwarded so a generated image saves back into its paramsJson snapshot. */
@@ -63,6 +65,7 @@ export function ImageDetailModal({
   clients,
   injectedIds,
   onInject,
+  onInjectAll,
   onAnalyze,
   onAdjust,
   onRegenerate,
@@ -250,9 +253,16 @@ export function ImageDetailModal({
                 )}
               </div>
             )}
+            {!loading && bgComp && (
+              <button onClick={() => onInject(bgComp)} disabled={injectedIds?.has(bgComp.id)}
+                className={`mt-3 w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl border transition-colors
+                  ${injectedIds?.has(bgComp.id) ? "bg-gray-100 border-gray-200 text-gray-400 cursor-default" : "bg-teal-600 border-teal-600 text-white hover:bg-teal-700"}`}>
+                <ArrowRightCircle className="h-3.5 w-3.5" />{injectedIds?.has(bgComp.id) ? "已帶入生成圖片（作背景）" : "帶入生成圖片（作背景）"}
+              </button>
+            )}
             {!loading && onOpenGenerateAsset && (
               <button onClick={() => onOpenGenerateAsset({ description: prompt ?? "", refImageUrl: effectiveRefImageUrl ?? "", type: "background", engine: derivedEngine })}
-                className="mt-3 w-full flex items-center justify-center gap-1.5 text-xs font-medium border border-violet-300 text-violet-700 bg-violet-50 px-3 py-2 rounded-xl hover:bg-violet-100 transition-colors">
+                className="mt-2 w-full flex items-center justify-center gap-1.5 text-xs font-medium border border-violet-300 text-violet-700 bg-violet-50 px-3 py-2 rounded-xl hover:bg-violet-100 transition-colors">
                 <RefreshCw className="h-3.5 w-3.5" />重新生成 / 調整（帶入素材生成）
               </button>
             )}
@@ -345,7 +355,7 @@ export function ImageDetailModal({
         <div className="flex items-center justify-between px-5 py-3.5 border-b shrink-0 gap-3 min-w-0">
           <h2 className="text-sm font-semibold flex items-center gap-1.5 min-w-0 flex-1">
             <ScanSearch className={`h-4 w-4 shrink-0 ${libraryImageId ? "text-violet-500" : "text-blue-500"}`} />
-            <span className="shrink-0">圖片風格</span>
+            <span className="shrink-0">{libraryImageId ? "產品成圖" : "參考圖"}</span>
             {libraryImageId ? (
               editingTitle ? (
                 <span className="flex items-center gap-1 min-w-0 flex-1">
@@ -452,6 +462,14 @@ export function ImageDetailModal({
 
           {/* Linked components — 構圖/配色/語氣 + 背景（合成會直接用到，所以顯示出嚟）。 */}
           <div className="space-y-3">
+            {/* 右欄頂主掣：只有參考圖顯示「全部帶入生成圖片」；產品成圖用左下「重新生成」掣。 */}
+            {!loading && !libraryImageId && onInjectAll && (sorted.length > 0 || bgComp) && (
+              <button
+                onClick={() => onInjectAll([...sorted, ...(bgComp ? [bgComp] : [])])}
+                className="w-full flex items-center justify-center gap-1.5 text-xs font-medium bg-violet-600 text-white px-3 py-2.5 rounded-xl hover:bg-violet-700 transition-colors">
+                <ArrowRightCircle className="h-4 w-4" />全部帶入生成圖片（{sorted.length + (bgComp ? 1 : 0)} 個積木）
+              </button>
+            )}
             {/* 來源產品圖：合成時用咗邊張（如有）。 */}
             {sourceImages && sourceImages.length > 0 && (
               <div className="rounded-xl border border-violet-200 bg-violet-50 p-3">

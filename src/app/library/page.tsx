@@ -67,6 +67,19 @@ export default function LibraryPage() {
     showToast(`已帶入${CATEGORY_META[comp.type].label}：${comp.name}`);
   }, [showToast]);
 
+  // Popup「全部帶入生成圖片」→ 一次過將構圖/配色/語氣/背景塞入對應 slot，並切去生成圖片 tab。
+  const handleInjectAll = useCallback((comps: StyleComponent[]) => {
+    if (comps.length === 0) return;
+    setSlots((prev) => {
+      const next = { ...prev };
+      comps.forEach((c) => { next[CATEGORY_META[c.type].slot as keyof PromptSlots] = c; });
+      return next;
+    });
+    setTab("assets");
+    setDetail(null);
+    showToast(`已帶入 ${comps.length} 個積木到生成圖片`);
+  }, [showToast]);
+
   const handleClearSlot = useCallback((key: keyof PromptSlots) => {
     setSlots((prev) => ({ ...prev, [key]: null }));
   }, []);
@@ -264,6 +277,7 @@ export default function LibraryPage() {
           clients={clients}
           injectedIds={injectedIds}
           onInject={handleInject}
+          onInjectAll={handleInjectAll}
           onAnalyze={handleAnalyze}
           onAdjust={handleAdjustImage}
           onRegenerate={detail.regenerateParams ? () => handleRegenerate(detail) : undefined}

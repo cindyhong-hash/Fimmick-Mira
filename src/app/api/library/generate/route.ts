@@ -4,7 +4,7 @@ import path from "path";
 import { randomUUID } from "crypto";
 import sharp from "sharp";
 import { db } from "@/lib/db";
-import { generateImage, generateCopy, compileChineseBrief, translateBriefToEnglishPrompt, falFlux2Edit, falSeedreamEdit, falQwenEdit, falImageEdit, falRemoveBg, falUpscale, describeReferenceStyle, falSceneFromRef, type GeneratedImage } from "@/lib/generate";
+import { generateImage, generateCopy, compileChineseBrief, translateBriefToEnglishPrompt, falFlux2Edit, falSeedreamEdit, falQwenEdit, falImageEdit, falRemoveBg, falUpscale, describeReferenceStyle, falSceneFromRef, falNanoTextToImage, type GeneratedImage } from "@/lib/generate";
 
 const W = 1024;
 const H = 1024;
@@ -295,17 +295,21 @@ export async function POST(request: Request) {
     // Chinese brief → optimized English FLUX prompt (falls back to brief if no API key).
     const prompt = await translateBriefToEnglishPrompt(enrichedBrief);
 
-    // 生成類型 → 揀模型：真人(FLUX.2 pro) / 插畫(Recraft V3) / nano(參考圖風格) / 場景(預設 schnell)。
-    const useNano = engine === "nano" && !!refImageUrl;
+    // 生成類型 → 揀模型：真人(FLUX.2 pro) / 插畫(Recraft V3) / nano / 場景(預設 schnell)。
+    // nano：有參考圖 → nano-banana/edit 風格遷移；冇參考圖 → nano-banana 純文字生圖。
+    const useNano = engine === "nano";
+    const useNanoEdit = useNano && !!refImageUrl;
     const genModel = genType === "person" ? "flux-2-pro" : genType === "illustration" ? "recraft" : undefined;
     const genStyle = genType === "illustration" ? "digital_illustration" : undefined;
     const genMode = useNano ? "nano-banana" : genType === "person" ? "flux2-person" : genType === "illustration" ? "recraft-illustration" : "flux-scene";
 
     let img: GeneratedImage;
-    if (useNano) {
+    if (useNanoEdit) {
       const refBuf = await loadImageBuffer(refImageUrl as string, host);
       const refDataUri = `data:image/jpeg;base64,${(await sharp(refBuf).resize(1024, 1024, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer()).toString("base64")}`;
       img = await falSceneFromRef({ refDataUri, sceneDescription: prompt, aspectRatio });
+    } else if (useNano) {
+      img = await falNanoTextToImage({ prompt, aspectRatio });
     } else {
       [img] = await Promise.all([generateImage({ prompt, seed, width: outW, height: outH, model: genModel, style: genStyle })]);
     }

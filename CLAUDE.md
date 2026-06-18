@@ -16,6 +16,15 @@ git 只帶 code + docs。**手動帶**（gitignore，唔會喺 clone 入面）�
 - **Merge 時：`docs/` 同 `.claude/*.md`（WIP 筆記）唔好 merge 入公司 repo**，只 merge 程式碼/功能。
 - commit email 用公司 `vernaip@fimmick.com`。⚠️ 全機 global 預設係個人 email；新機 clone 後要：`git config user.email vernaip@fimmick.com`
 
+## 老闆分享 repo（market-tool-demo）
+- **分享 repo**：`verna-fimmickTW/market-tool-demo`（Private，已 invite 老闆）
+- **remote 名**：`share`（走 port 443：`ssh://git@ssh.github.com:443/verna-fimmickTW/market-tool-demo.git`）
+- **規矩**：只放 code + `docs/GUIDE-新手使用.md`；剝走 `CLAUDE.md`、`AGENTS.md`、`.claude/`、其他 `docs/`
+- **每次同步**：`bash scripts/sync-share.sh "今次更新咗咩"` — 自動剝走內部文件再 force-push
+- 用戶話「sync demo」/ 「push 新版去 demo」就係叫行呢個 script
+- 進度記錄自動寫去 `docs/SHARE-LOG.md`
+- 老闆 clone 後：要自備 `.env.local`（3 個 key：OpenRouter / fal.ai / HF）+ 跑 `npx prisma db push`，詳見 `docs/GUIDE-新手使用.md`
+
 ## 供應商 / 已知（2026-06-11）
 - 圖片生成（text→image）：**fal.ai FLUX.1-schnell**（`FAL_KEY`，主）→ **HF FLUX**（`HF_TOKEN`，備，端點 `router.huggingface.co`）→ Pollinations（停，402）。
 - 產品合成：**fal.ai Bria Product Shot**（`fal-ai/bria/product-shot`，~$0.04/張，主）→ `sharp` 疊圖（備，需透明去背 PNG）。

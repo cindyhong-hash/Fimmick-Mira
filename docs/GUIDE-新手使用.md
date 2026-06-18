@@ -1,7 +1,46 @@
-# 使用指南 / Demo 操作順序 — 社群行銷素材工具
+# 使用指南 — 社群行銷素材工具
 
-> 由零開始、跟住做就生到圖。**每一步都標明用緊邊個 AI**，方便 demo 時知道背後係邊個引擎。
 > ⚠️ 重要流程：**要先建立「品牌 / 客戶」，先可以入素材庫做生成。**
+
+---
+
+## 🚀 第一次安裝（Setup）
+
+### 1. 前置需求
+- [Node.js 20+](https://nodejs.org/)
+- npm（隨 Node.js 附帶）
+
+### 2. Clone 專案
+```bash
+git clone ssh://git@ssh.github.com:443/verna-fimmickTW/market-tool-demo.git
+cd market-tool-demo
+```
+
+### 3. 設定 API Keys
+```bash
+cp .env.example .env.local
+```
+打開 `.env.local`，填入以下必要 keys：
+
+| 變數 | 用途 | 取得位置 |
+|---|---|---|
+| `OPENROUTER_API_KEY` | 文案生成 + 圖片分析 | [openrouter.ai/keys](https://openrouter.ai/keys) |
+| `FAL_KEY` | 圖片生成 + 產品合成（主力）| [fal.ai/dashboard/keys](https://fal.ai/dashboard/keys) |
+| `HF_TOKEN` | 圖片生成備用 | [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)（建 Read token）|
+
+### 4. 安裝 + 建立資料庫
+```bash
+npm install
+npx prisma db push
+```
+
+### 5. 啟動
+```bash
+npm run dev
+```
+開瀏覽器去 **http://localhost:3000**，就可以開始用。
+
+---
 
 ---
 

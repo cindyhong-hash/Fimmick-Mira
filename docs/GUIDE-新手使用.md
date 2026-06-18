@@ -31,7 +31,8 @@ cp .env.example .env.local
 ### 4. 安裝 + 建立資料庫
 ```bash
 npm install
-npx prisma db push
+npx dotenv -e .env.local -- npx prisma db push
+npx dotenv -e .env.local -- npx prisma generate
 ```
 
 ### 5. 啟動

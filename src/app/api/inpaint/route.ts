@@ -474,27 +474,48 @@ async function editWithReferenceImage(opts: {
       `- The result should look like it came from a professional design agency\n` +
       `- If IMAGE 2 has gold metallic text → apply gold metallic treatment to the Chinese characters`;
   } else {
-    // 一般參考圖編輯 prompt
-    const translatedPrompt = /[一-鿿]/.test(prompt)
-      ? (await translateToEnglish(prompt) ?? prompt)
-      : prompt;
+    // 一般參考圖（產品替換）→ Gemini multimodal，能同時看到廣告圖和參考產品圖
     const areaHint = boundsToAreaHint(selectionBounds);
-    const locationPrefix = areaHint ? `In the ${areaHint} area, ` : "";
+    const locationHint = areaHint ? `The product to replace is in the ${areaHint} area. ` : "";
+    const userIntent = prompt?.trim()
+      ? (/[一-鿿]/.test(prompt) ? (await translateToEnglish(prompt) ?? prompt) : prompt)
+      : "";
+
     finalPrompt =
-      `${locationPrefix}${translatedPrompt}. ` +
-      `The second image is the reference. ` +
-      `Apply the reference style/face/element to the first image as instructed. ` +
-      `Keep everything else in the original image unchanged.`;
+      `TASK: Replace the product in IMAGE 1 (the advertisement) with the product shown in IMAGE 2 (the reference).\n\n` +
+      (locationHint ? `LOCATION: ${locationHint}\n\n` : "") +
+      (userIntent   ? `USER INSTRUCTION: ${userIntent}\n\n` : "") +
+      `PRODUCT REPLACEMENT RULES:\n` +
+      `- Study IMAGE 2 carefully: brand name, bottle shape, color, label, cap/pump design\n` +
+      `- Replace the product in IMAGE 1 with the EXACT product from IMAGE 2 — same brand, color, shape, label text\n` +
+      `- Place the replacement product at the EXACT SAME POSITION as the original product in IMAGE 1\n` +
+      `- The replacement product must occupy the SAME SIZE AND AREA as the original product\n` +
+      `- Match the perspective angle so the new product fits naturally in the scene\n\n` +
+      `MUST NOT CHANGE:\n` +
+      `- Output canvas dimensions and aspect ratio (same size as IMAGE 1)\n` +
+      `- Background, props, environment, lighting\n` +
+      `- ALL text and typography (headline, subtitle — pixel identical, do NOT touch)\n` +
+      `- Shadows and color grading of the scene\n\n` +
+      `OUTPUT: Same advertisement as IMAGE 1, but with the product replaced by the product from IMAGE 2.`;
   }
 
-  console.log(`[editWithRef] isStyleRef=${isStyleRef} prompt="${finalPrompt.slice(0, 100)}"`);
-
-  // 1. 取得原圖尺寸
+  // 1. 取得原圖尺寸（先取得，才能在 prompt 裡告訴 Gemini 目標尺寸）
   const origMeta = await sharp(imgBuf).metadata();
   const origW = origMeta.width  ?? 1024;
   const origH = origMeta.height ?? 1024;
+  const origRatio = origW / origH;
+  const orientation = origW >= origH ? "landscape" : "portrait";
 
-  // 2. 呼叫 Gemini
+  // 把尺寸資訊加進兩種 prompt（讓 Gemini 知道輸出要維持原始比例）
+  const sizeInstruction =
+    `\nCRITICAL OUTPUT SIZE: The output image must maintain the SAME aspect ratio as IMAGE 1 ` +
+    `(${origW}×${origH}, ${orientation} orientation, ratio ${origRatio.toFixed(2)}:1). ` +
+    `Do NOT output a square image. Keep the same ${orientation} proportions.`;
+  finalPrompt += sizeInstruction;
+
+  console.log(`[editWithRef] isStyleRef=${isStyleRef} size=${origW}×${origH} prompt="${finalPrompt.slice(0, 100)}"`);
+
+  // 2. 呼叫 Gemini（需要同時看兩張圖：廣告圖 + 參考產品/風格圖）
   const resultUrl = await generateImageOpenRouter(
     finalPrompt,
     `ref-edit-${Date.now()}`,
@@ -504,17 +525,25 @@ async function editWithReferenceImage(opts: {
     undefined
   );
 
-  // 3. 強制縮放回原始尺寸
+  // 3. 縮放回原始尺寸：
+  //    - 比例接近（誤差 <8%）→ fit:fill（微量拉伸，幾乎看不出來）
+  //    - 比例差很多（Gemini 輸出正方形）→ fit:cover + 置中裁切（裁邊比壓扁好看）
   try {
     const uploadsDir = join(process.cwd(), "public/uploads");
     await mkdir(uploadsDir, { recursive: true });
 
     const localResultBuf = await readFile(join(process.cwd(), "public", resultUrl));
+    const resultMeta = await sharp(localResultBuf).metadata();
+    const resultRatio = (resultMeta.width ?? origW) / (resultMeta.height ?? origH);
+    const ratioDiff = Math.abs(resultRatio - origRatio) / origRatio;
+
+    const fitMode = ratioDiff < 0.08 ? "fill" : "cover";
+    console.log(`[editWithRef] result ratio=${resultRatio.toFixed(2)}, orig=${origRatio.toFixed(2)}, diff=${(ratioDiff*100).toFixed(1)}% → fit:${fitMode}`);
 
     const resizedBuf = await sharp(localResultBuf)
       .resize(origW, origH, {
-        fit: "cover",
-        position: "top",  // 從頂部裁切，保留頂部文字
+        fit: fitMode,
+        position: "centre",  // cover 時從中心裁，避免切掉頂部文字或底部產品
       })
       .jpeg({ quality: 95 })
       .toBuffer();
@@ -593,6 +622,18 @@ export async function POST(request: Request) {
     const lower = trim.toLowerCase();
     console.log(`[inpaint] prompt="${trim}" | bounds=${JSON.stringify(selectionBounds)}`);
 
+    // ── Case 0.5: 加品牌 Logo（優先於 Case 0，避免有殘留參考圖時被攔截）────────
+    if (detectLogoIntent(trim)) {
+      console.log("[inpaint] LOGO mode → searching brand logo");
+      const logoPath = await getBrandLogoPath(brandLogoUrl);
+      if (logoPath) {
+        const position = extractLogoPosition(trim);
+        const resultUrl = await addLogoToImage(imageUrl, logoPath, position, selectionBounds);
+        return NextResponse.json({ imageUrl: resultUrl });
+      }
+      console.warn("[inpaint] LOGO intent detected but no brand logo found — falling through to AI routing");
+    }
+
     // ── Case 0: 有參考圖 → Gemini multimodal 編輯 ──────────────────────────
     if (referenceImageDataUrl) {
       console.log("[inpaint] REFERENCE IMAGE mode → Gemini multimodal");
@@ -603,18 +644,6 @@ export async function POST(request: Request) {
         selectionBounds,
       });
       return NextResponse.json({ imageUrl: resultUrl });
-    }
-
-    // ── Case 0.5: 加品牌 Logo → Sharp 疊加真實 logo（不讓 AI 生成）──────────
-    if (detectLogoIntent(trim)) {
-      console.log("[inpaint] LOGO mode → searching brand logo");
-      const logoPath = await getBrandLogoPath(brandLogoUrl);
-      if (logoPath) {
-        const position = extractLogoPosition(trim);
-        const resultUrl = await addLogoToImage(imageUrl, logoPath, position, selectionBounds);
-        return NextResponse.json({ imageUrl: resultUrl });
-      }
-      console.warn("[inpaint] LOGO intent detected but no brand logo found — falling through to AI routing");
     }
 
     // ── Case 0.7: 字體更改 → Gemini AI（鎖定文字內容只換字型）───────────────

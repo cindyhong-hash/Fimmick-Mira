@@ -180,7 +180,7 @@ export function MaskCanvas({ imageUrl, onMaskChange, onSelectionChange }: Props)
           ref={imgRef}
           src={imageUrl}
           alt="Layout preview"
-          className="w-full aspect-square object-cover block"
+          className="w-full h-auto object-contain block"
           draggable={false}
         />
 

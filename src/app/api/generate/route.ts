@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { anthropic } from "@/lib/anthropic";
-import { generateImageFal, generateImageFluxSchnell, describeStyle, describeProduct } from "@/lib/fal";
+import { generateImageFal, generateImageFluxSchnell, describeStyle, describeProduct, editImageFal } from "@/lib/fal";
 import { generateImageOpenRouter } from "@/lib/openrouter";
 
 /** 背景生成：優先 OpenRouter Gemini（更寫實），備援 Fal FLUX */
@@ -41,13 +41,21 @@ import type { LayoutType } from "@/types";
 
 export const maxDuration = 180;
 
+/** 清掉 AI 填的「無 / 沒有 / none / N/A / -」等佔位字，視為空字串 */
+function sanitizeText(s: string): string {
+  const t = s.trim().replace(/^[（(]\s*|\s*[）)]$/g, "").trim();  // 去掉外層括號
+  if (!t) return "";
+  if (/^(無|沒有|不需要|留空|空|none|no|n\/a|na|null|-|—|–)$/i.test(t)) return "";
+  return s.trim();
+}
+
 /** 取出圖上專用短文字 */
 function parseImageText(raw: string): { title: string; imageSubtitle: string } {
   const titleMatch  = raw.match(/(?:主標題|標題)[：:]\s*(.+)/);
   const imgSubMatch = raw.match(/圖上副標[：:]\s*(.+)/);
   return {
-    title:         titleMatch?.[1]?.trim()  ?? "",
-    imageSubtitle: imgSubMatch?.[1]?.trim() ?? "",
+    title:         sanitizeText(titleMatch?.[1]?.trim()  ?? ""),
+    imageSubtitle: sanitizeText(imgSubMatch?.[1]?.trim() ?? ""),
   };
 }
 
@@ -140,6 +148,8 @@ export async function POST(request: Request) {
 
       // ── 1. Claude 文案 ──────────────────────────────────────────────────────
       const requiredText = activity.titleText ?? activity.focusPoint ?? "";
+      // Layout A 鎖定使用者填入的文字；B、C 讓 AI 自由發揮
+      const isLockedLayout = layoutConfig.type === "A";
       const copyPrompt = buildCopyPrompt({
         theme:      activity.theme,
         focusPoint: activity.focusPoint ?? "",
@@ -147,6 +157,7 @@ export async function POST(request: Request) {
         toneLabels,
         layoutType: layoutConfig.type,
         taboos,
+        forceTitle: isLockedLayout,
       });
       const copyResponse = await anthropic.messages.create({
         model: "claude-opus-4-5",
@@ -156,7 +167,13 @@ export async function POST(request: Request) {
       const rawCopy = (copyResponse.content[0] as { text: string }).text;
 
       // 圖上文字（短版）：主標題 + 圖上副標
-      const { title: finalTitle, imageSubtitle: finalImageSubtitle } = parseImageText(rawCopy);
+      const { title: aiTitle, imageSubtitle: aiImageSubtitle } = parseImageText(rawCopy);
+
+      // Layout A（鎖定）：prompt 已要求 AI 把使用者指定文字「不增刪改字」拆成主標+副標並做層次
+      //                  → 直接採用 AI 拆分結果，保留設計感；AI 萬一沒給才降級用原文
+      // Layout B/C：完全採用 AI 發想結果
+      const finalTitle = aiTitle || (isLockedLayout ? (activity.titleText?.trim() ?? "") : "");
+      const finalImageSubtitle = aiImageSubtitle;
       // 發文文案（長版）
       const postCopy = parsePostCopy(rawCopy) || rawCopy;
       console.log(`[generate] ✅ Copy | title="${finalTitle}" imgSub="${finalImageSubtitle}" post="${postCopy.slice(0, 40)}…"`);
@@ -191,63 +208,89 @@ export async function POST(request: Request) {
       };
       const size = SIZE_MAP[ratio] ?? { w: 1024, h: 1024 };
 
+      // 使用者選擇的生圖模型：fal-ai/* 走 Fal，其餘（gemini/gpt）走 OpenRouter
+      const imageModel  = activity.imageModel || "google/gemini-3-pro-image-preview";
+      const isFalModel  = imageModel.startsWith("fal-ai/");
+      const isSchnell   = imageModel === "fal-ai/flux/schnell";
+      const useOpenRouter = !isFalModel && !!process.env.OPENROUTER_API_KEY;
+      console.log(`[generate] model=${imageModel} → ${useOpenRouter ? "OpenRouter" : "Fal"}`);
+
       let imageUrl: string;
 
       // 用 Claude Vision 分析產品圖，加入 prompt（迴圈內每個版型都分析）
       let productDesc: string | null = null;
-      if (firstProductImage) {
-        productDesc = await describeProduct(firstProductImage);
-        console.log(`[generate] Product desc: ${productDesc?.slice(0, 80)}`);
+      if (productImageUrls.length > 0) {
+        const descs = await Promise.all(
+          productImageUrls.slice(0, 3).map(url => describeProduct(url))
+        );
+        const valid = descs.filter(Boolean) as string[];
+        if (valid.length === 1) {
+          productDesc = valid[0];
+        } else if (valid.length > 1) {
+          productDesc = valid.map((d, i) => `Product ${i + 1}: ${d}`).join(" ");
+        }
+        console.log(`[generate] Product descs (${valid.length} items): ${productDesc?.slice(0, 120)}`);
       }
 
       if (hasProductImage) {
         // ── 有產品圖流程 ──────────────────────────────────────────────────────
-        // Step A: 生成背景（帶產品描述讓背景貼合產品調性）
-        const bgPrompt = buildImagePrompt({
-          theme:           activity.theme,
-          focusPoint:      activity.focusPoint,
-          userImagePrompt: productDesc
-            ? `${productDesc}. ${activity.imagePrompt ?? ""}`.trim()
-            : activity.imagePrompt ?? undefined,
-          primaryColor:    client.primaryColor,
-          secondaryColor:  client.secondaryColor ?? undefined,
-          toneLabels,
-          compositionPrompt:         layoutConfig.compositionPrompt,
-          hasProductImage:           true,
-          componentPrompts:          componentPrompts || undefined,
-          styleReferenceDescription: brandStyleGuide  ?? undefined,
-          imageRatio:                ratio,
-          enableTextOverlay:         true,
-          headline:  finalTitle         || undefined,
-          subtitle:  finalImageSubtitle || undefined,
-        });
+        if (useOpenRouter) {
+          // Gemini/GPT one-shot：產品圖當參考，模型同時畫背景＋產品＋文字
+          const fullPrompt = buildImagePrompt({
+            theme:           activity.theme,
+            focusPoint:      activity.focusPoint,
+            userImagePrompt: `${productDesc ? productDesc + ". " : ""}${activity.imagePrompt ?? ""}`.trim() || undefined,
+            primaryColor:    client.primaryColor,
+            secondaryColor:  client.secondaryColor ?? undefined,
+            toneLabels,
+            compositionPrompt:         layoutConfig.compositionPrompt,
+            layoutType:                layoutConfig.type,
+            fontHint:                  client.commonText || undefined,
+            hasProductImage:           true,
+            componentPrompts:          componentPrompts || undefined,
+            styleReferenceDescription: brandStyleGuide  ?? undefined,
+            imageRatio:                ratio,
+            enableTextOverlay:         true,
+            headline:  finalTitle         || undefined,
+            subtitle:  finalImageSubtitle || undefined,
+          });
+          console.log(`[generate] Gemini one-shot prompt (first 120): ${fullPrompt.slice(0, 120)}`);
 
-        console.log(`[generate] bg prompt (first 120): ${bgPrompt.slice(0, 120)}`);
-
-        // Step B: Gemini 一次生成含產品的完整廣告圖（把產品圖當 reference 送進去）
-        // bgPrompt 已包含場景描述（含使用者填的畫面描述）
-        // firstProductImage 作為 productImageUrl 送給 Gemini 當參考
-        if (process.env.OPENROUTER_API_KEY) {
           imageUrl = await generateImageOpenRouter(
-            bgPrompt,
+            fullPrompt,
             `${activityId}-${layoutConfig.type}`,
             styleImages,
-            enableTextOverlay,   // 有文字需求就一起燒入
-            undefined,           // baseImageUrl（不是編輯模式）
-            productImageUrls     // 全部產品圖一起送給 Gemini
+            true,                // 讓 Gemini 燒入設計感文字
+            undefined,           // baseImageUrl
+            productImageUrls,    // 產品圖當參考（最多 3 張）
+            layoutConfig.type,   // 只套用當前版型規則
+            ratio,               // 圖片比例（9:16 等）
+            imageModel,          // 使用者選擇的模型
           );
           if (imageUrl.includes("picsum")) {
-            // OpenRouter 失敗 → fallback 到舊的 Sharp 合成流程
-            console.warn("[generate] OpenRouter failed, falling back to compositeImage");
-            const bgUrl = await generateImageFal({ prompt: bgPrompt, imageRatio: ratio, seed: `${activityId}-${layoutConfig.type}-bg` });
-            imageUrl = await compositeImage({
-              backgroundUrl: bgUrl, productImageUrl: firstProductImage,
-              layoutType: layoutConfig.type, canvasWidth: size.w, canvasHeight: size.h,
-              titleText: finalTitle || undefined, subtitleText: finalImageSubtitle || undefined,
-              seed: `${activityId}-${layoutConfig.type}`,
-            });
+            console.warn("[generate] OpenRouter one-shot failed → Fal fallback");
+            imageUrl = await generateImageFal({ prompt: fullPrompt, imageRatio: ratio, seed: `${activityId}-${layoutConfig.type}` });
           }
         } else {
+          // 沒有 OpenRouter → 舊版 Sharp 合成流程（背景帶產品調性）
+          const bgPrompt = buildImagePrompt({
+            theme:           activity.theme,
+            focusPoint:      activity.focusPoint,
+            userImagePrompt: productDesc
+              ? `${productDesc}. ${activity.imagePrompt ?? ""}`.trim()
+              : activity.imagePrompt ?? undefined,
+            primaryColor:    client.primaryColor,
+            secondaryColor:  client.secondaryColor ?? undefined,
+            toneLabels,
+            compositionPrompt:         layoutConfig.compositionPrompt,
+            layoutType:                layoutConfig.type,
+            fontHint:                  client.commonText || undefined,
+            hasProductImage:           true,
+            componentPrompts:          componentPrompts || undefined,
+            styleReferenceDescription: brandStyleGuide  ?? undefined,
+            imageRatio:                ratio,
+            enableTextOverlay:         false,
+          });
           // 沒有 OpenRouter → Sharp 合成流程
           const bgUrl = await generateImageFal({ prompt: bgPrompt, imageRatio: ratio, seed: `${activityId}-${layoutConfig.type}-bg` });
           imageUrl = await compositeImage({
@@ -269,6 +312,8 @@ export async function POST(request: Request) {
           secondaryColor:  client.secondaryColor ?? undefined,
           toneLabels,
           compositionPrompt:         layoutConfig.compositionPrompt,
+            layoutType:                layoutConfig.type,
+            fontHint:                  client.commonText || undefined,
           hasProductImage:           false,
           componentPrompts:          componentPrompts || undefined,
           styleReferenceDescription: brandStyleGuide  ?? undefined,
@@ -278,10 +323,11 @@ export async function POST(request: Request) {
           subtitle:  finalImageSubtitle || undefined,
         });
 
-        // 無論有沒有文字需求，都走 OpenRouter（Gemini 品質最好）
-        if (process.env.OPENROUTER_API_KEY) {
-          imageUrl = await generateImageOpenRouter(fullPrompt, `${activityId}-${layoutConfig.type}`, styleImages, enableTextOverlay);
+        if (useOpenRouter) {
+          imageUrl = await generateImageOpenRouter(fullPrompt, `${activityId}-${layoutConfig.type}`, styleImages, enableTextOverlay, undefined, undefined, layoutConfig.type, ratio, imageModel);
           if (imageUrl.includes("picsum")) imageUrl = await generateImageFal({ prompt: fullPrompt, imageRatio: ratio, seed: `${activityId}-${layoutConfig.type}` });
+        } else if (isSchnell) {
+          imageUrl = await generateImageFluxSchnell({ prompt: fullPrompt, imageRatio: ratio, seed: `${activityId}-${layoutConfig.type}` });
         } else {
           imageUrl = await generateImageFal({ prompt: fullPrompt, imageRatio: ratio, seed: `${activityId}-${layoutConfig.type}` });
         }

@@ -1,7 +1,7 @@
 "use client";
 /**
  * ComponentSelector — 三個下拉選單版本
- * 分別對應構圖 / 配色 / 語氣，各自單選，選取後以 chip 顯示。
+ * 分別對應構圖 / 配色，各自單選，選取後以 chip 顯示。
  */
 import { useEffect, useState } from "react";
 import { X, ChevronDown } from "lucide-react";
@@ -18,7 +18,6 @@ type StyleComponent = {
 const SLOTS = [
   { type: "COMPOSITION" as const, label: "構圖風格", placeholder: "選擇構圖" },
   { type: "COLOR_SCHEME" as const, label: "配色方案", placeholder: "選擇配色" },
-  { type: "COPY_TONE"   as const, label: "語氣風格", placeholder: "選擇語氣" },
 ] as const;
 
 const CHIP_COLOR: Record<string, string> = {

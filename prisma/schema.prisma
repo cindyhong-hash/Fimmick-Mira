@@ -34,6 +34,7 @@ model Activity {
   referenceImageUrls   String            @default("[]")
   selectedComponentIds String            @default("[]") // 選取的風格組件 IDs
   imageRatio           String            @default("1:1") // 圖片比例
+  imageModel           String            @default("google/gemini-3-pro-image-preview") // 生圖模型
   status               String            @default("PENDING")
   createdAt            DateTime          @default(now())
   generatedLayouts     GeneratedLayout[]

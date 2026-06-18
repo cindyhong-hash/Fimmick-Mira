@@ -12,10 +12,19 @@ export type ActivityFormValues = {
   requiredText: string;
   imagePrompt: string;
   imageRatio: string;
+  imageModel: string;
   productImageUrls: string[];
   referenceImageUrls: string[];
   selectedComponentIds: string[];
 };
+
+// ── 可選生圖模型 ───────────────────────────────────────────────────────────────
+export const IMAGE_MODELS: { value: string; label: string; hint: string }[] = [
+  { value: "google/gemini-3-pro-image-preview", label: "Gemini 3 Pro Image（Nano Banana Pro）⭐ 推薦", hint: "中文字最強、產品還原好、支援比例控制" },
+  { value: "openai/gpt-5.4-image-2",            label: "GPT-5.4 Image",                              hint: "風格不同、構圖強，但較慢" },
+  { value: "fal-ai/flux-pro/v1.1",              label: "FLUX Pro 1.1（快速）",                        hint: "寫實照片感佳，中文字較弱" },
+  { value: "fal-ai/flux/schnell",               label: "FLUX Schnell（極速草稿）",                    hint: "最快，品質較低" },
+];
 
 // ── Ratio selector ────────────────────────────────────────────────────────────
 
@@ -57,19 +66,47 @@ function UploadZone({
   disabled?: boolean;
 }) {
   const isEmpty = urls.length === 0;
+  const [preview, setPreview] = useState<string | null>(null);
   return (
     <div className="space-y-2">
       {urls.length > 0 && (
         <div className="flex gap-1.5 flex-wrap px-1">
           {urls.map((url, i) => (
-            <div key={i} className="relative w-14 h-14 shrink-0">
-              <img src={url} alt="" className="w-14 h-14 object-cover rounded-lg border border-gray-200" />
-              <button type="button" onClick={() => onRemove(i)}
+            <div key={i} className="relative w-14 h-14 shrink-0 group/thumb">
+              <img
+                src={url}
+                alt=""
+                onClick={() => setPreview(url)}
+                className="w-14 h-14 object-cover rounded-lg border border-gray-200 cursor-zoom-in transition-opacity group-hover/thumb:opacity-90"
+              />
+              <button type="button" onClick={(e) => { e.stopPropagation(); onRemove(i); }}
                 className="absolute -top-1 -right-1 bg-white rounded-full border shadow-sm p-0.5 hover:bg-red-50">
                 <X className="h-2.5 w-2.5 text-gray-500" />
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* 放大預覽 lightbox */}
+      {preview && (
+        <div
+          onClick={() => setPreview(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-6 cursor-zoom-out"
+        >
+          <img
+            src={preview}
+            alt="放大預覽"
+            onClick={(e) => e.stopPropagation()}
+            className="max-h-[85vh] max-w-[85vw] rounded-lg shadow-2xl object-contain cursor-default"
+          />
+          <button
+            type="button"
+            onClick={() => setPreview(null)}
+            className="absolute top-4 right-4 bg-white/90 hover:bg-white rounded-full p-1.5 shadow"
+          >
+            <X className="h-5 w-5 text-gray-700" />
+          </button>
         </div>
       )}
       {urls.length < max && (
@@ -119,6 +156,7 @@ export function ActivityForm({
     requiredText:         initialValues?.requiredText         ?? "",
     imagePrompt:          initialValues?.imagePrompt          ?? "",
     imageRatio:           initialValues?.imageRatio           ?? "1:1",
+    imageModel:           initialValues?.imageModel           ?? "google/gemini-3-pro-image-preview",
     productImageUrls:     initialValues?.productImageUrls     ?? [],
     referenceImageUrls:   initialValues?.referenceImageUrls   ?? [],
     selectedComponentIds: initialValues?.selectedComponentIds ?? [],
@@ -243,14 +281,6 @@ export function ActivityForm({
       <div className="space-y-4">
         <SectionLabel step="01" title="基本資訊" />
 
-        <Field label="必放文字" hint="AI 文案會包含這些文字">
-          <Input
-            value={values.requiredText}
-            onChange={(e) => set("requiredText", e.target.value)}
-            placeholder="例：精緻女孩必帶✨ / 夏日清涼控油，一噴搞定"
-          />
-        </Field>
-
         {/* 畫面描述 + AI 優化按鈕 */}
         <div className="space-y-1">
           <div className="flex items-center justify-between">
@@ -353,6 +383,14 @@ export function ActivityForm({
             </p>
           )}
         </div>
+
+        <Field label="必放文字（選填）" hint="AI 文案會包含這些文字">
+          <Input
+            value={values.requiredText}
+            onChange={(e) => set("requiredText", e.target.value)}
+            placeholder="例：精緻女孩必帶✨ / 夏日清涼控油，一噴搞定"
+          />
+        </Field>
       </div>
 
       {/* ── 02 素材上傳 ─────────────────────────────────────── */}
@@ -415,7 +453,8 @@ export function ActivityForm({
         </div>
       </div>
 
-      {/* ── 03 風格組件 ─────────────────────────────────────── */}
+      {/* ── 03 風格組件（暫時隱藏；要叫回來把下面整段 {false && (...)} 改回 true 或移除外層即可）─── */}
+      {false && (
       <div className="space-y-3">
         <SectionLabel step="03" title="套用風格組件" hint="選填，AI 會沿用已有的視覺設定" />
         <ComponentSelector
@@ -424,9 +463,10 @@ export function ActivityForm({
           onChange={(ids) => set("selectedComponentIds", ids)}
         />
       </div>
+      )}
 
-      {/* ── 04 圖片比例 ─────────────────────────────────────── */}
-      <div className="space-y-3">
+      {/* ── 04 圖片比例與生圖模型 ─────────────────────────────── */}
+      <div className="space-y-4">
         <SectionLabel step="04" title="圖片尺寸比例" />
         <div className="relative w-48">
           <select
@@ -441,6 +481,28 @@ export function ActivityForm({
           <svg className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
           </svg>
+        </div>
+
+        {/* 生圖模型 */}
+        <div className="space-y-1">
+          <Label className="text-sm font-medium">生圖模型</Label>
+          <div className="relative w-full max-w-md">
+            <select
+              value={values.imageModel}
+              onChange={(e) => set("imageModel", e.target.value)}
+              className="w-full appearance-none border border-gray-200 rounded-lg px-3 py-2 pr-8 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-gray-300 cursor-pointer"
+            >
+              {IMAGE_MODELS.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+            <svg className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+          <p className="text-xs text-gray-400">
+            {IMAGE_MODELS.find((m) => m.value === values.imageModel)?.hint ?? ""}
+          </p>
         </div>
       </div>
 

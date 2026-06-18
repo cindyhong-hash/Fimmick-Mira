@@ -12,6 +12,7 @@ type ImagePromptParams = {
   secondaryColor?: string;
   toneLabels: string[];
   compositionPrompt: string;
+  layoutType?: "A" | "B" | "C";  // 明確指定版型，避免靠字串偵測
   hasProductImage?: boolean;
   componentPrompts?: string;
   imageRatio?: string;
@@ -19,6 +20,7 @@ type ImagePromptParams = {
   enableTextOverlay?: boolean;
   headline?: string;
   subtitle?: string;
+  fontHint?: string;  // 品牌常用字體：作為圖上文字的字體風格提示
 };
 
 // ── 各 Layout 專屬的視覺設計語言 ────────────────────────────────────────────
@@ -60,6 +62,7 @@ function buildTypographyBlock(
   layout: string,
   headline?: string,
   subtitle?: string,
+  fontHint?: string,
 ): string {
   if (!headline && !subtitle) return "";
 
@@ -100,10 +103,19 @@ function buildTypographyBlock(
     typoGuide,
     `RENDERING REQUIREMENTS:`,
     `  - Text must cast REAL shadows consistent with the scene's light source direction`,
-    `  - Characters must have proper Chinese font rendering — use a bold gothic/黑體 style`,
+    fontHint
+      ? `  - Render the Chinese characters in a typeface STYLE resembling "${fontHint}" (match its overall character — e.g. gothic/黑體, serif/明體, rounded/圓體, or handwriting — not necessarily the exact font file)`
+      : `  - Characters must have proper Chinese font rendering — use a bold gothic/黑體 style`,
     `  - Text must be 100% legible — if contrast is insufficient, add a localized luminosity adjustment, NOT a flat semi-transparent box`,
     `  - The final result must look like a PROFESSIONAL DESIGNER spent hours on the typography, not like text was pasted on`,
     `  - DO NOT add any other text, watermarks, or Chinese characters besides the specified content above`,
+    ``,
+    `CRITICAL TEXT UNIQUENESS RULE:`,
+    `- Each text element must appear EXACTLY ONCE in the entire image`,
+    `- Do NOT repeat, duplicate, mirror, or echo any text element in any other location`,
+    `- Do NOT render the same text in both large and small sizes simultaneously`,
+    `- Do NOT add decorative repetitions, watermark versions, or secondary instances of any text`,
+    `- If only a headline is provided with no subtitle, leave the subtitle area completely empty`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -112,9 +124,9 @@ function buildTypographyBlock(
 export function buildImagePrompt(params: ImagePromptParams): string {
   const {
     theme, focusPoint, titleText, subtitleText, userImagePrompt,
-    primaryColor, secondaryColor, toneLabels, compositionPrompt,
+    primaryColor, secondaryColor, toneLabels, compositionPrompt, layoutType,
     hasProductImage, componentPrompts, imageRatio, styleReferenceDescription,
-    enableTextOverlay, headline, subtitle,
+    enableTextOverlay, headline, subtitle, fontHint,
   } = params;
 
   const colorDesc = secondaryColor
@@ -122,15 +134,16 @@ export function buildImagePrompt(params: ImagePromptParams): string {
     : `brand color ${primaryColor}`;
   const toneDesc = toneLabels.length > 0 ? toneLabels.join(", ") : "professional";
 
-  // 從 compositionPrompt 偵測 Layout 類型
+  // Layout 類型：優先用明確傳入的 layoutType，沒有才退回字串偵測（向下相容）
   const layoutKey =
-    compositionPrompt.includes("Layout A") || compositionPrompt.includes("top-left")
-      ? "A"
-      : compositionPrompt.includes("Layout B") || compositionPrompt.includes("High Impact")
-        ? "B"
-        : compositionPrompt.includes("Layout C") || compositionPrompt.includes("Mood")
-          ? "C"
-          : "A";
+    layoutType
+      ?? (compositionPrompt.includes("Layout A") || compositionPrompt.includes("top-left")
+        ? "A"
+        : compositionPrompt.includes("Layout B") || compositionPrompt.includes("High Impact")
+          ? "B"
+          : compositionPrompt.includes("Layout C") || compositionPrompt.includes("Mood")
+            ? "C"
+            : "A");
 
   const layoutVisual = LAYOUT_VISUAL_LANGUAGE[layoutKey] ?? "";
 
@@ -143,7 +156,7 @@ export function buildImagePrompt(params: ImagePromptParams): string {
     `  - Real photography aesthetic: natural caustics, lens micro-flare, subtle chromatic aberration at edges`,
     `  - Depth of field: subject razor-sharp, background smoothly defocused (NOT artificially blurred)`,
     `  - Lighting: motivated by a real-world light source — NOT flat studio lighting, NOT artificial ring-light look`,
-    `  - Surface detail: visible texture on every material (fabric weave, skin pores, liquid meniscus, metal brushing)`,
+    `  - Surface detail: visible texture on every material, each rendered with its own true finish (fabric weave, skin pores, brushed metal, matte or glossy packaging as appropriate)`,
     ``,
     `WHAT TO AVOID (these make images look AI-generated):`,
     `  - Floating geometric objects, colorful spheres, or abstract shapes as background filler`,
@@ -169,6 +182,8 @@ export function buildImagePrompt(params: ImagePromptParams): string {
     parts.push(`SCENE DIRECTION:`);
     if (userImagePrompt) {
       parts.push(`  ${userImagePrompt}`);
+      // 畫面描述為主，品牌調性僅作次要氛圍提示
+      parts.push(`  (Secondary mood hint — let the scene direction above lead, just nudge the overall vibe toward: ${toneDesc}.)`);
     } else {
       parts.push(
         `  Aspirational lifestyle setting that emotionally resonates with the product's promise.`,
@@ -182,7 +197,12 @@ export function buildImagePrompt(params: ImagePromptParams): string {
     parts.push(`SCENE DIRECTION:`);
     if (userImagePrompt) parts.push(`  ${userImagePrompt}`);
     if (focusPoint)      parts.push(`  Visual narrative: ${focusPoint}`);
-    parts.push(`  Mood and tone: ${toneDesc}.`);
+    if (userImagePrompt) {
+      // 有畫面描述：品牌調性僅作次要氛圍提示
+      parts.push(`  (Secondary mood hint — let the scene direction above lead, just nudge the overall vibe toward: ${toneDesc}.)`);
+    } else {
+      parts.push(`  Mood and tone: ${toneDesc}.`);
+    }
   }
 
   parts.push("");
@@ -204,7 +224,7 @@ export function buildImagePrompt(params: ImagePromptParams): string {
   parts.push(`ASPECT RATIO: ${imageRatio ?? "1:1"}. Compose with this ratio's safe zones in mind.`, ``);
 
   if (enableTextOverlay && (headline || subtitle)) {
-    parts.push(buildTypographyBlock(layoutKey, headline, subtitle));
+    parts.push(buildTypographyBlock(layoutKey, headline, subtitle, fontHint));
   } else {
     parts.push(
       `TEXT: Absolutely NO text, letters, numbers, watermarks, logos, or Chinese characters anywhere in the image.`,
@@ -235,6 +255,7 @@ type CopyPromptParams = {
   toneLabels: string[];
   layoutType: string;
   taboos: string[];
+  forceTitle?: boolean;  // 主標題強制使用 titleText（鎖定版）
 };
 
 const LAYOUT_COPY_PERSONA: Record<string, { direction: string; examples: string }> = {
@@ -256,7 +277,7 @@ const LAYOUT_COPY_PERSONA: Record<string, { direction: string; examples: string 
 };
 
 export function buildCopyPrompt(params: CopyPromptParams): string {
-  const { theme, focusPoint, titleText, toneLabels, layoutType, taboos } = params;
+  const { theme, focusPoint, titleText, toneLabels, layoutType, taboos, forceTitle } = params;
 
   const persona = LAYOUT_COPY_PERSONA[layoutType] ?? LAYOUT_COPY_PERSONA["A"];
 
@@ -264,6 +285,17 @@ export function buildCopyPrompt(params: CopyPromptParams): string {
   const messageDirection = titleText || focusPoint
     ? `\n【核心訊息方向】（請理解這個訊息的精髓，用更精煉的方式表達，不要原文照用）：\n「${titleText || focusPoint}」`
     : "";
+
+  // 鎖定版：使用者指定文字「一字不增刪改」，但允許拆成主標+副標並做大小層次；自由版：AI 發揮
+  const titleInstruction = forceTitle && titleText?.trim()
+    ? `【文字鎖定指示】以下是必須完整出現在圖上的指定文字，每一個字都不可增加、刪減或修改：「${titleText}」
+請把這段文字「重新分配」成「主標題」與「圖上副標」兩段，做出有設計感的視覺層次：
+- 把最有力、最吸睛的關鍵短句（約 6-10 字）放進「主標題」，讓它可以放大、成為視覺主角
+- 其餘文字放進「圖上副標」，作為補充說明
+- 兩段加起來必須「剛好等於」指定文字的全部字句，順序維持通順，不可漏字、不可加字、不可改字
+- 標點可在斷句處自然調整，但文字內容本身不變
+- 目標：像 B、C 版型那樣有主次大小對比，而不是一整句平鋪直敘`
+    : `主標題請根據活動主題與重點自由發揮，目標吸睛有力，10 字以內。`;
 
   return `你是台灣頂尖廣告公司的資深文案總監，擅長把品牌訊息提煉成讓人停下來看的廣告語。
 
@@ -278,7 +310,7 @@ ${messageDirection}
 - 禁忌事項：${taboos.length > 0 ? taboos.join("、") : "無特別限制"}
 
 【圖上文字原則】——想像這些字會被放大印在廣告看板上
-- 主標題：10字以內，精煉有力，有記憶點，不是把核心訊息直接複製貼上
+- ${titleInstruction}
 - 圖上副標：最多12字，一行，是主標的情境補充，不要列功能清單
 - CTA：3-6字，有行動感
 

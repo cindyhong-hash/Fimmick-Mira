@@ -384,8 +384,10 @@ export async function eraseImageFal(opts: {
 
 export async function editImageFal(opts: {
   imageUrl: string;
-  prompt: string;           // 自然語言指令，例如「把裙子換成綠色短裙」
-  areaHint?: string;        // 可選：圈選區域描述，例如「lower center」
+  prompt: string;
+  areaHint?: string;
+  /** 用戶上傳的替換產品參考圖（data URL 或 /uploads/... 路徑）*/
+  referenceProductUrl?: string;
 }): Promise<string> {
   initFal();
 
@@ -401,8 +403,18 @@ export async function editImageFal(opts: {
   const mime = ext === "png" ? "image/png" : "image/jpeg";
   const imageUrl = await fal.storage.upload(new File([origBuf], `orig.${ext}`, { type: mime }));
 
-  // 組合最終 prompt（用英文指令效果更好）
+  // 如果有參考產品圖，用 Claude Vision 描述它
+  let refProductDesc: string | null = null;
+  if (opts.referenceProductUrl) {
+    refProductDesc = await describeProduct(opts.referenceProductUrl);
+    console.log(`[fal:kontext] Reference product: ${refProductDesc?.slice(0, 80)}`);
+  }
+
   const location = opts.areaHint ? `In the ${opts.areaHint} area, ` : "";
+
+  const refProductHint = refProductDesc
+    ? `Replace the existing product with this specific product: ${refProductDesc}. `
+    : "";
 
   // 偵測「添加物件」指令 → 強調寫實融合
   const isAddObject =
@@ -412,14 +424,25 @@ export async function editImageFal(opts: {
     ? ` The added object must look photorealistic, match the scene lighting, perspective, and cast appropriate shadows. Scale it proportionally to surrounding objects.`
     : "";
 
+  // 有替換產品時，強制鎖定尺寸和位置
+  const sizePositionRules = opts.referenceProductUrl
+    ? `CRITICAL SIZE AND POSITION RULES: ` +
+      `The replacement product MUST occupy EXACTLY the same bounding box, position, and scale as the original product in the image. ` +
+      `Do NOT resize the new product — match the original product's pixel dimensions and center point precisely. ` +
+      `Do NOT change the canvas size, aspect ratio, or overall image composition in any way. ` +
+      `The background, lighting, shadows, and all other elements must remain 100% identical. ` +
+      `Only swap the product visual — same size, same position, same perspective angle. `
+    : "";
+
   const finalPrompt =
-    `${location}${opts.prompt}.${addObjectHint} ` +
+    `${location}${refProductHint}${opts.prompt}.${addObjectHint} ` +
+    sizePositionRules +
     `CRITICAL: Keep ALL existing text and typography 100% identical — same characters, same position, same style. ` +
     `Do not remove, replace, or modify any existing text. ` +
     `Keep the person's face, hair, skin tone, and pose IDENTICAL. ` +
     `Only modify exactly what was requested.`;
 
-  console.log(`[fal:kontext] Editing — prompt: "${finalPrompt.slice(0, 120)}"`);
+  console.log(`[fal:kontext] Editing — prompt: "${finalPrompt.slice(0, 150)}"`);
 
   const result = await (fal.run as (id: string, o: { input: Record<string, unknown> }) => Promise<unknown>)(
     "fal-ai/flux-pro/kontext",
@@ -427,7 +450,7 @@ export async function editImageFal(opts: {
       input: {
         prompt:         finalPrompt,
         image_url:      imageUrl,
-        guidance_scale: 8,
+        guidance_scale: opts.referenceProductUrl ? 10 : 8,  // 替換產品時更嚴格遵守指令
         num_images:     1,
       },
     }

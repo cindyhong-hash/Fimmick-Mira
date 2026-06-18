@@ -89,19 +89,31 @@ export function LayoutPicker({ layouts, selectedId, activityId, clientId, onSele
                 <img
                   src={layout.imageUrl}
                   alt={`Layout ${layout.layoutType}`}
-                  className="w-full aspect-square object-cover"
+                  className="w-full h-auto object-contain bg-gray-50"
                 />
                 {isSelected && (
                   <div className="absolute top-2 right-2 bg-black text-white rounded-full p-1">
                     <Check className="h-3 w-3" />
                   </div>
                 )}
-                {layout.textBurnedIn && (
-                  <div className="absolute top-2 left-2 flex items-center gap-1 bg-orange-500/90 text-white text-[10px] px-2 py-0.5 rounded-full">
-                    <Flame className="h-2.5 w-2.5" />
-                    文字已燒入
-                  </div>
-                )}
+                {/* 左上角標籤群：文字鎖定/AI 發揮 + 文字已燒入 */}
+                <div className="absolute top-2 left-2 flex flex-col items-start gap-1">
+                  {layout.layoutType === "A" ? (
+                    <span className="flex items-center gap-1 rounded-full bg-orange-500 px-2 py-0.5 text-[10px] font-medium text-white shadow">
+                      🔒 文字鎖定
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1 rounded-full bg-indigo-500 px-2 py-0.5 text-[10px] font-medium text-white shadow">
+                      ✨ AI 發揮
+                    </span>
+                  )}
+                  {layout.textBurnedIn && (
+                    <span className="flex items-center gap-1 bg-orange-500/90 text-white text-[10px] px-2 py-0.5 rounded-full">
+                      <Flame className="h-2.5 w-2.5" />
+                      文字已燒入
+                    </span>
+                  )}
+                </div>
               </div>
 
               <div className="p-3">

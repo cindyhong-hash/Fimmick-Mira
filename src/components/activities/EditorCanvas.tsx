@@ -82,6 +82,8 @@ export function EditorCanvas({ layout, brandLogoUrl }: Props) {
       setMaskDataUrl(null);
       setSelectionBounds(null);
       setImagePrompt("");
+      setRefImageDataUrl(null);
+      setRefImageName(null);
       setSaved(false);
     } catch (err) {
       console.error("[inpaint]", err);
@@ -228,7 +230,7 @@ export function EditorCanvas({ layout, brandLogoUrl }: Props) {
                 {saving
                   ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   : <CheckCircle2 className="h-3.5 w-3.5" />}
-                {saving ? "儲存中…" : "完成此版本"}
+                <span>{saving ? "儲存中…" : "完成此版本"}</span>
               </Button>
             )}
           </div>
@@ -238,11 +240,11 @@ export function EditorCanvas({ layout, brandLogoUrl }: Props) {
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => exportImage("fb")} disabled={exporting}>
             {exporting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Download className="h-4 w-4 mr-1" />}
-            FB 尺寸
+            <span>FB 尺寸</span>
           </Button>
           <Button variant="outline" size="sm" onClick={() => exportImage("ig")} disabled={exporting}>
             {exporting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Download className="h-4 w-4 mr-1" />}
-            IG 尺寸
+            <span>IG 尺寸</span>
           </Button>
         </div>
       </div>
@@ -304,8 +306,8 @@ export function EditorCanvas({ layout, brandLogoUrl }: Props) {
             className="w-full gap-2 bg-violet-600 hover:bg-violet-700 text-white disabled:opacity-50"
           >
             {inpainting
-              ? <><Loader2 className="h-4 w-4 animate-spin" />生成中…</>
-              : <><Sparkles className="h-4 w-4" />開始修改</>}
+              ? <><Loader2 className="h-4 w-4 animate-spin" /><span>生成中…</span></>
+              : <><Sparkles className="h-4 w-4" /><span>開始修改</span></>}
           </Button>
         </div>
       </div>

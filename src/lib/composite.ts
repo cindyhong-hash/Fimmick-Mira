@@ -192,6 +192,29 @@ async function sampleRegionBrightness(
   return sum / (data.length / 3);
 }
 
+// 區域「忙碌程度」：回傳 0~1，越高代表細節越多（有產品/文字/邊緣），越低代表越乾淨平坦
+// 用亮度標準差衡量：空白桌面/牆面變化小 → 低；產品或文字 → 變化大 → 高
+async function sampleRegionBusyness(
+  src: sharp.Sharp,
+  region: { left: number; top: number; width: number; height: number }
+): Promise<number> {
+  const { data } = await src
+    .clone()
+    .extract(region)
+    .resize(24, 24, { fit: "fill" })
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const lumas: number[] = [];
+  for (let i = 0; i < data.length; i += 3)
+    lumas.push(0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]);
+  const mean = lumas.reduce((a, b) => a + b, 0) / lumas.length;
+  const variance = lumas.reduce((a, l) => a + (l - mean) ** 2, 0) / lumas.length;
+  const std = Math.sqrt(variance);
+  // std 0~~80 對應到 0~1（80 以上視為很忙）
+  return Math.min(1, std / 80);
+}
+
 function classifyBrightness(luma: number): BgTone {
   if (luma < 80)  return "dark";
   if (luma > 175) return "light";
@@ -279,7 +302,7 @@ export async function overlayLogo(opts: {
   textZone?:   TextZone;
 }): Promise<string> {
   await mkdir(UPLOADS, { recursive: true });
-  const { imageUrl, logoUrl, widthRatio = 0.16, seed, textZone, position } = opts;
+  const { imageUrl, logoUrl, widthRatio = 0.12, seed, textZone, position } = opts;
 
   // 1. 底圖
   const baseBuf  = await loadBuffer(imageUrl);
@@ -294,7 +317,7 @@ export async function overlayLogo(opts: {
     .resize({ width: targetW, fit: "inside", withoutEnlargement: false })
     .png().toBuffer();
   let lMeta = await sharp(logoResized).metadata();
-  const maxH = Math.floor(ch * 0.18);
+  const maxH = Math.floor(ch * 0.14);
   if ((lMeta.height ?? 0) > maxH) {
     logoResized = await sharp(logoBuf).resize({ height: maxH, fit: "inside" }).png().toBuffer();
     lMeta = await sharp(logoResized).metadata();
@@ -313,7 +336,7 @@ export async function overlayLogo(opts: {
     const pool = ALL.filter((c) => !blocked.includes(c));
     const candidates = pool.length > 0 ? pool : (["bottom-right"] as Corner[]);
     const baseSharp = sharp(baseBuf).removeAlpha().toColorspace("srgb");
-    const scores: { corner: Corner; luma: number; score: number }[] = [];
+    const scores: { corner: Corner; luma: number; busy: number; score: number }[] = [];
     for (const corner of candidates) {
       const r = cornerRegion(corner, cw, ch, lw, lh, pad)!;
       const safeR = {
@@ -323,14 +346,21 @@ export async function overlayLogo(opts: {
         height: Math.max(1, Math.min(r.height, ch - r.top)),
       };
       const luma = await sampleRegionBrightness(baseSharp, safeR);
-      // 越接近中間亮度分越高；右側位置略加分
-      const score = (1 - Math.abs(luma - 128) / 128) + (corner.includes("right") ? 0.12 : 0);
-      scores.push({ corner, luma, score });
+      const busy = await sampleRegionBusyness(baseSharp, safeR);
+      // 評分（權重）：
+      //   乾淨度最重要（避開產品/文字）= 1 - busy，權重 1.0
+      //   易讀性（中間亮度好疊 logo）= 1 - |luma-128|/128，權重 0.4
+      //   右側位置略加分（品牌慣例）= 0.1
+      const cleanScore = (1 - busy) * 1.0;
+      const legibScore = (1 - Math.abs(luma - 128) / 128) * 0.4;
+      const sideBonus  = corner.includes("right") ? 0.1 : 0;
+      const score = cleanScore + legibScore + sideBonus;
+      scores.push({ corner, luma, busy, score });
     }
     scores.sort((a, b) => b.score - a.score);
     chosenCorner = scores[0].corner;
     chosenLuma   = scores[0].luma;
-    console.log(`[smartLogo] chosen=${chosenCorner} luma=${chosenLuma.toFixed(1)} tone=${classifyBrightness(chosenLuma)} blocked=[${blocked.join(",")}]`);
+    console.log(`[smartLogo] chosen=${chosenCorner} luma=${chosenLuma.toFixed(1)} busy=${scores[0].busy.toFixed(2)} tone=${classifyBrightness(chosenLuma)} blocked=[${blocked.join(",")}] | all=${scores.map(s => `${s.corner}(busy${s.busy.toFixed(2)},sc${s.score.toFixed(2)})`).join(" ")}`);
   } else {
     // 舊版相容：依 position 參數
     const posMap: Record<string, Corner> = {

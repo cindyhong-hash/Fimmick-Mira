@@ -6,7 +6,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const {
       clientId,
-      requiredText, imagePrompt, imageRatio,
+      requiredText, imagePrompt, imageRatio, imageModel,
       productImageUrls, referenceImageUrls, selectedComponentIds,
     } = body;
 
@@ -32,6 +32,7 @@ export async function POST(request: Request) {
         referenceImageUrls:   JSON.stringify(referenceImageUrls  ?? []),
         selectedComponentIds: JSON.stringify(selectedComponentIds ?? []),
         imageRatio:           imageRatio ?? "1:1",
+        imageModel:           imageModel ?? "google/gemini-3-pro-image-preview",
         status: "PENDING",
       },
     });

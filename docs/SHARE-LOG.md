@@ -15,3 +15,4 @@
 ## 已分享版本
 <!-- script 會 append 喺呢度下面 -->
 - 2026-06-18 · main@66e457b · 初次分享 market-tool-demo
+- 2026-06-18 · main@0707c94 · 加 Setup 安裝指南，老闆 clone 後跟 GUIDE 就可以起動

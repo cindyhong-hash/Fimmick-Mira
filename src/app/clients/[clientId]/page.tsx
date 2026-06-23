@@ -1,9 +1,10 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Settings, Plus, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
+import { BrandWorkspaceHeader } from "@/components/layout/BrandWorkspaceHeader";
+import { BrandMemoryCards } from "@/components/clients/BrandMemoryCards";
 
 type Activity = { id: string; theme: string; focusPoint: string; status: string; createdAt: string };
 type Client = { id: string; name: string; activities: Activity[] };
@@ -43,21 +44,9 @@ export default function ClientFolderPage({ params }: { params: Promise<{ clientI
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-semibold">{client.name}</h1>
-        <div className="flex gap-2">
-          <Link href={`/clients/${clientId}/settings`}>
-            <Button variant="outline" size="sm">
-              <Settings className="h-4 w-4 mr-1" />品牌設定
-            </Button>
-          </Link>
-          <Link href={`/clients/${clientId}/activities/new`}>
-            <Button size="sm">
-              <Plus className="h-4 w-4 mr-1" />新增活動
-            </Button>
-          </Link>
-        </div>
-      </div>
+      <BrandWorkspaceHeader clientId={clientId} activeTab="activities" />
+
+      <BrandMemoryCards clientId={clientId} />
 
       {client.activities.length === 0 ? (
         <div className="text-center py-20 text-gray-400">

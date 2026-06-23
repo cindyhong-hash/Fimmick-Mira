@@ -1,0 +1,58 @@
+"use client";
+/**
+ * ProductComposeModal — wireframe v2 ⑧「產品圖」生成（由「新增產品／素材圖片」→ 產品圖 進入）。
+ * 將原「生成圖片」tab 嘅 PromptComposer 包成 modal：合併入融合入口，唔再做 sub-tab。
+ * Controlled：slots / prefill 由上層 LibraryWorkspace 持有，令原有「帶入生成 / 重新生成」flow 照用。
+ */
+import { X } from "lucide-react";
+import { PromptComposer } from "./PromptComposer";
+import type { PromptSlots, StyleComponent } from "@/types/library";
+
+type Prefill = { subject?: string; notes?: string; useFlags?: Record<string, boolean> };
+
+export function ProductComposeModal({
+  clientId,
+  slots,
+  onClearSlot,
+  onPickSlot,
+  onGenerated,
+  prefill,
+  prefillNonce,
+  onClose,
+}: {
+  clientId: string | null;
+  slots: PromptSlots;
+  onClearSlot: (slot: keyof PromptSlots) => void;
+  onPickSlot: (comp: StyleComponent) => void;
+  onGenerated?: () => void;
+  prefill?: Prefill;
+  prefillNonce?: number;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-start justify-center bg-black/40 overflow-y-auto p-4" onClick={onClose}>
+      <div className="w-full max-w-3xl bg-white rounded-2xl shadow-xl my-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between px-6 py-4 border-b sticky top-0 bg-white rounded-t-2xl z-10">
+          <div>
+            <h2 className="text-lg font-semibold">產品圖生成</h2>
+            <p className="text-xs text-gray-400 mt-0.5">上傳產品主圖（或輸入文字主體），配搭風格積木合成乾淨產品成圖；出完入素材庫。</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 rounded-full p-1 hover:bg-gray-100 shrink-0">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="px-6 py-5">
+          <PromptComposer
+            slots={slots}
+            onClearSlot={onClearSlot}
+            onPickSlot={onPickSlot}
+            clientId={clientId}
+            onGenerated={onGenerated}
+            prefill={prefill}
+            prefillNonce={prefillNonce}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}

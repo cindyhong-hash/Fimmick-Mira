@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
-import { FolderOpen, Plus, Library, Trash2 } from "lucide-react";
+import { FolderOpen, Plus, Trash2, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type Client = { id: string; name: string; _count: { activities: number } };
@@ -23,9 +23,6 @@ export function Sidebar() {
     loadClients();
   }, [pathname]);
 
-  // 素材庫 has its own client-folder column (with a 《 back link), so hide the global sidebar there.
-  if (pathname === "/library") return null;
-
   const handleDelete = async (e: React.MouseEvent, clientId: string, clientName: string) => {
     e.preventDefault();
     e.stopPropagation();
@@ -42,7 +39,7 @@ export function Sidebar() {
   return (
     <aside className="w-60 min-h-screen border-r bg-gray-50 flex flex-col p-3 gap-1 shrink-0">
       <div className="flex items-center justify-between px-2 py-1 mb-2">
-        <span className="font-semibold text-sm text-gray-700">客戶</span>
+        <span className="font-semibold text-sm text-gray-700">品牌</span>
         <Link href="/clients/new">
           <Button variant="ghost" size="icon" className="h-6 w-6">
             <Plus className="h-4 w-4" />
@@ -77,15 +74,16 @@ export function Sidebar() {
         </Link>
       ))}
 
-      <div className="mt-auto">
-        <Link href="/library">
+      {/* 未分組：收納未指派品牌（clientId=null）嘅素材 */}
+      <div className="mt-auto pt-2 border-t">
+        <Link href="/unassigned">
           <div
             className={`flex items-center gap-2 px-2 py-2 rounded-md text-sm cursor-pointer hover:bg-gray-100 ${
-              pathname === "/library" ? "bg-gray-200 font-medium" : ""
+              pathname === "/unassigned" ? "bg-gray-200 font-medium" : "text-gray-600"
             }`}
           >
-            <Library className="h-4 w-4 text-gray-500" />
-            <span>素材庫</span>
+            <Layers className="h-4 w-4 text-gray-500 shrink-0" />
+            <span>未分組素材</span>
           </div>
         </Link>
       </div>

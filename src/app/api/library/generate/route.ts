@@ -45,10 +45,17 @@ export async function POST(request: Request) {
       : (productImageUrl ? [productImageUrl] : [])).slice(0, 3);
     const host = new URL(request.url).origin;
 
-    // Output size: 正方形 1200×1200 or 橫向 1800×1200.
-    const outW = size === "landscape" ? 1800 : 1200;
-    const outH = 1200;
-    const aspectRatio = size === "landscape" ? "3:2" : "1:1";
+    // Output size 對照表（wireframe ⑧）：正方形 / 橫向 / 直向 / 限時動態。
+    const SIZE_MAP: Record<string, { w: number; h: number; ar: string }> = {
+      square:    { w: 1200, h: 1200, ar: "1:1" },
+      landscape: { w: 1800, h: 1200, ar: "3:2" },
+      portrait:  { w: 1200, h: 1800, ar: "2:3" },
+      story:     { w: 1080, h: 1920, ar: "9:16" },
+    };
+    const dim = SIZE_MAP[size as string] ?? SIZE_MAP.square;
+    const outW = dim.w;
+    const outH = dim.h;
+    const aspectRatio = dim.ar;
     // Force the final image to the exact target dimensions (cover) — guarantees the 2 sizes
     // regardless of what each provider returns.
     const fitToSize = async (buf: Buffer) =>

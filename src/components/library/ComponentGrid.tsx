@@ -12,8 +12,8 @@
 import { useEffect, useState, useCallback, useImperativeHandle, forwardRef } from "react";
 import {
   ArrowRightCircle, LayoutTemplate, Palette, MessageSquare,
-  Image as ImageIcon, LayoutGrid, Plus, Trash2, Wand2,
-  Paperclip, UserRound, Package, Sparkles,
+  Image as ImageIcon, LayoutGrid, Plus, Trash2,
+  Paperclip, UserRound, Package, Sparkles, Search, ArrowUpDown,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { StyleComponent, ComponentCategory, PromptSlots, GalleryItem, ImageDetail } from "@/types/library";
@@ -30,6 +30,17 @@ const FILTER_TABS: { key: FilterTab; label: string; icon?: React.ReactNode }[] =
   { key: "COPY_TONE", label: "語氣", icon: <MessageSquare className="h-3.5 w-3.5" /> },
   { key: "BACKGROUND", label: "背景", icon: <ImageIcon className="h-3.5 w-3.5" /> },
 ];
+
+// ─── Gallery search / engine helpers (wireframe ⑥⑦) ─────────────────────────
+function galleryItemEngine(item: GalleryItem): string | null {
+  if (item.kind === "generated") return engineLabel(item.paramsJson);
+  if (item.kind === "material" && item.mode) return engineLabel(JSON.stringify({ mode: item.mode }));
+  return null;
+}
+function galleryItemText(item: GalleryItem): string {
+  if (item.kind === "generated") return [item.subject, item.prompt, item.copyText].filter(Boolean).join(" ").toLowerCase();
+  return [item.name, item.aiPromptText].filter(Boolean).join(" ").toLowerCase();
+}
 
 // ─── Component card (image-led, like SlotPicker) ─────────────────────────────
 function ComponentCard({
@@ -221,6 +232,7 @@ function matchesGalleryFilter(item: GalleryItem, f: GalleryFilter): boolean {
 
 type Props = {
   clientId: string | null;
+  unassigned?: boolean;   // 未分組視圖：clientId 為 null 嘅素材
   injectedSlots: PromptSlots;
   onInject: (comp: StyleComponent) => void;
   onOpenQuickAdd?: () => void;
@@ -230,26 +242,29 @@ type Props = {
 };
 
 export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function ComponentGrid(
-  { clientId, injectedSlots, onInject, onOpenQuickAdd, onOpenGenerateAsset, onOpenImage, reloadKey = 0 }, ref,
+  { clientId, unassigned = false, injectedSlots, onInject, onOpenQuickAdd, onOpenGenerateAsset, onOpenImage, reloadKey = 0 }, ref,
 ) {
   const [components, setComponents] = useState<StyleComponent[]>([]);
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<FilterTab>("GALLERY");
   const [galleryFilter, setGalleryFilter] = useState<GalleryFilter>("ALL");
+  // wireframe ⑥⑦：圖庫搜尋 / 引擎 filter / 排序（日期 range 拎走，改輕量排序）
+  const [gallerySearch, setGallerySearch] = useState("");
+  const [galleryEngine, setGalleryEngine] = useState<string>("ALL");
+  const [gallerySort, setGallerySort] = useState<"newest" | "oldest">("newest");
 
   // Internal tick for imperative refresh (via ref.refresh())
   const [localTick, setLocalTick] = useState(0);
 
   // Fetch helper stored in ref so delete handlers always call the latest version
   const doFetch = useCallback(() => {
-    const cq = clientId ? `?clientId=${clientId}` : "";
+    const cq = clientId ? `?clientId=${clientId}` : unassigned ? `?unassigned=1` : "";
     const bust = `${cq ? "&" : "?"}_t=${Date.now()}`;
     return Promise.all([
       fetch(`/api/components${cq}${bust}`, { cache: "no-store" }).then((r) => r.json()),
       fetch(`/api/library/gallery${cq}${bust}`, { cache: "no-store" }).then((r) => r.json()),
     ]);
-  }, [clientId]);
+  }, [clientId, unassigned]);
 
   // Primary data effect — runs whenever clientId, reloadKey (from parent), or localTick changes
   useEffect(() => {
@@ -312,60 +327,54 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
     }
   };
 
-  // 背景 is now an image-only asset — hide legacy text-only backgrounds (no image) everywhere.
-  const visibleComponents = components.filter((c) => c.type !== "BACKGROUND" || c.previewUrl || c.data?.imageUrl);
-  const filtered = activeTab === "ALL" || activeTab === "GALLERY"
-    ? visibleComponents
-    : visibleComponents.filter((c) => c.type === activeTab);
-
-  const grouped = filtered.reduce<Record<string, StyleComponent[]>>((acc, c) => {
-    acc[c.type] = [...(acc[c.type] ?? []), c];
-    return acc;
-  }, {});
-
-  const counts = (key: FilterTab) =>
-    key === "GALLERY" ? gallery.length
-    : key === "ALL" ? visibleComponents.length
-    : visibleComponents.filter((c) => c.type === key).length;
+  // wireframe ⑥⑦：圖庫經 分類pill → 搜尋 → 引擎 → 排序 過濾
+  const galleryEngines = Array.from(new Set(gallery.map(galleryItemEngine).filter((e): e is string => !!e))).sort();
+  const visibleGallery = gallery
+    .filter((item) => matchesGalleryFilter(item, galleryFilter))
+    .filter((item) => !gallerySearch.trim() || galleryItemText(item).includes(gallerySearch.trim().toLowerCase()))
+    .filter((item) => galleryEngine === "ALL" || galleryItemEngine(item) === galleryEngine)
+    .sort((a, b) => gallerySort === "newest"
+      ? b.createdAt.localeCompare(a.createdAt)
+      : a.createdAt.localeCompare(b.createdAt));
 
   return (
     <div className="space-y-5">
 
-      {/* Top bar */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit flex-wrap">
-          {FILTER_TABS.map((t) => (
-            <button key={t.key} onClick={() => setActiveTab(t.key)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                activeTab === t.key ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"}`}>
-              {t.icon}
-              {t.label}
-              <span className={`text-[10px] ${activeTab === t.key ? "text-gray-400" : "text-gray-300"}`}>{counts(t.key)}</span>
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {/* 背景生成 only shows in 圖庫 / 全部 / 背景 sub-tabs */}
-          {onOpenGenerateAsset && (activeTab === "GALLERY" || activeTab === "ALL" || activeTab === "BACKGROUND") && (
-            <button onClick={onOpenGenerateAsset}
-              className="flex items-center gap-1.5 text-xs font-medium bg-violet-600 text-white px-3 py-2 rounded-lg hover:bg-violet-700 transition-colors">
-              <Wand2 className="h-3.5 w-3.5" />素材生成
-            </button>
-          )}
-          {onOpenQuickAdd && (
-            <button onClick={onOpenQuickAdd}
-              className="flex items-center gap-1.5 text-xs font-medium bg-gray-900 text-white px-3 py-2 rounded-lg hover:bg-gray-700 transition-colors">
-              <Plus className="h-3.5 w-3.5" />上傳參考圖
-            </button>
-          )}
-        </div>
-      </div>
-
+      {/* 動作掣（上傳參考圖 / 新增產品素材圖片）已搬上 BrandWorkspaceHeader 右上角 */}
       {loading ? (
         <div className="text-gray-400 text-sm py-8 text-center">載入中…</div>
-      ) : activeTab === "GALLERY" ? (
-        // ── Gallery view ──
+      ) : (
+        // ── Gallery view（唯一視圖：頂部分段控制已移除，積木 via 圖片詳情帶入） ──
         <>
+          {/* 搜尋 / 引擎 / 排序（wireframe ⑦：日期 range 拎走，改輕量排序） */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex-1 min-w-[180px] flex items-center gap-1.5 bg-white border border-gray-300 rounded-full px-3.5 py-1.5">
+              <Search className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+              <input
+                value={gallerySearch}
+                onChange={(e) => setGallerySearch(e.target.value)}
+                placeholder="搜尋標題 / 內文 / Prompt…"
+                className="flex-1 text-xs bg-transparent outline-none placeholder:text-gray-400"
+              />
+            </div>
+            {galleryEngines.length > 0 && (
+              <select
+                value={galleryEngine}
+                onChange={(e) => setGalleryEngine(e.target.value)}
+                className="text-xs bg-white border border-gray-300 rounded-full px-3 py-1.5 outline-none cursor-pointer"
+              >
+                <option value="ALL">引擎：全部</option>
+                {galleryEngines.map((e) => <option key={e} value={e}>{e}</option>)}
+              </select>
+            )}
+            <button
+              onClick={() => setGallerySort((s) => (s === "newest" ? "oldest" : "newest"))}
+              className="flex items-center gap-1 text-xs bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-3 py-1.5 hover:bg-blue-100 transition-colors"
+            >
+              <ArrowUpDown className="h-3 w-3" />排序：{gallerySort === "newest" ? "最新先" : "最舊先"}
+            </button>
+          </div>
+
           {/* Gallery filter pills */}
           <div className="flex gap-1.5 flex-wrap">
             {(["ALL", "uploaded", "material", "person", "illustration", "product"] as GalleryFilter[]).map((f) => {
@@ -384,42 +393,17 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
           {gallery.length === 0 ? (
             <EmptyState onOpenQuickAdd={onOpenQuickAdd}
               text={clientId ? "此客戶還沒有圖片" : "還沒有任何圖片"} hint="上傳圖片分析，或在「生成圖片」分頁產生新圖" />
+          ) : visibleGallery.length === 0 ? (
+            <div className="text-center py-16 text-gray-400 text-sm">搵唔到符合條件嘅圖片</div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
-              {gallery
-                .filter((item) => matchesGalleryFilter(item, galleryFilter))
-                .map((item) => (
-                  <GalleryTile key={`${item.kind}-${item.imageUrl}`} item={item}
-                    onOpen={openFromGallery} onDelete={handleDeleteGalleryItem} />
-                ))}
+              {visibleGallery.map((item) => (
+                <GalleryTile key={`${item.kind}-${item.imageUrl}`} item={item}
+                  onOpen={openFromGallery} onDelete={handleDeleteGalleryItem} />
+              ))}
             </div>
           )}
         </>
-      ) : components.length === 0 ? (
-        <EmptyState onOpenQuickAdd={onOpenQuickAdd}
-          text={clientId ? "此客戶還沒有風格組件" : "還沒有任何風格組件"} hint="生成活動或上傳圖片後，會自動提取風格組件" />
-      ) : (
-        // ── Component cards by group ──
-        <div className="space-y-6">
-          {Object.entries(grouped).map(([type, items]) => {
-            const meta = CATEGORY_META[type as ComponentCategory];
-            return (
-              <div key={type}>
-                <h3 className={`text-xs font-semibold mb-3 flex items-center gap-1.5 ${meta.color}`}>
-                  <span className={`inline-block w-2 h-2 rounded-full ${meta.bg} border ${meta.border}`} />
-                  {meta.label}
-                  <span className="text-gray-400 font-normal">({items.length})</span>
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-                  {items.map((comp) => (
-                    <ComponentCard key={comp.id} comp={comp} isInjected={injectedIds.has(comp.id)}
-                      onInject={onInject} onDelete={handleDelete} onOpen={openFromCard} />
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
       )}
     </div>
   );

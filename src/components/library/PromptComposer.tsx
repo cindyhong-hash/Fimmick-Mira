@@ -207,8 +207,8 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
   const [productUrls, setProductUrls] = useState<string[]>([]);
   const MAX_PRODUCTS = 3;
   const [productUploading, setProductUploading] = useState(false);
-  // Output size — 正方形 1200×1200 or 橫向 1800×1200.
-  const [size, setSize] = useState<"square" | "landscape">("square");
+  // Output size — wireframe ⑧ 多尺寸：正方形 / 橫向 / 直向 / 限時動態。
+  const [size, setSize] = useState<"square" | "landscape" | "portrait" | "story">("square");
   // 合成方式引擎（全部支援多產品）：flux2edit（主力）/ nano / seedream / qwen / paste（文字保真貼圖）。
   const [engine, setEngine] = useState<"flux2edit" | "nano" | "seedream" | "qwen" | "paste">("flux2edit");
   const [describing, setDescribing] = useState(false);
@@ -473,15 +473,10 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
   }
 
   return (
-    <div className="rounded-2xl border bg-white shadow-sm overflow-hidden">
-      <div className="px-5 py-4 border-b bg-gradient-to-r from-gray-50 to-white flex items-center gap-2">
-        <Sparkles className="h-4 w-4 text-violet-500" />
-        <h3 className="font-semibold text-sm">Prompt 積木組合台</h3>
-        <span className="ml-auto text-xs text-gray-400">點積木揀素材，或從「風格組件」帶入</span>
-      </div>
-
-      <div className="p-5 space-y-5">
-        {/* Industry preset quick-fill */}
+    <div>
+      <div className="space-y-5">
+        {/* 套用行業範本：暫隱藏（hide · no use now）— 內部 header 已移除（modal 標題已表示） */}
+        {false && (
         <div>
           <label className="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-1.5">
             <Sparkles className="h-3.5 w-3.5 text-violet-400" />套用行業範本（一鍵填入所有積木）
@@ -504,6 +499,7 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
             )}
           </div>
         </div>
+        )}
 
         {/* Subject — 二選一: 文字主體 (純 AI) 或 產品圖 (合成用原圖) */}
         <div className="space-y-2">
@@ -638,6 +634,25 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
             component={slots.background} onClear={() => onClearSlot("background")} onPick={() => setPickerCategory("BACKGROUND")} />
         </div>
 
+        {/* Output size — wireframe ⑧ 多尺寸（統一順序：積木之後即尺寸） */}
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-gray-500">輸出尺寸</label>
+          <div className="flex gap-1.5 flex-wrap">
+            {([
+              { key: "square", label: "正方形 1200×1200", w: 12, h: 12 },
+              { key: "landscape", label: "橫向 1800×1200", w: 16, h: 12 },
+              { key: "portrait", label: "直向 1200×1800", w: 10, h: 14 },
+              { key: "story", label: "限時 1080×1920", w: 8, h: 14 },
+            ] as const).map((s) => (
+              <button key={s.key} type="button" onClick={() => setSize(s.key)}
+                className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors ${
+                  size === s.key ? "bg-violet-600 text-white border-violet-600" : "bg-white border-gray-200 text-gray-500 hover:border-gray-300"}`}>
+                <span className="inline-block border border-current rounded-[2px]" style={{ width: s.w, height: s.h }} />{s.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Notes */}
         <div className="space-y-1.5">
           <label className="flex items-center gap-1.5 text-xs font-semibold text-gray-600">
@@ -715,23 +730,6 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
               )}
             </div>
           )}
-        </div>
-
-        {/* Output size */}
-        <div className="space-y-1.5">
-          <label className="text-xs font-semibold text-gray-500">輸出尺寸</label>
-          <div className="flex gap-1.5">
-            <button type="button" onClick={() => setSize("square")}
-              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors ${
-                size === "square" ? "bg-violet-600 text-white border-violet-600" : "bg-white border-gray-200 text-gray-500 hover:border-gray-300"}`}>
-              <span className="inline-block w-3 h-3 border border-current rounded-[2px]" />正方形 1200×1200
-            </button>
-            <button type="button" onClick={() => setSize("landscape")}
-              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors ${
-                size === "landscape" ? "bg-violet-600 text-white border-violet-600" : "bg-white border-gray-200 text-gray-500 hover:border-gray-300"}`}>
-              <span className="inline-block w-4 h-3 border border-current rounded-[2px]" />橫向 1800×1200
-            </button>
-          </div>
         </div>
 
         {/* Composite engine — only in composite (產品圖) mode */}

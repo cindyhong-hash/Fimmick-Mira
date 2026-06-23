@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { ActivityForm, type ActivityFormValues } from "@/components/activities/ActivityForm";
 
 export default function NewActivityPage({ params }: { params: Promise<{ clientId: string }> }) {
-  const [clientId, setClientId] = useState<string>("");
+  const [clientId, setClientId] = useState("");
   const router = useRouter();
 
   useEffect(() => {
@@ -18,15 +18,14 @@ export default function NewActivityPage({ params }: { params: Promise<{ clientId
       body: JSON.stringify({ ...values, clientId }),
     });
     const activity = await res.json();
-
     router.push(`/clients/${clientId}/activities/${activity.id}`);
   };
 
   if (!clientId) return null;
 
   return (
-    <div>
-      <h1 className="text-xl font-semibold mb-6">新增活動</h1>
+    <div className="max-w-xl">
+      <h1 className="text-xl font-semibold mb-8">新增活動</h1>
       <ActivityForm clientId={clientId} onSubmit={handleSubmit} />
     </div>
   );

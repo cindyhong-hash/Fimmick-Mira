@@ -389,6 +389,7 @@
 - [ ] **配色 hex 輸入真正改色**：目前 hex 輸入框只是 UI，改色後需更新 slot 中的 palette 資料並重新編譯 prompt。
 
 ### 優先級中
+- [ ] **🔜 future：寫個清理 script 真正清走未採用素材** → 對住 [UNUSED-ASSETS.md](./UNUSED-ASSETS.md) 嘅清單，一次過刪除 `clientId=null` 嘅實體檔（`public/uploads/`）+ 對應 DB 記錄（LibraryImage / StyleComponent），慳磁碟空間並避免孤兒記錄。⚠️ 用戶確認過 uploads 係**混住用緊同未用**，要 script 安全處理（先 dry-run 列出、要二次確認先刪）。現時只有**只讀**清單 script（`npm run unused-assets`），未有刪除動作。
 - [ ] 圖庫 tile 可直接刪除（目前需進子分頁才有刪除）
 - [ ] n8n provider stub 接通（`GEN_PROVIDER=n8n`）
 - [ ] 素材生成：生成時顯示目前用緊哪個引擎 + 預計秒數提示

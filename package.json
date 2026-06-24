@@ -6,7 +6,8 @@
     "dev": "dotenv -e .env.local -- next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "unused-assets": "dotenv -e .env.local -- node scripts/list-unused-assets.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.1",

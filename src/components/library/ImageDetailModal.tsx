@@ -134,10 +134,10 @@ export function ImageDetailModal({
   const ReassignSelect = () => (clients && clients.length > 0) ? (
     <select disabled={reassigning} defaultValue=""
       onChange={(e) => { const v = e.target.value; if (!v) return; reassign(v === "__public__" ? null : v); }}
-      title="移到其他客戶 / 設公用"
+      title="移到其他客戶 / 移入未分類素材（從畫面隱藏）"
       className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-600 hover:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-300 disabled:opacity-50">
       <option value="">移到…</option>
-      <option value="__public__">公用（全部客戶）</option>
+      <option value="__public__">未分類素材（從畫面隱藏）</option>
       {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
     </select>
   ) : null;

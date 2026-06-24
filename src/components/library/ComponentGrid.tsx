@@ -9,11 +9,12 @@
  *   • Card actions: 複製 Prompt / 帶入生成 / 刪除 (stopPropagation).
  */
 
-import { useEffect, useState, useCallback, useImperativeHandle, forwardRef } from "react";
+import { useEffect, useState, useCallback, useImperativeHandle, forwardRef, useRef } from "react";
 import {
   ArrowRightCircle, LayoutTemplate, Palette, MessageSquare,
   Image as ImageIcon, LayoutGrid, Plus, Trash2,
   Paperclip, UserRound, Package, Sparkles, Search, ArrowUpDown,
+  CheckCircle2, Circle, X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { StyleComponent, ComponentCategory, PromptSlots, GalleryItem, ImageDetail } from "@/types/library";
@@ -127,16 +128,40 @@ function ComponentCard({
 }
 
 // ─── Gallery tile ────────────────────────────────────────────────────────────
-function GalleryTile({ item, onOpen, onDelete }: {
+function GalleryTile({ item, onOpen, onDelete, selectMode, selected, onToggleSelect, onLongPress }: {
   item: GalleryItem;
   onOpen: (item: GalleryItem) => void;
   onDelete: (item: GalleryItem) => void;
+  selectMode: boolean;
+  selected: boolean;
+  onToggleSelect: () => void;
+  onLongPress: () => void;
 }) {
   const [confirmDel, setConfirmDel] = useState(false);
   const [dims, setDims] = useState("");
+  // 長按（~0.5s）入多選：手機相簿式操作。pointer 事件兼容滑鼠 + 觸控。
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longFired = useRef(false);
+  const startPress = () => {
+    longFired.current = false;
+    pressTimer.current = setTimeout(() => { longFired.current = true; onLongPress(); }, 500);
+  };
+  const cancelPress = () => { if (pressTimer.current) { clearTimeout(pressTimer.current); pressTimer.current = null; } };
   return (
-    <div className="group relative rounded-xl overflow-hidden border border-gray-200 bg-gray-50 hover:shadow-md hover:border-gray-300 transition-all">
-      <button onClick={() => onOpen(item)} className="w-full text-left">
+    <div className={`group relative rounded-xl overflow-hidden border bg-gray-50 transition-all select-none ${selected ? "border-violet-500 ring-2 ring-violet-400" : "border-gray-200 hover:shadow-md hover:border-gray-300"}`}>
+      <button
+        onPointerDown={startPress}
+        onPointerUp={cancelPress}
+        onPointerLeave={cancelPress}
+        onPointerCancel={cancelPress}
+        onContextMenu={(e) => e.preventDefault()}
+        onClick={() => {
+          // 長按啱啱觸發過 → 食咗呢下 click，唔好開大圖
+          if (longFired.current) { longFired.current = false; return; }
+          if (selectMode) onToggleSelect(); else onOpen(item);
+        }}
+        className="w-full text-left"
+        style={{ touchAction: "manipulation" }}>
         {/* Show the FULL image (no crop) — object-contain, letterboxed in a square box. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={item.imageUrl} alt="brand" loading="lazy" decoding="async"
@@ -169,18 +194,29 @@ function GalleryTile({ item, onOpen, onDelete }: {
           </div>
         );
       })()}
-      {/* Delete button */}
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          if (confirmDel) { onDelete(item); }
-          else { setConfirmDel(true); setTimeout(() => setConfirmDel(false), 3000); }
-        }}
-        className={`absolute top-2 right-2 p-1 rounded-lg text-[10px] shadow transition-all opacity-0 group-hover:opacity-100
-          ${confirmDel ? "bg-red-500 text-white" : "bg-white/90 text-gray-500 hover:bg-red-50 hover:text-red-500"}`}
-        title={confirmDel ? "再按確認刪除" : "刪除"}>
-        <Trash2 className="h-3 w-3" />
-      </button>
+      {/* 選取模式：右上角勾選圈（取代逐張刪除掣） */}
+      {selectMode ? (
+        <button onClick={(e) => { e.stopPropagation(); onToggleSelect(); }}
+          className="absolute top-2 right-2 rounded-full bg-white/90 shadow"
+          title={selected ? "取消選取" : "選取"}>
+          {selected
+            ? <CheckCircle2 className="h-5 w-5 text-violet-600" />
+            : <Circle className="h-5 w-5 text-gray-400" />}
+        </button>
+      ) : (
+        /* Delete button */
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (confirmDel) { onDelete(item); }
+            else { setConfirmDel(true); setTimeout(() => setConfirmDel(false), 3000); }
+          }}
+          className={`absolute top-2 right-2 p-1 rounded-lg text-[10px] shadow transition-all opacity-0 group-hover:opacity-100
+            ${confirmDel ? "bg-red-500 text-white" : "bg-white/90 text-gray-500 hover:bg-red-50 hover:text-red-500"}`}
+          title={confirmDel ? "再按確認刪除" : "刪除"}>
+          <Trash2 className="h-3 w-3" />
+        </button>
+      )}
     </div>
   );
 }
@@ -239,10 +275,11 @@ type Props = {
   onOpenGenerateAsset?: () => void;
   onOpenImage: (detail: ImageDetail) => void;
   reloadKey?: number;
+  clients?: { id: string; name: string }[];  // 批次「移到客戶 / 設公用」用
 };
 
 export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function ComponentGrid(
-  { clientId, unassigned = false, injectedSlots, onInject, onOpenQuickAdd, onOpenGenerateAsset, onOpenImage, reloadKey = 0 }, ref,
+  { clientId, unassigned = false, injectedSlots, onInject, onOpenQuickAdd, onOpenGenerateAsset, onOpenImage, reloadKey = 0, clients = [] }, ref,
 ) {
   const [components, setComponents] = useState<StyleComponent[]>([]);
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
@@ -301,6 +338,35 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
     setLocalTick((t) => t + 1);
   }, []);
 
+  // ── 多選 / 批次操作（移到客戶 · 設公用 · 批次刪除）─────────────────────────
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [confirmBatchDelete, setConfirmBatchDelete] = useState(false);
+
+  const itemKey = (item: GalleryItem) => `${item.kind}-${item.imageUrl}`;
+  const toggleSelect = useCallback((key: string) => {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }, []);
+  const exitSelect = useCallback(() => {
+    setSelectMode(false); setSelectedKeys(new Set()); setConfirmBatchDelete(false);
+  }, []);
+
+  // 將一個 gallery item 對應到底層 API：generated → images/[id]；uploaded/material → 逐個 component。
+  const applyToItem = useCallback((item: GalleryItem, body: { clientId: string | null } | "delete") => {
+    const opts = body === "delete"
+      ? { method: "DELETE" as const }
+      : { method: "PATCH" as const, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+    if (item.kind === "generated") {
+      return fetch(`/api/library/images/${item.libraryImageId}`, opts);
+    }
+    return Promise.all(item.componentIds.map((id) => fetch(`/api/components/${id}`, opts)));
+  }, []);
+
   const injectedIds = new Set(Object.values(injectedSlots).filter(Boolean).map((c) => c!.id));
 
   const openFromCard = (comp: StyleComponent) => {
@@ -336,6 +402,22 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
     .sort((a, b) => gallerySort === "newest"
       ? b.createdAt.localeCompare(a.createdAt)
       : a.createdAt.localeCompare(b.createdAt));
+
+  // 選取項（用 key 對返 gallery）+ 全選狀態 + 批次執行
+  const selectedItems = gallery.filter((it) => selectedKeys.has(itemKey(it)));
+  const allVisibleSelected = visibleGallery.length > 0 && visibleGallery.every((it) => selectedKeys.has(itemKey(it)));
+  const toggleSelectAll = () =>
+    setSelectedKeys(allVisibleSelected ? new Set() : new Set(visibleGallery.map(itemKey)));
+
+  async function runBatch(body: { clientId: string | null } | "delete") {
+    if (selectedItems.length === 0 || busy) return;
+    setBusy(true);
+    try {
+      await Promise.all(selectedItems.map((it) => applyToItem(it, body)));
+      setLocalTick((t) => t + 1);
+      exitSelect();
+    } finally { setBusy(false); }
+  }
 
   return (
     <div className="space-y-5">
@@ -375,6 +457,38 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
             </button>
           </div>
 
+          {/* 批次操作工具列（長按入多選後出現）：全選 / 移到客戶 / 未分類 / 刪除 / 完成 */}
+          {selectMode && (
+            <div className="sticky top-2 z-20 flex items-center gap-2 flex-wrap bg-violet-50 border border-violet-200 rounded-xl px-3 py-2 shadow-sm">
+              <button onClick={toggleSelectAll}
+                className="text-xs font-medium text-violet-700 border border-violet-300 bg-white rounded-full px-3 py-1.5 hover:bg-violet-100 transition-colors">
+                {allVisibleSelected ? "取消全選" : "全選"}
+              </button>
+              <span className="text-xs text-violet-700 font-medium">已選 {selectedItems.length} 項</span>
+              <div className="flex-1" />
+              {clients.length > 0 && (
+                <select disabled={busy || selectedItems.length === 0} defaultValue=""
+                  onChange={(e) => { const v = e.target.value; if (!v) return; runBatch({ clientId: v === "__unassigned__" ? null : v }); e.currentTarget.value = ""; }}
+                  title="把選取嘅素材移到客戶 / 移入未分類素材（從畫面隱藏）"
+                  className="flex items-center gap-1 text-xs bg-white border border-violet-300 text-violet-700 rounded-full px-3 py-1.5 outline-none cursor-pointer disabled:opacity-50">
+                  <option value="">移到…</option>
+                  <option value="__unassigned__">未分類素材（從畫面隱藏）</option>
+                  {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              )}
+              <button disabled={busy || selectedItems.length === 0}
+                onClick={() => { if (confirmBatchDelete) runBatch("delete"); else { setConfirmBatchDelete(true); setTimeout(() => setConfirmBatchDelete(false), 3000); } }}
+                className={`flex items-center gap-1 text-xs font-medium rounded-full px-3 py-1.5 border transition-colors disabled:opacity-50
+                  ${confirmBatchDelete ? "bg-red-500 text-white border-red-500" : "bg-white text-red-600 border-red-300 hover:bg-red-50"}`}>
+                <Trash2 className="h-3 w-3" />{confirmBatchDelete ? `確認刪除 ${selectedItems.length} 項？` : "刪除選取"}
+              </button>
+              <button onClick={exitSelect}
+                className="flex items-center gap-1 text-xs font-medium text-gray-600 border border-gray-300 bg-white rounded-full px-3 py-1.5 hover:bg-gray-100 transition-colors">
+                <X className="h-3 w-3" />完成
+              </button>
+            </div>
+          )}
+
           {/* Gallery filter pills */}
           <div className="flex gap-1.5 flex-wrap">
             {(["ALL", "uploaded", "material", "person", "illustration", "product"] as GalleryFilter[]).map((f) => {
@@ -390,6 +504,9 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
               );
             })}
           </div>
+          {!selectMode && gallery.length > 0 && (
+            <p className="text-[11px] text-gray-400">提示：長按任何圖片即可進入多選，批次移到客戶 / 移入未分類 / 刪除。</p>
+          )}
           {gallery.length === 0 ? (
             <EmptyState onOpenQuickAdd={onOpenQuickAdd}
               text={clientId ? "此客戶還沒有圖片" : "還沒有任何圖片"} hint="上傳圖片分析，或在「生成圖片」分頁產生新圖" />
@@ -399,7 +516,10 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
             <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
               {visibleGallery.map((item) => (
                 <GalleryTile key={`${item.kind}-${item.imageUrl}`} item={item}
-                  onOpen={openFromGallery} onDelete={handleDeleteGalleryItem} />
+                  onOpen={openFromGallery} onDelete={handleDeleteGalleryItem}
+                  selectMode={selectMode} selected={selectedKeys.has(itemKey(item))}
+                  onToggleSelect={() => toggleSelect(itemKey(item))}
+                  onLongPress={() => { setSelectMode(true); setSelectedKeys((prev) => new Set(prev).add(itemKey(item))); }} />
               ))}
             </div>
           )}

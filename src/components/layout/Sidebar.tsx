@@ -7,6 +7,13 @@ import { Button } from "@/components/ui/button";
 
 type Client = { id: string; name: string; _count: { activities: number } };
 
+/**
+ * 「未分類素材」（clientId=null）已從 layout 隱藏 —— 屬未採用 / 待清理素材，唔再喺側欄出現。
+ * 仍可用 URL /unassigned 入去 recover（搬返去某品牌）；清理同回收方法見 docs/UNUSED-ASSETS.md。
+ * 將來想喺側欄攞返呢個入口：改 true 即可。
+ */
+const SHOW_UNASSIGNED_LINK = false;
+
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
@@ -74,19 +81,21 @@ export function Sidebar() {
         </Link>
       ))}
 
-      {/* 未分組：收納未指派品牌（clientId=null）嘅素材 */}
-      <div className="mt-auto pt-2 border-t">
-        <Link href="/unassigned">
-          <div
-            className={`flex items-center gap-2 px-2 py-2 rounded-md text-sm cursor-pointer hover:bg-gray-100 ${
-              pathname === "/unassigned" ? "bg-gray-200 font-medium" : "text-gray-600"
-            }`}
-          >
-            <Layers className="h-4 w-4 text-gray-500 shrink-0" />
-            <span>未分組素材</span>
-          </div>
-        </Link>
-      </div>
+      {/* 未分類素材（clientId=null）入口已隱藏 —— 見上方 SHOW_UNASSIGNED_LINK 註解。 */}
+      {SHOW_UNASSIGNED_LINK && (
+        <div className="mt-auto pt-2 border-t">
+          <Link href="/unassigned">
+            <div
+              className={`flex items-center gap-2 px-2 py-2 rounded-md text-sm cursor-pointer hover:bg-gray-100 ${
+                pathname === "/unassigned" ? "bg-gray-200 font-medium" : "text-gray-600"
+              }`}
+            >
+              <Layers className="h-4 w-4 text-gray-500 shrink-0" />
+              <span>未分組素材</span>
+            </div>
+          </Link>
+        </div>
+      )}
     </aside>
   );
 }

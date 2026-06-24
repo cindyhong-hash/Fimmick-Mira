@@ -17,6 +17,24 @@
 
 ---
 
+## 2026-06-24：素材庫批次整理 + 未分類素材
+
+### 多選 / 批次操作（`ComponentGrid`）
+- 圖庫每格支援**長按（~0.5s）入多選**（手機相簿式；pointer 事件兼容滑鼠＋觸控），移除咗原「選取」掣。
+- 選取後出現批次工具列：**全選／取消全選 · 移到（客戶 / 未分類素材）· 刪除選取（兩段確認）· 完成**。
+- 後端零改動：沿用單項 `PATCH/DELETE /api/library/images/[id]` 同 `/api/components/[id]`（兩者已支援改 `clientId`），前端並發觸發。
+- `LibraryWorkspace` 將 clients 清單傳落 `ComponentGrid` 供「移到客戶」用。
+
+### 「公用（全部客戶）」改名「未分類素材」+ 從 layout 隱藏
+- `clientId=null` 嘅圖實際上唔屬任何品牌、唔會喺品牌畫面顯示 —— 故「公用（全部客戶）」係誤導，統一改名「未分類素材（從畫面隱藏）」（批次 dropdown + `ImageDetailModal` 單張 reassign）。值不變（null）。
+- 側欄「未分組素材」連結隱藏：`Sidebar.tsx` 加 `SHOW_UNASSIGNED_LINK = false`（route `/unassigned` 保留，可用 URL 入去 recover）。
+
+### 未採用素材清單（recover / 清理慳空間）
+- `scripts/list-unused-assets.mjs`（`npm run unused-assets`）掃 `clientId=null` 圖，**只讀**，生成 [UNUSED-ASSETS.md](./UNUSED-ASSETS.md)：每個未採用檔案嘅路徑 / 大小 / 來源 / DB id + 合計空間。
+- 用途：日後可循 `/unassigned` recover，或對住清單刪檔慳空間（`public/uploads/` 本已 gitignore，唔影響 repo）。
+
+---
+
 ## 2026-06-18：popup 帶入生成 + Nano 純文字生圖
 
 ### 背景 popup「帶入生成圖片（作背景）」

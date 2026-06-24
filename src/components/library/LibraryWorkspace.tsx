@@ -188,6 +188,7 @@ export const LibraryWorkspace = forwardRef<LibraryWorkspaceHandle, { clientId: s
         onOpenGenerateAsset={() => setShowAddPicker(true)}
         onOpenImage={setDetail}
         reloadKey={componentReloadKey}
+        clients={clients}
       />
 
       {/* 產品圖生成（PromptComposer modal） */}

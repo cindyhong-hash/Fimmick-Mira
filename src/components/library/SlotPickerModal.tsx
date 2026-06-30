@@ -34,6 +34,9 @@ export function SlotPickerModal({ clientId, category, onPick, onClose }: Props) 
 
   useEffect(() => {
     setLoading(true);
+    // [WIP / 待 auth] 而家「全部品牌」會攞晒所有 client 嘅 component。
+    // 將來接咗 user login，呢度應該 scope 做「登入用戶自己 account 內建立嘅品牌」，
+    // 唔可以見到 / 取用其他用戶 client 嘅 blocks（server route 亦要按 user 過濾）。
     const url = filterClientId ? `/api/components?clientId=${filterClientId}` : "/api/components";
     fetch(url)
       .then((r) => r.json())

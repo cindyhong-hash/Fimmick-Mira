@@ -427,23 +427,6 @@ export function ImageDetailModal({
                 </div>
               </div>
             )}
-            {!loading && bgComp && (
-              <div className="rounded-xl border border-teal-200 bg-teal-50 p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-teal-50 border-teal-200 text-teal-700">背景</span>
-                  <span className="text-xs font-semibold text-gray-800 truncate ml-2">{bgComp.name}</span>
-                </div>
-                {sorted.length > 0 && Boolean(bgComp.data.imageUrl || bgComp.previewUrl) && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={(bgComp.data.imageUrl as string) || bgComp.previewUrl!} alt="bg" loading="lazy" decoding="async" className="w-full aspect-square object-contain bg-gray-50 rounded-lg border mb-2" />
-                )}
-                <button onClick={() => onInject(bgComp)} disabled={injectedIds?.has(bgComp.id)}
-                  className={`w-full flex items-center justify-center gap-1 text-[11px] font-medium py-1.5 rounded-lg border transition-colors
-                    ${injectedIds?.has(bgComp.id) ? "bg-gray-100 border-gray-200 text-gray-400" : "bg-white border-teal-200 text-teal-700 hover:opacity-80"}`}>
-                  <ArrowRightCircle className="h-3.5 w-3.5" />{injectedIds?.has(bgComp.id) ? "已帶入" : "帶入生成（背景）"}
-                </button>
-              </div>
-            )}
             {loading ? (
               <div className="text-sm text-gray-400 py-6 text-center">載入中…</div>
             ) : sorted.length === 0 && !bgComp ? (
@@ -461,15 +444,27 @@ export function ImageDetailModal({
                 )}
               </div>
             ) : (
-              sorted.map((comp) => (
-                <ComponentRow
-                  key={comp.id}
-                  comp={comp}
-                  injected={injectedIds?.has(comp.id) ?? false}
-                  onInject={onInject}
-                  onDelete={onDeleteComponents ? (id) => onDeleteComponents([id]) : undefined}
-                />
-              ))
+              <>
+                {/* 構圖/配色 + 背景 全部行同一個 ComponentRow（Plan B：統一 block，背景 teal 主題 + 大預覽圖）*/}
+                {sorted.map((comp) => (
+                  <ComponentRow
+                    key={comp.id}
+                    comp={comp}
+                    injected={injectedIds?.has(comp.id) ?? false}
+                    onInject={onInject}
+                    onDelete={onDeleteComponents ? (id) => onDeleteComponents([id]) : undefined}
+                  />
+                ))}
+                {bgComp && (
+                  <ComponentRow
+                    key={bgComp.id}
+                    comp={bgComp}
+                    injected={injectedIds?.has(bgComp.id) ?? false}
+                    onInject={onInject}
+                    onDelete={onDeleteComponents ? (id) => onDeleteComponents([id]) : undefined}
+                  />
+                )}
+              </>
             )}
           </div>
         </div>
@@ -514,9 +509,9 @@ function ComponentRow({
           ))}
         </div>
       )}
-      {comp.type === "BACKGROUND" && Boolean(comp.data.imageUrl) && (
+      {comp.type === "BACKGROUND" && Boolean(comp.data.imageUrl || comp.previewUrl) && (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={comp.data.imageUrl as string} alt="bg" className="w-full h-20 object-contain bg-gray-50 rounded-lg border" />
+        <img src={(comp.data.imageUrl as string) || comp.previewUrl!} alt="bg" loading="lazy" decoding="async" className="w-full aspect-square max-h-56 object-contain bg-gray-50 rounded-lg border" />
       )}
 
       {/* 小說明文字（aiPromptText）唔喺方塊度展示 */}

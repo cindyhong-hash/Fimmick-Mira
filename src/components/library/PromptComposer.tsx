@@ -119,6 +119,7 @@ function SlotCard({
 
   return (
     <div
+      onClick={!filled ? onPick : undefined}
       className={`rounded-xl border p-3 transition-all ${filled ? `${meta.bg} ${meta.border}` : "border-dashed border-gray-200 bg-gray-50 hover:border-gray-300 cursor-pointer hover:shadow-sm"}`}>
       {/* Header — click to (re)pick the source material */}
       <div className="flex items-center justify-between">

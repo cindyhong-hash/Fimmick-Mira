@@ -5,7 +5,7 @@
  * 色盤逐色開關；其他注意事項。生成走 POST /api/library/generate。
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   X, Copy, Check, Sparkles, LayoutTemplate, Palette,
   Image as ImageIcon, Target, StickyNote, Loader2, Upload, Plus, Trash2, Type, Lock, Wand2, RotateCcw,
@@ -182,13 +182,21 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
   const [copied, setCopied] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ imageUrl: string; copyText: string } | null>(null);
   const [pickerCategory, setPickerCategory] = useState<ComponentCategory | null>(null);
   // #3 多輸出（合成）：一次生 N 張 draft（唔即刻入庫）→ 揀邊張保留。
   const [count, setCount] = useState(1);
   // draft 各自帶用咗嘅產品圖（系列圖時每張得一件）。
   const [drafts, setDrafts] = useState<{ imageUrl: string; copyText: string; mode: string; selected: boolean; productImageUrls: string[] }[] | null>(null);
   const [savingDrafts, setSavingDrafts] = useState(false);
+  // 生成完成（drafts 一出）自動 scroll 落揀圖區（同素材生成一致）。
+  // ref 擺喺真正嘅 drafts 容器（唔再用 0 高度空錨點）+ block:"start"；draft 圖 async load，
+  // 用 setTimeout 等 layout settle 先 scroll，否則塊區仲未有高度，scroll 唔到位。
+  const resultRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!drafts) return;
+    const t = setTimeout(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
+    return () => clearTimeout(t);
+  }, [drafts]);
   // #4 系列圖：固定模板貼圖（方案 A）—— 每件產品貼喺固定背景嘅固定位置/尺寸，100% 一致。
   const [seriesMode, setSeriesMode] = useState(false);
   // 擺位：scale=產品高度佔比，x/y=產品中心（0–1）。可拖預覽 + 滑桿調大小。
@@ -207,8 +215,10 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
   const [productUrls, setProductUrls] = useState<string[]>([]);
   const MAX_PRODUCTS = 3;
   const [productUploading, setProductUploading] = useState(false);
-  // Output size — wireframe ⑧ 多尺寸：正方形 / 橫向 / 直向 / 限時動態。
-  const [size, setSize] = useState<"square" | "landscape" | "portrait" | "story">("square");
+  // Output size — wireframe ⑧ 多尺寸：正方形 / 橫向 / 直向 / 限時動態 / 自訂。
+  const [size, setSize] = useState<"square" | "landscape" | "portrait" | "story" | "custom">("square");
+  const [customW, setCustomW] = useState(1200);
+  const [customH, setCustomH] = useState(1200);
   // 合成方式引擎（全部支援多產品）：flux2edit（主力）/ nano / seedream / qwen / paste（文字保真貼圖）。
   const [engine, setEngine] = useState<"flux2edit" | "nano" | "seedream" | "qwen" | "paste">("flux2edit");
   const [describing, setDescribing] = useState(false);
@@ -385,13 +395,14 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
     if (!canGenerate) return;
     setGenerating(true);
     setGenError(null);
-    setResult(null);
     setDrafts(null);
     try {
       const palette = buildPalette();
       const effectiveSlots = buildEffectiveSlots();
       const baseBody = {
         clientId, subject, slots: effectiveSlots, palette, notes, size,
+        customW: size === "custom" ? customW : undefined,
+        customH: size === "custom" ? customH : undefined,
         engine: composite ? effEngine : undefined,
         productImageUrls: composite ? productUrls : undefined,
         productImageUrl: composite ? productUrls[0] : undefined,
@@ -424,19 +435,15 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
           .filter((x): x is NonNullable<typeof x> => !!x);
         if (!ok.length) throw new Error("系列圖全部生成失敗，請重試");
         setDrafts(ok);
-      } else if (composite && count > 1) {
-        // #3 合成多輸出：平行生 N 張 draft（同一組產品）→ 揀。
+      } else {
+        // 一律 draftOnly（唔即刻入庫）→ 跳結果俾你揀/確認 → saveDrafts 先 save-image。
+        // 對齊 背景/人像/插畫：產品成圖（合成 or 文字）都唔再直接落 gallery。
         const results = await Promise.allSettled(Array.from({ length: count }, () => post({ draftOnly: true })));
         const ok = results
           .filter((r): r is PromiseFulfilledResult<{ imageUrl: string; copyText?: string; mode?: string }> => r.status === "fulfilled" && !!r.value?.imageUrl)
-          .map((r) => ({ imageUrl: r.value.imageUrl, copyText: r.value.copyText ?? "", mode: r.value.mode ?? "flux2-edit", selected: true, productImageUrls: productUrls }));
+          .map((r) => ({ imageUrl: r.value.imageUrl, copyText: r.value.copyText ?? "", mode: r.value.mode ?? (composite ? "flux2-edit" : "flux"), selected: true, productImageUrls: composite ? productUrls : [] }));
         if (!ok.length) throw new Error("全部生成失敗，請重試");
         setDrafts(ok);
-      } else {
-        const data = await post({});
-        if (data.error) throw new Error(data.error);
-        setResult({ imageUrl: data.imageUrl, copyText: data.copyText ?? "" });
-        onGenerated?.();
       }
     } catch (e: unknown) {
       setGenError(e instanceof Error ? e.message : "生成失敗，請重試");
@@ -454,15 +461,19 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
     try {
       const palette = buildPalette();
       const effectiveSlots = buildEffectiveSlots();
-      const promptStr = `[AI 合成] ${(polishedBrief || compiledPrompt || subject || "").trim()}`;
-      await Promise.all(sel.map((d) =>
-        fetch("/api/library/save-image", {
+      await Promise.all(sel.map((d) => {
+        const isComposite = d.productImageUrls.length > 0;
+        const promptStr = isComposite
+          ? `[AI 合成] ${(polishedBrief || compiledPrompt || subject || "").trim()}`
+          : (effectiveBrief || compiledPrompt || subject || "").trim();
+        const params = isComposite
+          ? { slots: effectiveSlots, palette, notes, productImageUrl: d.productImageUrls[0], productImageUrls: d.productImageUrls, composite: true, mode: d.mode }
+          : { slots: effectiveSlots, palette, notes, customPrompt: effectiveBrief, mode: d.mode };
+        return fetch("/api/library/save-image", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            clientId, imageUrl: d.imageUrl, subject, prompt: promptStr, copyText: d.copyText,
-            paramsJson: JSON.stringify({ slots: effectiveSlots, palette, notes, productImageUrl: d.productImageUrls[0], productImageUrls: d.productImageUrls, composite: true, mode: d.mode }),
-          }),
-        })));
+          body: JSON.stringify({ clientId, imageUrl: d.imageUrl, subject, prompt: promptStr, copyText: d.copyText, paramsJson: JSON.stringify(params) }),
+        });
+      }));
       setDrafts(null);
       onGenerated?.();
     } catch (e: unknown) {
@@ -650,7 +661,22 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
                 <span className="inline-block border border-current rounded-[2px]" style={{ width: s.w, height: s.h }} />{s.label}
               </button>
             ))}
+            <button type="button" onClick={() => setSize("custom")}
+              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors ${
+                size === "custom" ? "bg-violet-600 text-white border-violet-600" : "bg-white border-dashed border-gray-300 text-gray-500 hover:border-gray-400"}`}>
+              <Plus className="h-3 w-3" />自訂
+            </button>
           </div>
+          {size === "custom" && (
+            <div className="flex items-center gap-2 pt-1.5">
+              <input type="number" min={256} max={2400} value={customW} onChange={(e) => setCustomW(Number(e.target.value))}
+                className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400" />
+              <span className="text-xs text-gray-400">×</span>
+              <input type="number" min={256} max={2400} value={customH} onChange={(e) => setCustomH(Number(e.target.value))}
+                className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400" />
+              <span className="text-[10px] text-gray-400">px（256–2400）</span>
+            </div>
+          )}
         </div>
 
         {/* Notes */}
@@ -840,22 +866,9 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
           <div className="text-xs text-red-500 bg-red-50 border border-red-200 rounded-lg px-3 py-2">⚠️ {genError}</div>
         )}
 
-        {/* Result（單張）*/}
-        {result && (
-          <div className="rounded-xl border border-violet-200 bg-violet-50/50 p-3 flex gap-3 items-center">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={result.imageUrl} alt="generated" className="w-32 h-32 object-contain rounded-lg border shrink-0 bg-white" />
-            <div className="flex-1 min-w-0">
-              <div className="text-xs font-semibold text-violet-700 flex items-center gap-1">
-                <Check className="h-3.5 w-3.5" />完成，已加入圖片紀錄
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* #3 多張 draft：揀邊張保留 */}
+        {/* 多張 draft：揀邊張保留（單張亦行此 path → 確認後先入庫，唔自動落 gallery）*/}
         {drafts && (
-          <div className="rounded-xl border border-violet-200 bg-violet-50/40 p-3 space-y-3">
+          <div ref={resultRef} className="scroll-mt-2 rounded-xl border border-violet-200 bg-violet-50/40 p-3 space-y-3">
             <div className="text-xs font-semibold text-violet-700">
               點擊選取要保留的圖（已選 {drafts.filter((d) => d.selected).length}/{drafts.length}）
             </div>

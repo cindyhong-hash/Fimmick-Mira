@@ -9,7 +9,7 @@
  * 生成用 draftOnly（存檔不入庫），未選的不會出現在圖庫。可先「✨潤色」擴寫描述再生成。
  */
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { X, Wand2, Loader2, Check, Save, ImageIcon, UserRound, Palette, Link2, Sparkles, Upload, RefreshCw } from "lucide-react";
 
 type GeneratedItem = { imageUrl: string; selected: boolean };
@@ -35,7 +35,9 @@ export function GenerateAssetModal({ clientId, onClose, onSaved, init, lockedTyp
   const [type, setType] = useState<AssetType>(lockedType ?? init?.type ?? "background");
   const [description, setDescription] = useState(init?.description ?? "");
   const [count, setCount] = useState(3);
-  const [size, setSize] = useState<"square" | "landscape" | "portrait" | "story">("square");
+  const [size, setSize] = useState<"square" | "landscape" | "portrait" | "story" | "custom">("square");
+  const [customW, setCustomW] = useState(1200);
+  const [customH, setCustomH] = useState(1200);
   const [asianFirst, setAsianFirst] = useState(true); // 人像：預設亞裔（台/港受眾）
   const [refImageUrl, setRefImageUrl] = useState<string>(init?.refImageUrl ?? "");
   const [refUploading, setRefUploading] = useState(false);
@@ -47,6 +49,14 @@ export function GenerateAssetModal({ clientId, onClose, onSaved, init, lockedTyp
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<GeneratedItem[]>([]);
   const [saving, setSaving] = useState(false);
+  const resultsRef = useRef<HTMLDivElement | null>(null);
+
+  // 生成完（items 由空變有）自動 scroll 落結果區，俾用戶即刻見到成品。
+  useEffect(() => {
+    if (items.length > 0) {
+      requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    }
+  }, [items.length]);
 
   const genType = type === "background" ? undefined : type; // 背景走預設(場景)模型；人像/插畫走對應模型
 
@@ -171,6 +181,8 @@ export function GenerateAssetModal({ clientId, onClose, onSaved, init, lockedTyp
               subject: description.trim(),
               customPrompt: prompt,
               size,
+              customW: size === "custom" ? customW : undefined,
+              customH: size === "custom" ? customH : undefined,
               genType,
               draftOnly: true,
               ...(refImageUrl.trim() ? { refImageUrl: refImageUrl.trim() } : {}),
@@ -369,21 +381,37 @@ export function GenerateAssetModal({ clientId, onClose, onSaved, init, lockedTyp
             )}
           </div>
 
-          {/* ③ 尺寸 — wireframe ⑧ 多尺寸（同產品圖一致） */}
+          {/* ③ 尺寸 — wireframe ⑧ 多尺寸 + 自訂（同產品圖一致） */}
           <div className="flex items-start gap-3">
             <label className="text-xs font-semibold text-gray-600 whitespace-nowrap pt-1.5">尺寸</label>
-            <div className="flex gap-1.5 flex-wrap">
-              {([
-                { key: "square", label: "正方形 1200×1200", w: 12, h: 12 },
-                { key: "landscape", label: "橫向 1800×1200", w: 16, h: 12 },
-                { key: "portrait", label: "直向 1200×1800", w: 10, h: 14 },
-                { key: "story", label: "限時 1080×1920", w: 8, h: 14 },
-              ] as const).map((s) => (
-                <button key={s.key} onClick={() => setSize(s.key)}
-                  className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors ${size === s.key ? "bg-violet-600 text-white border-violet-600" : "bg-white border-gray-200 text-gray-600 hover:border-violet-300"}`}>
-                  <span className="inline-block border border-current rounded-[2px]" style={{ width: s.w, height: s.h }} />{s.label}
+            <div className="flex-1 space-y-1.5">
+              <div className="flex gap-1.5 flex-wrap">
+                {([
+                  { key: "square", label: "正方形 1200×1200", w: 12, h: 12 },
+                  { key: "landscape", label: "橫向 1800×1200", w: 16, h: 12 },
+                  { key: "portrait", label: "直向 1200×1800", w: 10, h: 14 },
+                  { key: "story", label: "限時 1080×1920", w: 8, h: 14 },
+                ] as const).map((s) => (
+                  <button key={s.key} onClick={() => setSize(s.key)}
+                    className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors ${size === s.key ? "bg-violet-600 text-white border-violet-600" : "bg-white border-gray-200 text-gray-600 hover:border-violet-300"}`}>
+                    <span className="inline-block border border-current rounded-[2px]" style={{ width: s.w, height: s.h }} />{s.label}
+                  </button>
+                ))}
+                <button onClick={() => setSize("custom")}
+                  className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors ${size === "custom" ? "bg-violet-600 text-white border-violet-600" : "bg-white border-dashed border-gray-300 text-gray-500 hover:border-gray-400"}`}>
+                  ＋ 自訂
                 </button>
-              ))}
+              </div>
+              {size === "custom" && (
+                <div className="flex items-center gap-2">
+                  <input type="number" min={256} max={2400} value={customW} onChange={(e) => setCustomW(Number(e.target.value))}
+                    className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400" />
+                  <span className="text-xs text-gray-400">×</span>
+                  <input type="number" min={256} max={2400} value={customH} onChange={(e) => setCustomH(Number(e.target.value))}
+                    className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400" />
+                  <span className="text-[10px] text-gray-400">px（256–2400）</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -435,7 +463,7 @@ export function GenerateAssetModal({ clientId, onClose, onSaved, init, lockedTyp
 
           {/* Results */}
           {items.length > 0 && (
-            <div>
+            <div ref={resultsRef} className="scroll-mt-2">
               <div className="flex items-center justify-between mb-2">
                 <div className="text-xs font-semibold text-gray-600">
                   點擊選取要保留的圖片（已選 {selectedCount}/{items.length}）

@@ -13,8 +13,21 @@ export default function ActivityPage({ params }: { params: Promise<{ clientId: s
   const [activityId, setActivityId] = useState<string>("");
   const [activity, setActivity] = useState<Activity | null>(null);
   const [selectedId, setSelectedId] = useState<string>();
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
   const pollingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const generationTriggered = useRef(false);
+
+  const saveTitle = async () => {
+    const v = titleDraft.trim();
+    setEditingTitle(false);
+    if (!v || !activity || v === activity.theme) return;
+    setActivity((prev) => (prev ? { ...prev, theme: v } : prev));
+    await fetch(`/api/activities/${activityId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ theme: v }),
+    });
+  };
 
   useEffect(() => {
     params.then(({ clientId, activityId }) => {
@@ -109,7 +122,7 @@ export default function ActivityPage({ params }: { params: Promise<{ clientId: s
         <div className="text-3xl">⚠️</div>
         <div className="font-medium text-gray-700">生成失敗</div>
         <div className="text-sm text-gray-400 text-center max-w-sm">
-          AI 圖片生成時發生錯誤（可能是 OpenAI 額度不足）。<br />
+          AI 圖片生成失敗（可能係 API 額度／逾時／網路問題）。<br />
           文案仍可重試。
         </div>
         <Link href={`/clients/${clientId}/activities/${activityId}/edit`}>
@@ -124,7 +137,24 @@ export default function ActivityPage({ params }: { params: Promise<{ clientId: s
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <h1 className="text-xl font-semibold">{activity.theme}</h1>
+        {editingTitle ? (
+          <input
+            autoFocus
+            value={titleDraft}
+            onChange={(e) => setTitleDraft(e.target.value)}
+            onBlur={saveTitle}
+            onKeyDown={(e) => { if (e.key === "Enter") saveTitle(); if (e.key === "Escape") setEditingTitle(false); }}
+            className="text-xl font-semibold border-b border-violet-400 outline-none bg-transparent flex-1 mr-4"
+          />
+        ) : (
+          <h1
+            className="text-xl font-semibold cursor-text hover:bg-gray-50 rounded px-1 -mx-1"
+            title="撳一下改活動名稱"
+            onClick={() => { setTitleDraft(activity.theme); setEditingTitle(true); }}
+          >
+            {activity.theme}
+          </h1>
+        )}
         <Link href={`/clients/${clientId}/activities/${activityId}/edit`}>
           <Button variant="outline" size="sm">
             <Pencil className="h-4 w-4 mr-1" />編輯 / 重新生成

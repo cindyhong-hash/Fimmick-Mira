@@ -14,20 +14,25 @@ export function BrandWorkspaceHeader({
   clientId,
   activeTab,
   actions,
+  name: nameProp,
 }: {
   clientId: string;
   activeTab: Tab;
   actions?: React.ReactNode;
+  /** Parent 已 load client 時直接傳入 → 品牌名/icon 同頁面一齊出，唔使等第二個 fetch（IMG_01）。
+   *  未傳就 fallback 自己 fetch（保持未改的 caller 行為）。 */
+  name?: string;
 }) {
-  const [name, setName] = useState<string>("");
+  const [fetched, setFetched] = useState<string>("");
+  const name = nameProp ?? fetched;
 
   useEffect(() => {
-    if (!clientId) return;
+    if (nameProp !== undefined || !clientId) return; // 有 prop 就唔再 fetch
     fetch(`/api/clients/${clientId}`)
       .then((r) => r.json())
-      .then((c) => setName(c?.name ?? ""))
+      .then((c) => setFetched(c?.name ?? ""))
       .catch(() => {});
-  }, [clientId]);
+  }, [clientId, nameProp]);
 
   const tabs: { key: Tab; label: string; href: string; icon: React.ReactNode }[] = [
     { key: "activities", label: "廣告活動圖", href: `/clients/${clientId}`, icon: <Target className="h-4 w-4" /> },

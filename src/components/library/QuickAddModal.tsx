@@ -54,7 +54,7 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, prefil
   const [include, setInclude] = useState({
     COMPOSITION: true,
     COLOR_SCHEME: true,
-    COPY_TONE: true,
+    COPY_TONE: false,  // 語氣積木已移除（wireframe ⑧）—— 預設唔包含、section 已隱藏
     BACKGROUND: false,
   });
 
@@ -377,7 +377,7 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, prefil
         <div className="flex items-center justify-between px-6 py-4 border-b">
           <div>
             <h2 className="text-base font-semibold">{isEdit ? "編輯素材" : "快速加入素材"}</h2>
-            <p className="text-xs text-gray-400 mt-0.5">{isEdit ? "修改後儲存即覆蓋原素材" : "構圖・配色・語氣・背景可同時新增"}</p>
+            <p className="text-xs text-gray-400 mt-0.5">{isEdit ? "修改後儲存即覆蓋原素材" : "構圖・配色・背景可同時新增"}</p>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
             <X className="h-4 w-4" />
@@ -401,7 +401,7 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, prefil
           {/* Reference image upload + AI analyze — available in both create and edit mode */}
           <div>
             <label className="text-xs font-semibold text-gray-600 mb-2 block">
-              參考圖片（選填，供 AI 分析構圖／配色／語氣／背景）
+              參考圖片（選填，供 AI 分析構圖／配色／背景）
             </label>
             <input ref={fileRef} type="file" accept="image/*" className="hidden"
               onChange={(e) => { if (e.target.files?.[0]) handleUpload(e.target.files[0]); }} />
@@ -480,7 +480,8 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, prefil
             </Field>
           </SectionWrapper>
 
-          {/* COPY_TONE */}
+          {/* COPY_TONE — 語氣積木已移除（wireframe ⑧），暫隱藏（保留 code 供日後） */}
+          {false && (
           <SectionWrapper meta={toneMeta} label="語氣" checked={include.COPY_TONE}
             onToggle={() => setInclude((p) => ({ ...p, COPY_TONE: !p.COPY_TONE }))}
             action={imageUrl ? <SectionAIButton loading={sectionAnalyzing === "COPY_TONE"} disabled={!!sectionAnalyzing || analyzing} onClick={() => analyzeSection("COPY_TONE")} /> : null}>
@@ -509,6 +510,7 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, prefil
               </div>
             </Field>
           </SectionWrapper>
+          )}
         </div>
 
         {/* Footer */}

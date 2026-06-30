@@ -379,7 +379,7 @@ export function ActivityForm({
           {optimizingPrompt && (
             <p className="text-xs text-violet-500 flex items-center gap-1">
               <Loader2 className="h-3 w-3 animate-spin" />
-              MiniMax AI 正在擴寫提示詞…
+              Gemini AI 正在優化提示詞…
             </p>
           )}
         </div>

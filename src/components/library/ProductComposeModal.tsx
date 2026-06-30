@@ -30,9 +30,10 @@ export function ProductComposeModal({
   onClose: () => void;
 }) {
   return (
+    // 同 GenerateAssetModal 一致：flex-col + max-height + body 內捲（修破版；body 先係 scroll 容器）
     <div className="fixed inset-0 z-[60] flex items-start justify-center bg-black/40 overflow-y-auto p-4" onClick={onClose}>
-      <div className="w-full max-w-3xl bg-white rounded-2xl shadow-xl my-6" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-start justify-between px-6 py-4 border-b sticky top-0 bg-white rounded-t-2xl z-10">
+      <div className="relative w-full max-w-3xl bg-white rounded-2xl shadow-xl my-6 flex flex-col max-h-[calc(100vh-3rem)] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between px-6 py-4 border-b shrink-0">
           <div>
             <h2 className="text-lg font-semibold">產品圖生成</h2>
             <p className="text-xs text-gray-400 mt-0.5">上傳產品主圖（或輸入文字主體），配搭風格積木合成乾淨產品成圖；出完入素材庫。</p>
@@ -41,7 +42,7 @@ export function ProductComposeModal({
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className="px-6 py-5">
+        <div className="flex-1 overflow-y-auto px-6 py-5">
           <PromptComposer
             slots={slots}
             onClearSlot={onClearSlot}

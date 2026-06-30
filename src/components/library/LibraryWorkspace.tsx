@@ -46,7 +46,7 @@ export const LibraryWorkspace = forwardRef<LibraryWorkspaceHandle, { clientId: s
   const componentGridRef = useRef<ComponentGridHandle>(null);
   const prevShowQuickAdd = useRef(false);
 
-  // clients list 仍需要：ImageDetailModal 嘅「移到 公用／客戶」功能用到。
+  // clients list 仍需要：ComponentGrid（gallery 長按移到）+ QuickAddModal（編輯素材的「專案」下拉）用到。
   useEffect(() => {
     fetch("/api/clients").then((r) => r.json()).then(setClients).catch(() => {});
   }, []);
@@ -219,7 +219,6 @@ export const LibraryWorkspace = forwardRef<LibraryWorkspaceHandle, { clientId: s
           refImageUrl={(() => { try { return JSON.parse(detail.regenerateParams || "{}").refImageUrl as string | undefined; } catch { return undefined; } })()}
           sourceImages={(() => { try { const p = JSON.parse(detail.regenerateParams || "{}"); const arr = (Array.isArray(p.productImageUrls) && p.productImageUrls.length ? p.productImageUrls : (p.productImageUrl ? [p.productImageUrl] : [])) as string[]; return arr.filter(Boolean); } catch { return []; } })()}
           onOpenGenerateAsset={handleOpenGenerateAsset}
-          clients={clients}
           injectedIds={injectedIds}
           onInject={handleInject}
           onInjectAll={handleInjectAll}

@@ -10,7 +10,10 @@
 ## 0. 同事來源 repo（重要）
 
 - **同事 repo URL**：`https://github.com/fimmick/claude-code-examples`（作者 cindyhong-hash）
-- **本輪 merge 基準 commit**：`70171bb`（2026-06-18 12:32，commit 訊息：「1.圖片三種選項…2.新增活動修改…3.圖面生成的 prompt 修改」）
+- **基準 commit**：`1e3f9e6`（2026-06-24 同步；前一基準 `70171bb` 2026-06-18）
+  - `70171bb..1e3f9e6` 同事改動：`.env.example` 新增、`.gitignore`、`package-lock.json`、`ActivityForm.tsx`（loading 文字 MiniMax→Gemini）
+  - 背景：同事（Hermes）發現幾條 AI API **香港地區 geo-block**，已遷專案去**美國 Azure 伺服器**；prompt 優化已可用，圖片生成仍偏慢。
+  - 我哋同步：ActivityForm 文字 fix + 修正活動詳情頁誤導錯誤訊息（「OpenAI 額度不足」→ 講明 API 區域限制 / OpenRouter Gemini / 建議 VPN 或部署版）。圖片生成 code 本身已行 OpenRouter `google/gemini-3-pro-image-preview`（`/api/generate`），無需改邏輯。
 - 已確認：本機 `claude-code-examples-main/` 內容 == 此 repo `main@70171bb`（用 `src/lib/fal.ts` 逐字核對一致）。
 
 > ⚠️ **規矩**：呢個 repo 同 `CLAUDE.md` 嗰條「絕對唔好 push 去 `fimmick/claude-code-examples`」係同一個。
@@ -137,3 +140,40 @@ WIP 已有：`DATABASE_URL`、`ANTHROPIC_API_KEY`、`OPENROUTER_API_KEY`、`FAL_
 1. **UI 重構**（依 `wireframes/marketing-tool-wireframes-v2.html`）：統一側邊欄、switch-tab（廣告活動圖／風格組件）、品牌設定內含「連動帳號」tab、新增產品／素材融合表單、圖庫排序（活動成品→參考圖）。
 2. **連動帳號 OAuth**：Meta / Google Ads / IG（wireframe ① ⑨ 有，屬 net-new）。
 3. **NextAuth 登入 + 內部/客戶權限**（wireframe ① ③）。
+
+---
+
+## 7. 活動圖 ↔ 素材庫 整合（我哋自訂 · merge 時必須保留／重套）
+
+> 同事原版：活動圖同素材庫係兩套（GeneratedLayout vs LibraryImage/StyleComponent），「加入素材庫」只 set `savedToLibrary` flag，唔會真係入到 Verna 嘅素材庫 gallery。
+> 我哋加咗以下**跨邊連結邏輯**，令活動成品真正入素材庫做「參考圖」+ 自動帶風格組件。
+> **⚠️ 下次由同事 repo merge 嗰陣，如果佢覆蓋咗呢啲檔，要把以下邏輯重新套返。**
+
+| 檔案 | 我哋改咗咩（自訂） | 屬誰原檔 |
+|---|---|---|
+| `src/app/api/layouts/[layoutId]/route.ts` | PATCH `savedToLibrary=true` → 建一筆 **rich LibraryImage**：`prompt`=活動 imagePrompt、`paramsJson={genType:"reference", fromLayoutId, productImageUrls:來源圖, slots:{layout,color}}`（slots 由 **AI 據實分析成品圖** `/api/components/analyze` 得出）。`false` → 刪 LibraryImage(by imageUrl) + 清 `import-<layoutId>` 殘留。 | 同事（COLLEAGUE）—— 佢原版只 `data:{savedToLibrary}` |
+| `src/app/api/library/images/[id]/route.ts` | DELETE **反向同步**：若 `paramsJson.fromLayoutId` 存在 → 把對應 layout `savedToLibrary=false`（素材庫刪圖 → 活動頁標返未加入）。 | WIP（Verna） |
+| `src/components/library/ComponentGrid.tsx` | `generatedKind()`：`genType==="reference"` → `"uploaded"`（歸類做參考圖）；`matchesGalleryFilter()`：參考圖 filter 認 generated-reference。 | WIP（Verna） |
+| `src/app/clients/[clientId]/activities/[activityId]/page.tsx` | 活動標題 inline 改名（PATCH `theme`）；status tag 按狀態上色（補 FAILED）。 | 同事原檔 |
+| `src/app/api/library/gallery/route.ts`、`api/components/route.ts` | 加 `?unassigned=1`（clientId=null）。 | WIP |
+
+**設計取捨**：
+- detail 一次過有：**Prompt + 來源產品圖 + 真實構圖/配色 + 帶入生成**（同活動成圖 detail 一致），title 可改（generated）。
+- 用「分析成品圖」而唔係 gen-time input 參數（input 係品牌色/通用構圖，唔代表成品）。
+- 生成 prompt 放 `LibraryImage.prompt`（detail 顯示）；唔塞落每個組件。
+- 語氣（COPY_TONE）唔建（已全面移除）。
+- 去重：以 `imageUrl` / `fromLayoutId` 為鍵，可安全 toggle on/off + 反向同步。
+
+---
+
+## 8. 未用 / Legacy code 追蹤（merge 時考慮清理）
+
+> 用途：記低「而家無人 import、但暫時留住做後備」嘅檔。每次由同事 repo merge 之前/之後，
+> 翻睇呢個清單；若連續幾個 version 都仍然無人用，就向用戶建議刪除。
+
+| 檔案 | 狀態 | 來源 | 備註 |
+|---|---|---|---|
+| `src/lib/openai.ts` | **無人 import（dead）** | 同事原檔（`70171bb` 已有，一字不差） | 同事最初嘅 OpenAI(DALL·E/gpt-image) 出圖引擎；後來轉咗 OpenRouter Gemini 後被取代。用戶決定**留住做後備**（2026-06-26）。**若往後幾個 version 都仍然 0 import → 建議刪 + 拎走 `OPENAI_API_KEY`。** |
+
+**檢查方法**：`grep -rl "@/lib/openai" src/` —— 若仍然空 = 冇人用。
+（順帶：UI 重構後 `ComponentGrid.tsx` 內有少量舊 code，如 `ComponentCard` / `FILTER_TABS`，亦屬可清理，但低優先。）

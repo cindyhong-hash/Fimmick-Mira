@@ -1,3 +1,6 @@
+// ⚠️ LEGACY / 暫時無人用（2026-06-26）：同事最初嘅 OpenAI(DALL·E/gpt-image) 出圖引擎，
+// 後來圖片生成轉咗去 OpenRouter Gemini，呢個檔已被取代、目前 0 import（grep "@/lib/openai" 為空）。
+// 用戶決定留住做後備。將來整合/merge 時若仍然無人用，考慮刪除 + 拎走 OPENAI_API_KEY。詳見 docs/MERGE-MAP.md §8。
 import OpenAI from "openai";
 
 let _client: OpenAI | null = null;

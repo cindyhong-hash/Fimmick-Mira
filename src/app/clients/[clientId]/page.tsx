@@ -1,19 +1,24 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Badge } from "@/components/ui/badge";
 import { Trash2 } from "lucide-react";
 import { BrandWorkspaceHeader } from "@/components/layout/BrandWorkspaceHeader";
 import { BrandMemoryCards } from "@/components/clients/BrandMemoryCards";
 
 type Activity = { id: string; theme: string; focusPoint: string; status: string; createdAt: string };
-type Client = { id: string; name: string; activities: Activity[] };
+type Client = {
+  id: string; name: string; activities: Activity[];
+  // 品牌記憶卡用（/api/clients/[id] 已一併返）
+  primaryColor?: string; secondaryColor?: string | null; paletteColors?: unknown;
+  toneLabels?: string[]; taboos?: string[];
+};
 
-const STATUS_LABEL: Record<string, string> = { PENDING: "待生成", GENERATING: "生成中", DONE: "已完成" };
-const STATUS_VARIANT: Record<string, "secondary" | "outline" | "default"> = {
-  PENDING: "secondary",
-  GENERATING: "outline",
-  DONE: "default",
+// 狀態標籤：按狀態上色（補返 FAILED；唔好再用黑色 default badge）。
+const STATUS_META: Record<string, { label: string; cls: string }> = {
+  PENDING:    { label: "待生成", cls: "bg-gray-100 text-gray-600 border-gray-200" },
+  GENERATING: { label: "生成中", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+  DONE:       { label: "已完成", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  FAILED:     { label: "生成失敗", cls: "bg-red-50 text-red-600 border-red-200" },
 };
 
 export default function ClientFolderPage({ params }: { params: Promise<{ clientId: string }> }) {
@@ -44,9 +49,9 @@ export default function ClientFolderPage({ params }: { params: Promise<{ clientI
 
   return (
     <div>
-      <BrandWorkspaceHeader clientId={clientId} activeTab="activities" />
+      <BrandWorkspaceHeader clientId={clientId} activeTab="activities" name={client.name} />
 
-      <BrandMemoryCards clientId={clientId} />
+      <BrandMemoryCards clientId={clientId} data={client} />
 
       {client.activities.length === 0 ? (
         <div className="text-center py-20 text-gray-400">
@@ -65,7 +70,10 @@ export default function ClientFolderPage({ params }: { params: Promise<{ clientI
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Badge variant={STATUS_VARIANT[act.status]}>{STATUS_LABEL[act.status]}</Badge>
+                  {(() => {
+                    const s = STATUS_META[act.status] ?? { label: act.status || "—", cls: "bg-gray-100 text-gray-500 border-gray-200" };
+                    return <span className={`text-xs px-2.5 py-0.5 rounded-full border font-medium whitespace-nowrap ${s.cls}`}>{s.label}</span>;
+                  })()}
                   <button
                     onClick={(e) => handleDelete(e, act.id)}
                     disabled={deletingId === act.id}

@@ -4,6 +4,17 @@ import { db } from "@/lib/db";
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   try {
+    // 反向同步：若呢張係由活動成品匯入嘅參考圖（paramsJson.fromLayoutId），
+    // 刪走時把對應活動 layout 標返「未加入素材庫」，唔好令活動頁仲顯示已加入。
+    const img = await db.libraryImage.findUnique({ where: { id } });
+    if (img) {
+      try {
+        const p = JSON.parse(img.paramsJson || "{}");
+        if (p.fromLayoutId) {
+          await db.generatedLayout.update({ where: { id: p.fromLayoutId }, data: { savedToLibrary: false } }).catch(() => {});
+        }
+      } catch { /* ignore */ }
+    }
     await db.libraryImage.delete({ where: { id } });
     return NextResponse.json({ ok: true });
   } catch {

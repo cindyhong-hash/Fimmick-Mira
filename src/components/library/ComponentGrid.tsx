@@ -242,12 +242,15 @@ function isSeriesTemplate(item: GalleryItem): boolean {
   try { return JSON.parse(item.paramsJson ?? "{}").mode === "paste-template"; } catch { return false; }
 }
 
-/** Generated tiles split by genType (stored in paramsJson): person / illustration / 其餘=product。 */
-function generatedKind(item: GalleryItem): "person" | "illustration" | "product" | null {
+/** Generated tiles split by genType: person / illustration / reference(=參考圖,活動成品) / 其餘=product。 */
+function generatedKind(item: GalleryItem): "person" | "illustration" | "product" | "uploaded" | null {
   if (item.kind !== "generated") return null;
   try {
     const g = JSON.parse(item.paramsJson ?? "{}").genType;
-    return g === "person" ? "person" : g === "illustration" ? "illustration" : "product";
+    if (g === "person") return "person";
+    if (g === "illustration") return "illustration";
+    if (g === "reference") return "uploaded"; // 活動圖儲存 = 參考圖（wireframe ⑦）
+    return "product";
   } catch { return "product"; }
 }
 
@@ -261,7 +264,7 @@ function tileFilterKey(item: GalleryItem): GalleryFilter {
 /** Does a gallery item match the active filter pill? */
 function matchesGalleryFilter(item: GalleryItem, f: GalleryFilter): boolean {
   if (f === "ALL") return true;
-  if (f === "uploaded") return item.kind === "uploaded";
+  if (f === "uploaded") return item.kind === "uploaded" || generatedKind(item) === "uploaded";
   if (f === "material") return item.kind === "material";
   return generatedKind(item) === f; // person | illustration | product
 }

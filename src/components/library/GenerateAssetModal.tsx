@@ -35,9 +35,16 @@ export function GenerateAssetModal({ clientId, onClose, onSaved, init, lockedTyp
   const [type, setType] = useState<AssetType>(lockedType ?? init?.type ?? "background");
   const [description, setDescription] = useState(init?.description ?? "");
   const [count, setCount] = useState(3);
-  const [size, setSize] = useState<"square" | "landscape" | "portrait" | "story" | "custom">("square");
+  // 尺寸 — 8 比例（同活動圖/產品圖頁一致）+ 自訂；一律換算成確切 W×H 送 size:"custom"。
+  const RATIO_DIMS: Record<string, { w: number; h: number }> = {
+    "1:1": { w: 1200, h: 1200 }, "4:5": { w: 1200, h: 1500 }, "3:4": { w: 1200, h: 1600 },
+    "2:3": { w: 1200, h: 1800 }, "9:16": { w: 1080, h: 1920 }, "4:3": { w: 1600, h: 1200 },
+    "3:2": { w: 1800, h: 1200 }, "16:9": { w: 1920, h: 1080 },
+  };
+  const [ratio, setRatio] = useState<string>("1:1");
   const [customW, setCustomW] = useState(1200);
   const [customH, setCustomH] = useState(1200);
+  const outDims = ratio === "custom" ? { w: customW, h: customH } : (RATIO_DIMS[ratio] ?? RATIO_DIMS["1:1"]);
   const [asianFirst, setAsianFirst] = useState(true); // 人像：預設亞裔（台/港受眾）
   const [refImageUrl, setRefImageUrl] = useState<string>(init?.refImageUrl ?? "");
   const [refUploading, setRefUploading] = useState(false);
@@ -180,9 +187,7 @@ export function GenerateAssetModal({ clientId, onClose, onSaved, init, lockedTyp
               clientId,
               subject: description.trim(),
               customPrompt: prompt,
-              size,
-              customW: size === "custom" ? customW : undefined,
-              customH: size === "custom" ? customH : undefined,
+              size: "custom", customW: outDims.w, customH: outDims.h,
               genType,
               draftOnly: true,
               ...(refImageUrl.trim() ? { refImageUrl: refImageUrl.trim() } : {}),
@@ -381,41 +386,7 @@ export function GenerateAssetModal({ clientId, onClose, onSaved, init, lockedTyp
             )}
           </div>
 
-          {/* ③ 尺寸 — wireframe ⑧ 多尺寸 + 自訂（同產品圖一致） */}
-          <div className="flex items-start gap-3">
-            <label className="text-xs font-semibold text-gray-600 whitespace-nowrap pt-1.5">尺寸</label>
-            <div className="flex-1 space-y-1.5">
-              <div className="flex gap-1.5 flex-wrap">
-                {([
-                  { key: "square", label: "正方形 1200×1200", w: 12, h: 12 },
-                  { key: "landscape", label: "橫向 1800×1200", w: 16, h: 12 },
-                  { key: "portrait", label: "直向 1200×1800", w: 10, h: 14 },
-                  { key: "story", label: "限時 1080×1920", w: 8, h: 14 },
-                ] as const).map((s) => (
-                  <button key={s.key} onClick={() => setSize(s.key)}
-                    className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors ${size === s.key ? "bg-violet-600 text-white border-violet-600" : "bg-white border-gray-200 text-gray-600 hover:border-violet-300"}`}>
-                    <span className="inline-block border border-current rounded-[2px]" style={{ width: s.w, height: s.h }} />{s.label}
-                  </button>
-                ))}
-                <button onClick={() => setSize("custom")}
-                  className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors ${size === "custom" ? "bg-violet-600 text-white border-violet-600" : "bg-white border-dashed border-gray-300 text-gray-500 hover:border-gray-400"}`}>
-                  ＋ 自訂
-                </button>
-              </div>
-              {size === "custom" && (
-                <div className="flex items-center gap-2">
-                  <input type="number" min={256} max={2400} value={customW} onChange={(e) => setCustomW(Number(e.target.value))}
-                    className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400" />
-                  <span className="text-xs text-gray-400">×</span>
-                  <input type="number" min={256} max={2400} value={customH} onChange={(e) => setCustomH(Number(e.target.value))}
-                    className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400" />
-                  <span className="text-[10px] text-gray-400">px（256–2400）</span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* ④ 生成數量 */}
+          {/* ③ 生成數量 */}
           <div className="flex items-center gap-3">
             <label className="text-xs font-semibold text-gray-600 whitespace-nowrap">生成數量</label>
             <div className="flex gap-1.5">
@@ -428,7 +399,7 @@ export function GenerateAssetModal({ clientId, onClose, onSaved, init, lockedTyp
             </div>
           </div>
 
-          {/* ⑤ 生成引擎（最後揀；Nano Banana 需要參考圖；FLUX 標籤依素材類型） */}
+          {/* ④ 生成引擎（最後揀；Nano Banana 需要參考圖；FLUX 標籤依素材類型） */}
           <div>
             <label className="text-xs font-semibold text-gray-600 mb-1.5 flex items-center gap-1">
               <Sparkles className="h-3 w-3" />生成引擎
@@ -446,6 +417,33 @@ export function GenerateAssetModal({ clientId, onClose, onSaved, init, lockedTyp
                 <div className={`text-[10px] ${engine === "nano" ? "text-violet-100" : "text-gray-400"}`}>{refImageUrl.trim() ? "參考圖風格遷移" : "純文字生圖"}</div>
               </button>
             </div>
+          </div>
+
+          {/* ⑤ 尺寸（比例）— 擺喺引擎/數量之下（尺寸揀一次少改；同產品圖頁一致 full-width 下拉）*/}
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-gray-600">輸出尺寸（比例）</label>
+            <div className="relative w-full">
+              <select value={ratio} onChange={(e) => setRatio(e.target.value)}
+                className="w-full appearance-none border border-gray-200 rounded-lg px-3 py-2 pr-8 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-gray-300 cursor-pointer">
+                {["1:1", "4:5", "3:4", "2:3", "9:16", "4:3", "3:2", "16:9"].map((r) => (
+                  <option key={r} value={r}>{r}（{RATIO_DIMS[r].w}×{RATIO_DIMS[r].h}）</option>
+                ))}
+                <option value="custom">自訂…</option>
+              </select>
+              <svg className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
+            {ratio === "custom" && (
+              <div className="flex items-center gap-2 pt-1.5">
+                <input type="number" min={256} max={2400} value={customW} onChange={(e) => setCustomW(Number(e.target.value))}
+                  className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400" />
+                <span className="text-xs text-gray-400">×</span>
+                <input type="number" min={256} max={2400} value={customH} onChange={(e) => setCustomH(Number(e.target.value))}
+                  className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400" />
+                <span className="text-[10px] text-gray-400">px（256–2400）</span>
+              </div>
+            )}
           </div>
 
           <button

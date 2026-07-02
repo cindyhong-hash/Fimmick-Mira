@@ -74,7 +74,7 @@ export default function ClientFolderPage({ params }: { params: Promise<{ clientI
               {/* 揀中時用返狀態 tag 嘅顏色（同列表 badge 一致）；全部=黑；未揀=白 */}
               {[{ k: "ALL", label: "全部" }, { k: "DONE", label: "已完成" }, { k: "GENERATING", label: "生成中" }, { k: "FAILED", label: "生成失敗" }, { k: "PENDING", label: "待生成" }].map((f) => {
                 const selected = actStatus === f.k;
-                const selCls = f.k === "ALL" ? "bg-gray-900 text-white border-gray-900" : (STATUS_META[f.k]?.cls ?? "bg-gray-900 text-white border-gray-900");
+                const selCls = f.k === "ALL" ? "bg-violet-600 text-white border-violet-600" : (STATUS_META[f.k]?.cls ?? "bg-violet-600 text-white border-violet-600");
                 return (
                   <button key={f.k} onClick={() => setActStatus(f.k)}
                     className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${selected ? selCls : "bg-white border-gray-200 text-gray-500 hover:border-gray-400"}`}>

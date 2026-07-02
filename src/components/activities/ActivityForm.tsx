@@ -465,9 +465,9 @@ export function ActivityForm({
       </div>
       )}
 
-      {/* ── 04 圖片比例與生圖模型 ─────────────────────────────── */}
+      {/* ── 03 圖片比例與生圖模型（原 04；因 03 風格組件已隱藏，順序補上）─────────── */}
       <div className="space-y-4">
-        <SectionLabel step="04" title="圖片尺寸比例" />
+        <SectionLabel step="03" title="圖片尺寸比例" />
         <div className="relative w-48">
           <select
             value={values.imageRatio}

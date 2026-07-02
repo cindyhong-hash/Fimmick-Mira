@@ -216,10 +216,16 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
   const [productUrls, setProductUrls] = useState<string[]>([]);
   const MAX_PRODUCTS = 3;
   const [productUploading, setProductUploading] = useState(false);
-  // Output size — wireframe ⑧ 多尺寸：正方形 / 橫向 / 直向 / 限時動態 / 自訂。
-  const [size, setSize] = useState<"square" | "landscape" | "portrait" | "story" | "custom">("square");
+  // Output size — 8 比例（同活動圖頁一致）+ 自訂；底層一律換算成確切 W×H 送 size:"custom"（後端 line 63 用 exact dims，毋須改後端）。
+  const RATIO_DIMS: Record<string, { w: number; h: number }> = {
+    "1:1": { w: 1200, h: 1200 }, "4:5": { w: 1200, h: 1500 }, "3:4": { w: 1200, h: 1600 },
+    "2:3": { w: 1200, h: 1800 }, "9:16": { w: 1080, h: 1920 }, "4:3": { w: 1600, h: 1200 },
+    "3:2": { w: 1800, h: 1200 }, "16:9": { w: 1920, h: 1080 },
+  };
+  const [ratio, setRatio] = useState<string>("1:1");
   const [customW, setCustomW] = useState(1200);
   const [customH, setCustomH] = useState(1200);
+  const outDims = ratio === "custom" ? { w: customW, h: customH } : (RATIO_DIMS[ratio] ?? RATIO_DIMS["1:1"]);
   // 合成方式引擎（全部支援多產品）：flux2edit（主力）/ nano / seedream / qwen / paste（文字保真貼圖）。
   const [engine, setEngine] = useState<"flux2edit" | "nano" | "seedream" | "qwen" | "paste">("flux2edit");
   const [describing, setDescribing] = useState(false);
@@ -401,9 +407,8 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
       const palette = buildPalette();
       const effectiveSlots = buildEffectiveSlots();
       const baseBody = {
-        clientId, subject, slots: effectiveSlots, palette, notes, size,
-        customW: size === "custom" ? customW : undefined,
-        customH: size === "custom" ? customH : undefined,
+        clientId, subject, slots: effectiveSlots, palette, notes,
+        size: "custom", customW: outDims.w, customH: outDims.h,
         engine: composite ? effEngine : undefined,
         productImageUrls: composite ? productUrls : undefined,
         productImageUrl: composite ? productUrls[0] : undefined,
@@ -422,13 +427,13 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
         let sharedBg = (slots.background?.data?.imageUrl as string | undefined) || undefined;
         if (!sharedBg) {
           const bgPrompt = `${buildSceneBrief() || "簡潔專業棚拍背景、柔光"}，純背景場景，無產品、無人物、無文字`;
-          const bgRes = await postJson({ clientId, customPrompt: bgPrompt, size, draftOnly: true });
+          const bgRes = await postJson({ clientId, customPrompt: bgPrompt, size: "custom", customW: outDims.w, customH: outDims.h, draftOnly: true });
           sharedBg = bgRes.imageUrl;
           if (!sharedBg) throw new Error("共用背景生成失敗，請重試");
         }
         const results = await Promise.allSettled(productUrls.map((p) =>
           fetch("/api/library/template-paste", { method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ bgImageUrl: sharedBg, productImageUrl: p, placement, size, harmonize }) }).then((r) => r.json())));
+            body: JSON.stringify({ bgImageUrl: sharedBg, productImageUrl: p, placement, size: ratio, harmonize }) }).then((r) => r.json())));
         const ok = results
           .map((r, i) => r.status === "fulfilled" && r.value?.imageUrl
             ? { imageUrl: r.value.imageUrl as string, copyText: "", mode: "paste-template", selected: true, productImageUrls: [productUrls[i]] }
@@ -646,29 +651,22 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
             component={slots.background} onClear={() => onClearSlot("background")} onPick={() => setPickerCategory("BACKGROUND")} />
         </div>
 
-        {/* Output size — wireframe ⑧ 多尺寸（統一順序：積木之後即尺寸） */}
+        {/* Output size — 8 比例下拉（同活動圖頁一致）+ 自訂；選 ratio 自動換算 W×H */}
         <div className="space-y-1.5">
-          <label className="text-xs font-semibold text-gray-500">輸出尺寸</label>
-          <div className="flex gap-1.5 flex-wrap">
-            {([
-              { key: "square", label: "正方形 1200×1200", w: 12, h: 12 },
-              { key: "landscape", label: "橫向 1800×1200", w: 16, h: 12 },
-              { key: "portrait", label: "直向 1200×1800", w: 10, h: 14 },
-              { key: "story", label: "限時 1080×1920", w: 8, h: 14 },
-            ] as const).map((s) => (
-              <button key={s.key} type="button" onClick={() => setSize(s.key)}
-                className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors ${
-                  size === s.key ? "bg-violet-600 text-white border-violet-600" : "bg-white border-gray-200 text-gray-500 hover:border-gray-300"}`}>
-                <span className="inline-block border border-current rounded-[2px]" style={{ width: s.w, height: s.h }} />{s.label}
-              </button>
-            ))}
-            <button type="button" onClick={() => setSize("custom")}
-              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors ${
-                size === "custom" ? "bg-violet-600 text-white border-violet-600" : "bg-white border-dashed border-gray-300 text-gray-500 hover:border-gray-400"}`}>
-              <Plus className="h-3 w-3" />自訂
-            </button>
+          <label className="text-xs font-semibold text-gray-500">輸出尺寸（比例）</label>
+          <div className="relative w-full">
+            <select value={ratio} onChange={(e) => setRatio(e.target.value)}
+              className="w-full appearance-none border border-gray-200 rounded-lg px-3 py-2 pr-8 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-gray-300 cursor-pointer">
+              {["1:1", "4:5", "3:4", "2:3", "9:16", "4:3", "3:2", "16:9"].map((r) => (
+                <option key={r} value={r}>{r}（{RATIO_DIMS[r].w}×{RATIO_DIMS[r].h}）</option>
+              ))}
+              <option value="custom">自訂…</option>
+            </select>
+            <svg className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
           </div>
-          {size === "custom" && (
+          {ratio === "custom" && (
             <div className="flex items-center gap-2 pt-1.5">
               <input type="number" min={256} max={2400} value={customW} onChange={(e) => setCustomW(Number(e.target.value))}
                 className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400" />
@@ -799,7 +797,7 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
                   <div className="rounded-xl border border-violet-200 bg-violet-50/40 p-3 space-y-2">
                     <div className="text-[11px] font-semibold text-violet-700">擺位（拖產品定位置・滑桿調大小）—— 所有產品共用</div>
                     <div
-                      className={`relative w-full mx-auto rounded-lg overflow-hidden border bg-gray-100 select-none touch-none ${size === "landscape" ? "max-w-[360px] aspect-[3/2]" : "max-w-[280px] aspect-square"}`}
+                      className={`relative w-full mx-auto rounded-lg overflow-hidden border bg-gray-100 select-none touch-none ${outDims.w > outDims.h ? "max-w-[360px] aspect-[3/2]" : "max-w-[280px] aspect-square"}`}
                       style={slots.background?.data?.imageUrl ? { backgroundImage: `url(${slots.background.data.imageUrl as string})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}
                       onPointerDown={(e) => {
                         const box = e.currentTarget.getBoundingClientRect();

@@ -51,6 +51,34 @@ type Props = {
 // 語氣（COPY_TONE）已從 UI 移除（wireframe ⑧）——詳情彈窗只顯示 構圖/配色/背景。
 const ORDER: ComponentCategory[] = ["COMPOSITION", "COLOR_SCHEME", "BACKGROUND"];
 
+// popup（詳細檢視）尺寸 label：比例 · 原始像素，如「1:1 · 1200×1200」；非標準比例只顯示像素。
+const STD_RATIOS: [string, number][] = [
+  ["1:1", 1], ["4:5", 0.8], ["3:4", 0.75], ["2:3", 2 / 3],
+  ["9:16", 9 / 16], ["4:3", 4 / 3], ["3:2", 1.5], ["16:9", 16 / 9],
+];
+function sizeLabel(w: number, h: number): string {
+  if (!w || !h) return "";
+  const r = w / h;
+  let bestLabel = "", bestVal = 1, diff = Infinity;
+  for (const [lbl, val] of STD_RATIOS) { const d = Math.abs(val - r); if (d < diff) { diff = d; bestLabel = lbl; bestVal = val; } }
+  return diff / bestVal < 0.03 ? `${bestLabel} · ${w}×${h}` : `${w}×${h}`;
+}
+
+// 主圖 + 右下角尺寸 pill（比例 · 原始尺寸）
+function ImageWithSize({ src, alt, className }: { src: string; alt?: string; className?: string }) {
+  const [dims, setDims] = useState("");
+  return (
+    <div className="relative">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={src} alt={alt ?? "preview"} className={className}
+        onLoad={(e) => { const t = e.currentTarget; setDims(sizeLabel(t.naturalWidth, t.naturalHeight)); }} />
+      {dims && (
+        <span className="absolute bottom-2 right-2 text-[10px] font-medium bg-black/55 text-white px-1.5 py-0.5 rounded shadow pointer-events-none">{dims}</span>
+      )}
+    </div>
+  );
+}
+
 export function ImageDetailModal({
   imageUrl,
   presetComponents,
@@ -198,8 +226,7 @@ export function ImageDetailModal({
             {loading ? (
               <div className="text-sm text-gray-400 py-10 text-center">載入中…</div>
             ) : imageUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={imageUrl} alt={bgComp?.name} className="w-full max-h-[65vh] object-contain rounded-xl border bg-gray-50" />
+              <ImageWithSize src={imageUrl} alt={bgComp?.name} className="w-full max-h-[65vh] object-contain rounded-xl border bg-gray-50" />
             ) : null}
             {!loading && prompt && (
               <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 p-3">
@@ -282,8 +309,7 @@ export function ImageDetailModal({
           </div>
           <div className="p-5 overflow-y-auto">
             {imageUrl && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={imageUrl} alt="preview" className="w-full max-h-[64vh] object-contain rounded-xl border bg-gray-50" />
+              <ImageWithSize src={imageUrl} alt="preview" className="w-full max-h-[64vh] object-contain rounded-xl border bg-gray-50" />
             )}
             {prompt && (
               <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 p-3">
@@ -375,12 +401,7 @@ export function ImageDetailModal({
           {/* Image */}
           <div>
             {imageUrl && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={imageUrl}
-                alt="preview"
-                className="w-full max-h-[70vh] rounded-xl border object-contain bg-gray-50"
-              />
+              <ImageWithSize src={imageUrl} alt="preview" className="w-full max-h-[70vh] rounded-xl border object-contain bg-gray-50" />
             )}
             {/* 參考文案 intentionally hidden (not needed). AI Prompt is shown below. */}
             {prompt && (

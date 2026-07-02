@@ -140,7 +140,7 @@ function sizeTag(w: number, h: number): string {
     const d = Math.abs(val - r);
     if (d < diff) { diff = d; bestLabel = lbl; bestVal = val; }
   }
-  return diff / bestVal < 0.03 ? `${bestLabel}（${w}×${h}）` : `${w}×${h}`;
+  return diff / bestVal < 0.03 ? bestLabel : `${w}×${h}`;
 }
 
 // ─── Gallery tile ────────────────────────────────────────────────────────────

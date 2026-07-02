@@ -236,7 +236,14 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
   const [ratio, setRatio] = useState<string>("1:1");
   const [customW, setCustomW] = useState(1200);
   const [customH, setCustomH] = useState(1200);
-  const outDims = ratio === "custom" ? { w: customW, h: customH } : (RATIO_DIMS[ratio] ?? RATIO_DIMS["1:1"]);
+  // 揀比例 → 自動填 W×H（可再改，改時鎖住比例）；自訂 → 自由 W×H。outDims 一律用 customW/H。
+  const outDims = { w: customW, h: customH };
+  const pickRatio = (r: string) => { setRatio(r); if (r !== "custom") { setCustomW(RATIO_DIMS[r].w); setCustomH(RATIO_DIMS[r].h); } };
+  const changeDim = (which: "w" | "h", v: number) => {
+    const rd = RATIO_DIMS[ratio];
+    if (which === "w") { setCustomW(v); if (ratio !== "custom" && rd) setCustomH(Math.round(v * rd.h / rd.w)); }
+    else { setCustomH(v); if (ratio !== "custom" && rd) setCustomW(Math.round(v * rd.w / rd.h)); }
+  };
   // 合成方式引擎（全部支援多產品）：flux2edit（主力）/ nano / seedream / qwen / paste（文字保真貼圖）。
   const [engine, setEngine] = useState<"flux2edit" | "nano" | "seedream" | "qwen" | "paste">("flux2edit");
   const [describing, setDescribing] = useState(false);
@@ -819,11 +826,11 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
           </div>
         )}
 
-        {/* 輸出尺寸（比例）— 引擎之後、數量之前；text/image 模式都 show */}
+        {/* 輸出尺寸（比例）— 揀比例自動填 W×H，可再改（非自訂會鎖比例）；text/image 模式都 show */}
         <div className="space-y-1.5">
           <label className="text-xs font-semibold text-gray-500">輸出尺寸（比例）</label>
           <div className="relative w-full">
-            <select value={ratio} onChange={(e) => setRatio(e.target.value)}
+            <select value={ratio} onChange={(e) => pickRatio(e.target.value)}
               className="w-full appearance-none border border-gray-200 rounded-lg px-3 py-2 pr-8 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-gray-300 cursor-pointer">
               {["1:1", "4:5", "3:4", "2:3", "9:16", "4:3", "3:2", "16:9"].map((r) => (
                 <option key={r} value={r}>{r}（{RATIO_DIMS[r].w}×{RATIO_DIMS[r].h}）</option>
@@ -834,16 +841,14 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
           </div>
-          {ratio === "custom" && (
-            <div className="flex items-center gap-2 pt-1.5">
-              <input type="number" min={256} max={2400} value={customW} onChange={(e) => setCustomW(Number(e.target.value))}
-                className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400" />
-              <span className="text-xs text-gray-400">×</span>
-              <input type="number" min={256} max={2400} value={customH} onChange={(e) => setCustomH(Number(e.target.value))}
-                className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400" />
-              <span className="text-[10px] text-gray-400">px（256–2400）</span>
-            </div>
-          )}
+          <div className="flex items-center gap-2 pt-1.5">
+            <input type="number" min={256} max={2400} value={customW} onChange={(e) => changeDim("w", Number(e.target.value))}
+              className="w-24 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400" />
+            <span className="text-xs text-gray-400">×</span>
+            <input type="number" min={256} max={2400} value={customH} onChange={(e) => changeDim("h", Number(e.target.value))}
+              className="w-24 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400" />
+            <span className="text-[10px] text-gray-400">px · {ratio === "custom" ? "自由尺寸（256–2400）" : `改任一邊自動鎖 ${ratio} 比例`}</span>
+          </div>
         </div>
 
         {/* 生成數量（合成模式；系列模式時隱藏）— 04 最後 */}

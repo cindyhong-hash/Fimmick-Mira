@@ -8,7 +8,7 @@
 import { useState, useEffect, useRef } from "react";
 import {
   X, Copy, Check, Sparkles, LayoutTemplate, Palette,
-  Image as ImageIcon, Target, StickyNote, Loader2, Upload, Plus, Trash2, Type, Lock, Wand2, RotateCcw,
+  Image as ImageIcon, StickyNote, Loader2, Upload, Plus, Trash2, Type, Lock, Wand2, RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { PromptSlots, StyleComponent, ComponentCategory, PaletteColor, PaletteRole } from "@/types/library";
@@ -172,6 +172,17 @@ function SlotCard({
       ) : (
         <div onClick={onPick} className="text-xs text-gray-400 italic mt-2 cursor-pointer">{emptyLabel}</div>
       )}
+    </div>
+  );
+}
+
+// 編號分段標題（同活動圖頁 ActivityForm 一致）
+function SectionLabel({ step, title, hint }: { step: string; title: string; hint?: string }) {
+  return (
+    <div className="flex items-baseline gap-2 border-b pb-1.5">
+      <span className="text-[10px] font-bold text-gray-400 tracking-widest">{step}</span>
+      <span className="text-sm font-semibold text-gray-800">{title}</span>
+      {hint && <span className="text-xs text-gray-400 font-normal">{hint}</span>}
     </div>
   );
 }
@@ -518,11 +529,9 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
         </div>
         )}
 
-        {/* Subject — 二選一: 文字主體 (純 AI) 或 產品圖 (合成用原圖) */}
+        {/* ── 01 主體物件 ── */}
+        <SectionLabel step="01" title="主體物件" hint="產品圖 或 文字，二選一" />
         <div className="space-y-2">
-          <label className="flex items-center gap-1.5 text-xs font-semibold text-gray-600">
-            <Target className="h-3.5 w-3.5 text-emerald-500" />主體物件（產品圖 或 文字，二選一）
-          </label>
 
           {/* Mode toggle */}
           <div className="flex gap-1.5">
@@ -599,11 +608,19 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
           </div>
         </div>
 
-        {/* Style blocks — full-width stacked, placed below 主體物件. Each optional: 點卡片選取 / ✕ 移除 */}
-        <div className="space-y-2.5">
-          <label className="text-xs font-semibold text-gray-500 flex items-center gap-1.5">
-            <Sparkles className="h-3.5 w-3.5 text-violet-400" />風格積木（可選，按需增減：點卡片選取素材，右上 ✕ 移除）
+        {/* 其他注意事項 — 屬 01 輸入內容 */}
+        <div className="space-y-1.5">
+          <label className="flex items-center gap-1.5 text-xs font-semibold text-gray-600">
+            <StickyNote className="h-3.5 w-3.5 text-amber-500" />其他注意事項（選填）
           </label>
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2}
+            placeholder="例：不要加入紅色、營造溫暖放鬆感、避免文字、產品要清晰…"
+            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm resize-none placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-400 transition" />
+        </div>
+
+        {/* ── 02 風格積木 ── */}
+        <SectionLabel step="02" title="風格積木" hint="可選 · 點卡片選取素材，右上 ✕ 移除" />
+        <div className="space-y-2.5">
 
           <SlotCard category="COMPOSITION" icon={<LayoutTemplate className="h-4 w-4" />} emptyLabel="點擊選取構圖"
             component={slots.layout} onClear={() => onClearSlot("layout")} onPick={() => setPickerCategory("COMPOSITION")}
@@ -651,43 +668,8 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
             component={slots.background} onClear={() => onClearSlot("background")} onPick={() => setPickerCategory("BACKGROUND")} />
         </div>
 
-        {/* Output size — 8 比例下拉（同活動圖頁一致）+ 自訂；選 ratio 自動換算 W×H */}
-        <div className="space-y-1.5">
-          <label className="text-xs font-semibold text-gray-500">輸出尺寸（比例）</label>
-          <div className="relative w-full">
-            <select value={ratio} onChange={(e) => setRatio(e.target.value)}
-              className="w-full appearance-none border border-gray-200 rounded-lg px-3 py-2 pr-8 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-gray-300 cursor-pointer">
-              {["1:1", "4:5", "3:4", "2:3", "9:16", "4:3", "3:2", "16:9"].map((r) => (
-                <option key={r} value={r}>{r}（{RATIO_DIMS[r].w}×{RATIO_DIMS[r].h}）</option>
-              ))}
-              <option value="custom">自訂…</option>
-            </select>
-            <svg className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-          {ratio === "custom" && (
-            <div className="flex items-center gap-2 pt-1.5">
-              <input type="number" min={256} max={2400} value={customW} onChange={(e) => setCustomW(Number(e.target.value))}
-                className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400" />
-              <span className="text-xs text-gray-400">×</span>
-              <input type="number" min={256} max={2400} value={customH} onChange={(e) => setCustomH(Number(e.target.value))}
-                className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400" />
-              <span className="text-[10px] text-gray-400">px（256–2400）</span>
-            </div>
-          )}
-        </div>
-
-        {/* Notes */}
-        <div className="space-y-1.5">
-          <label className="flex items-center gap-1.5 text-xs font-semibold text-gray-600">
-            <StickyNote className="h-3.5 w-3.5 text-amber-500" />其他注意事項（選填）
-          </label>
-          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2}
-            placeholder="例：不要加入紅色、營造溫暖放鬆感、避免文字、產品要清晰…"
-            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm resize-none placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-400 transition" />
-        </div>
-
+        {/* ── 03 設計描述 ── */}
+        <SectionLabel step="03" title="設計描述" hint="自動組裝 · 可 AI 潤色" />
         {/* Compiled prompt — 唯讀預覽，或潤色後可編輯 */}
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-2">
@@ -757,6 +739,8 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
           )}
         </div>
 
+        {/* ── 04 輸出設定 ── */}
+        <SectionLabel step="04" title="輸出設定" hint="引擎 · 數量 · 尺寸" />
         {/* Composite engine — only in composite (產品圖) mode */}
         {inputMode === "image" && (
           <div className="space-y-2">
@@ -850,6 +834,33 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
             )}
           </div>
         )}
+
+        {/* 輸出尺寸（比例）— 04 尾；text/image 模式都 show */}
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-gray-500">輸出尺寸（比例）</label>
+          <div className="relative w-full">
+            <select value={ratio} onChange={(e) => setRatio(e.target.value)}
+              className="w-full appearance-none border border-gray-200 rounded-lg px-3 py-2 pr-8 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-gray-300 cursor-pointer">
+              {["1:1", "4:5", "3:4", "2:3", "9:16", "4:3", "3:2", "16:9"].map((r) => (
+                <option key={r} value={r}>{r}（{RATIO_DIMS[r].w}×{RATIO_DIMS[r].h}）</option>
+              ))}
+              <option value="custom">自訂…</option>
+            </select>
+            <svg className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+          {ratio === "custom" && (
+            <div className="flex items-center gap-2 pt-1.5">
+              <input type="number" min={256} max={2400} value={customW} onChange={(e) => setCustomW(Number(e.target.value))}
+                className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400" />
+              <span className="text-xs text-gray-400">×</span>
+              <input type="number" min={256} max={2400} value={customH} onChange={(e) => setCustomH(Number(e.target.value))}
+                className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400" />
+              <span className="text-[10px] text-gray-400">px（256–2400）</span>
+            </div>
+          )}
+        </div>
 
         {/* Generate */}
         <Button onClick={handleGenerate} disabled={!canGenerate || generating || savingDrafts}

@@ -31,6 +31,17 @@ const TYPE_META: Record<AssetType, { label: string; sub: string; icon: React.Rea
   illustration: { label: "插畫", sub: "Recraft V3 · 2D 插畫", icon: <Palette className="h-3.5 w-3.5" />, placeholder: "例：可愛貓咪吉祥物，扁平插畫風，手持產品\n例：清新夏日海灘，2D 插畫，柔和色塊" },
 };
 
+// 編號分段標題（同產品圖生成台一致）
+function SectionLabel({ step, title, hint }: { step: string; title: string; hint?: string }) {
+  return (
+    <div className="flex items-baseline gap-2 border-b pb-1.5">
+      <span className="text-[10px] font-bold text-gray-400 tracking-widest">{step}</span>
+      <span className="text-sm font-semibold text-gray-800">{title}</span>
+      {hint && <span className="text-xs text-gray-400 font-normal">{hint}</span>}
+    </div>
+  );
+}
+
 export function GenerateAssetModal({ clientId, onClose, onSaved, init, lockedType }: Props) {
   const [type, setType] = useState<AssetType>(lockedType ?? init?.type ?? "background");
   const [description, setDescription] = useState(init?.description ?? "");
@@ -301,7 +312,8 @@ export function GenerateAssetModal({ clientId, onClose, onSaved, init, lockedTyp
           </div>
           )}
 
-          {/* ① 主體描述（主要輸入，置頂）+ 潤色 —— 統一順序：主體→參考→尺寸→數量→引擎 */}
+          {/* ── 01 主體描述 ── */}
+          <SectionLabel step="01" title="主體描述" hint="主要輸入 · 可 AI 潤色" />
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <div className="flex items-center gap-1.5">
@@ -346,7 +358,8 @@ export function GenerateAssetModal({ clientId, onClose, onSaved, init, lockedTyp
             </label>
           )}
 
-          {/* ② 參考風格圖（選填） */}
+          {/* ── 02 參考風格圖 ── */}
+          <SectionLabel step="02" title="參考風格圖" hint="選填 · AI 讀色調/光影/質感" />
           <div>
             <label className="text-xs font-semibold text-gray-600 mb-1.5 flex items-center gap-1">
               <Link2 className="h-3 w-3" />參考風格圖
@@ -386,20 +399,10 @@ export function GenerateAssetModal({ clientId, onClose, onSaved, init, lockedTyp
             )}
           </div>
 
-          {/* ③ 生成數量 */}
-          <div className="flex items-center gap-3">
-            <label className="text-xs font-semibold text-gray-600 whitespace-nowrap">生成數量</label>
-            <div className="flex gap-1.5">
-              {[1, 2, 3, 4, 5].map((n) => (
-                <button key={n} onClick={() => setCount(n)}
-                  className={`w-9 h-9 rounded-lg border text-sm font-medium transition-colors ${count === n ? "bg-violet-600 text-white border-violet-600" : "bg-white border-gray-200 text-gray-600 hover:border-violet-300"}`}>
-                  {n}
-                </button>
-              ))}
-            </div>
-          </div>
+          {/* ── 03 輸出設定 ── */}
+          <SectionLabel step="03" title="輸出設定" hint="引擎 · 尺寸 · 數量" />
 
-          {/* ④ 生成引擎（最後揀；Nano Banana 需要參考圖；FLUX 標籤依素材類型） */}
+          {/* 生成引擎（Nano Banana 需要參考圖；FLUX 標籤依素材類型）*/}
           <div>
             <label className="text-xs font-semibold text-gray-600 mb-1.5 flex items-center gap-1">
               <Sparkles className="h-3 w-3" />生成引擎
@@ -419,7 +422,7 @@ export function GenerateAssetModal({ clientId, onClose, onSaved, init, lockedTyp
             </div>
           </div>
 
-          {/* ⑤ 尺寸（比例）— 擺喺引擎/數量之下（尺寸揀一次少改；同產品圖頁一致 full-width 下拉）*/}
+          {/* 輸出尺寸（比例）— 引擎之後、數量之前 */}
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-gray-600">輸出尺寸（比例）</label>
             <div className="relative w-full">
@@ -444,6 +447,19 @@ export function GenerateAssetModal({ clientId, onClose, onSaved, init, lockedTyp
                 <span className="text-[10px] text-gray-400">px（256–2400）</span>
               </div>
             )}
+          </div>
+
+          {/* 生成數量 — 04 最後 */}
+          <div className="flex items-center gap-3">
+            <label className="text-xs font-semibold text-gray-600 whitespace-nowrap">生成數量</label>
+            <div className="flex gap-1.5">
+              {[1, 2, 3, 4, 5].map((n) => (
+                <button key={n} onClick={() => setCount(n)}
+                  className={`w-9 h-9 rounded-lg border text-sm font-medium transition-colors ${count === n ? "bg-violet-600 text-white border-violet-600" : "bg-white border-gray-200 text-gray-600 hover:border-violet-300"}`}>
+                  {n}
+                </button>
+              ))}
+            </div>
           </div>
 
           <button

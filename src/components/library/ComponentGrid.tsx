@@ -127,6 +127,22 @@ function ComponentCard({
   );
 }
 
+// 尺寸 tag：對齊新尺寸設定（8 標準比例）。夠近標準比例就顯示比例（1:1 / 9:16…），否則 fallback 顯示像素。
+const STD_RATIOS: [string, number][] = [
+  ["1:1", 1], ["4:5", 0.8], ["3:4", 0.75], ["2:3", 2 / 3],
+  ["9:16", 9 / 16], ["4:3", 4 / 3], ["3:2", 1.5], ["16:9", 16 / 9],
+];
+function sizeTag(w: number, h: number): string {
+  if (!w || !h) return "";
+  const r = w / h;
+  let bestLabel = "", bestVal = 1, diff = Infinity;
+  for (const [lbl, val] of STD_RATIOS) {
+    const d = Math.abs(val - r);
+    if (d < diff) { diff = d; bestLabel = lbl; bestVal = val; }
+  }
+  return diff / bestVal < 0.03 ? bestLabel : `${w}×${h}`;
+}
+
 // ─── Gallery tile ────────────────────────────────────────────────────────────
 function GalleryTile({ item, onOpen, onDelete, selectMode, selected, onToggleSelect, onLongPress }: {
   item: GalleryItem;
@@ -165,7 +181,7 @@ function GalleryTile({ item, onOpen, onDelete, selectMode, selected, onToggleSel
         {/* Show the FULL image (no crop) — object-contain, letterboxed in a square box. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={item.imageUrl} alt="brand" loading="lazy" decoding="async"
-          onLoad={(e) => { const t = e.currentTarget; setDims((d) => d || `${t.naturalWidth}×${t.naturalHeight}`); }}
+          onLoad={(e) => { const t = e.currentTarget; setDims((d) => d || sizeTag(t.naturalWidth, t.naturalHeight)); }}
           className="w-full aspect-square object-contain" />
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors pointer-events-none" />
       </button>

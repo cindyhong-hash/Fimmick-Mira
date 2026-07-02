@@ -740,32 +740,6 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
 
         {/* ── 04 輸出設定 ── */}
         <SectionLabel step="04" title="輸出設定" hint="尺寸 · 引擎 · 數量" />
-        {/* 輸出尺寸（比例）— 04 先選尺寸；text/image 模式都 show */}
-        <div className="space-y-1.5">
-          <label className="text-xs font-semibold text-gray-500">輸出尺寸（比例）</label>
-          <div className="relative w-full">
-            <select value={ratio} onChange={(e) => setRatio(e.target.value)}
-              className="w-full appearance-none border border-gray-200 rounded-lg px-3 py-2 pr-8 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-gray-300 cursor-pointer">
-              {["1:1", "4:5", "3:4", "2:3", "9:16", "4:3", "3:2", "16:9"].map((r) => (
-                <option key={r} value={r}>{r}（{RATIO_DIMS[r].w}×{RATIO_DIMS[r].h}）</option>
-              ))}
-              <option value="custom">自訂…</option>
-            </select>
-            <svg className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-          {ratio === "custom" && (
-            <div className="flex items-center gap-2 pt-1.5">
-              <input type="number" min={256} max={2400} value={customW} onChange={(e) => setCustomW(Number(e.target.value))}
-                className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400" />
-              <span className="text-xs text-gray-400">×</span>
-              <input type="number" min={256} max={2400} value={customH} onChange={(e) => setCustomH(Number(e.target.value))}
-                className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400" />
-              <span className="text-[10px] text-gray-400">px（256–2400）</span>
-            </div>
-          )}
-        </div>
         {/* Composite engine — only in composite (產品圖) mode */}
         {inputMode === "image" && (
           <div className="space-y-2">
@@ -842,21 +816,49 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
               </>
             )}
 
-            {/* #3 生成數量：一次出多張俾你揀（系列模式時隱藏，張數＝產品件數）*/}
-            {!(seriesMode && productUrls.length >= 2) && (
-              <div className="flex items-center gap-3 pt-1">
-                <label className="text-xs font-semibold text-gray-500 whitespace-nowrap">生成數量</label>
-                <div className="flex gap-1.5">
-                  {[1, 2, 3, 4, 5].map((n) => (
-                    <button key={n} type="button" onClick={() => setCount(n)}
-                      className={`w-8 h-8 rounded-lg border text-sm font-medium transition-colors ${count === n ? "bg-violet-600 text-white border-violet-600" : "bg-white border-gray-200 text-gray-600 hover:border-violet-300"}`}>
-                      {n}
-                    </button>
-                  ))}
-                </div>
-                {count > 1 && <span className="text-[10px] text-gray-400">出 {count} 張揀（成本 ×{count}）</span>}
-              </div>
-            )}
+          </div>
+        )}
+
+        {/* 輸出尺寸（比例）— 引擎之後、數量之前；text/image 模式都 show */}
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-gray-500">輸出尺寸（比例）</label>
+          <div className="relative w-full">
+            <select value={ratio} onChange={(e) => setRatio(e.target.value)}
+              className="w-full appearance-none border border-gray-200 rounded-lg px-3 py-2 pr-8 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-gray-300 cursor-pointer">
+              {["1:1", "4:5", "3:4", "2:3", "9:16", "4:3", "3:2", "16:9"].map((r) => (
+                <option key={r} value={r}>{r}（{RATIO_DIMS[r].w}×{RATIO_DIMS[r].h}）</option>
+              ))}
+              <option value="custom">自訂…</option>
+            </select>
+            <svg className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+          {ratio === "custom" && (
+            <div className="flex items-center gap-2 pt-1.5">
+              <input type="number" min={256} max={2400} value={customW} onChange={(e) => setCustomW(Number(e.target.value))}
+                className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400" />
+              <span className="text-xs text-gray-400">×</span>
+              <input type="number" min={256} max={2400} value={customH} onChange={(e) => setCustomH(Number(e.target.value))}
+                className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400" />
+              <span className="text-[10px] text-gray-400">px（256–2400）</span>
+            </div>
+          )}
+        </div>
+
+        {/* 生成數量（合成模式；系列模式時隱藏）— 04 最後 */}
+        {inputMode === "image" && !(seriesMode && productUrls.length >= 2) && (
+          <div className="flex items-center gap-3">
+            <label className="text-xs font-semibold text-gray-500 whitespace-nowrap">生成數量</label>
+            <div className="flex gap-1.5">
+              {[1, 2, 3, 4, 5].map((n) => (
+                <button key={n} type="button" onClick={() => setCount(n)}
+                  className={`w-8 h-8 rounded-lg border text-sm font-medium transition-colors ${count === n ? "bg-violet-600 text-white border-violet-600" : "bg-white border-gray-200 text-gray-600 hover:border-violet-300"}`}>
+                  {n}
+                </button>
+              ))}
+            </div>
+            {count > 1 && <span className="text-[10px] text-gray-400">出 {count} 張揀（成本 ×{count}）</span>}
           </div>
         )}
 

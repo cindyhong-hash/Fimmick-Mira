@@ -443,14 +443,19 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
               />
             </div>
             {galleryEngines.length > 0 && (
-              <select
-                value={galleryEngine}
-                onChange={(e) => setGalleryEngine(e.target.value)}
-                className="text-xs bg-white border border-gray-300 rounded-full px-3 py-1.5 outline-none cursor-pointer"
-              >
-                <option value="ALL">引擎：全部</option>
-                {galleryEngines.map((e) => <option key={e} value={e}>{e}</option>)}
-              </select>
+              <div className="relative shrink-0">
+                <select
+                  value={galleryEngine}
+                  onChange={(e) => setGalleryEngine(e.target.value)}
+                  className="appearance-none text-xs bg-white border border-gray-300 rounded-full pl-3.5 pr-8 py-1.5 outline-none cursor-pointer"
+                >
+                  <option value="ALL">引擎：全部</option>
+                  {galleryEngines.map((e) => <option key={e} value={e}>{e}</option>)}
+                </select>
+                <svg className="absolute right-3 top-1/2 -translate-y-1/2 h-3 w-3 text-gray-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </div>
             )}
             <button
               onClick={() => setGallerySort((s) => (s === "newest" ? "oldest" : "newest"))}

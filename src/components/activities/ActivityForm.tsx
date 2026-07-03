@@ -13,6 +13,8 @@ export type ActivityFormValues = {
   requiredText: string;
   imagePrompt: string;
   imageRatio: string;
+  customW: number;
+  customH: number;
   imageModel: string;
   productImageUrls: string[];
   referenceImageUrls: string[];
@@ -39,6 +41,13 @@ const RATIOS: { value: string; label: string; w: number; h: number }[] = [
   { value: "3:2",  label: "3:2",  w: 20, h: 13 },
   { value: "16:9", label: "16:9", w: 20, h: 11 },
 ];
+
+// 比例 → 實際輸出尺寸（同產品圖生成台一致）；W×H 可改，改時鎖住比例。
+const RATIO_DIMS: Record<string, { w: number; h: number }> = {
+  "1:1": { w: 1200, h: 1200 }, "4:5": { w: 1200, h: 1500 }, "3:4": { w: 1200, h: 1600 },
+  "2:3": { w: 1200, h: 1800 }, "9:16": { w: 1080, h: 1920 }, "4:3": { w: 1600, h: 1200 },
+  "3:2": { w: 1800, h: 1200 }, "16:9": { w: 1920, h: 1080 },
+};
 
 type Props = {
   clientId: string;
@@ -157,6 +166,8 @@ export function ActivityForm({
     requiredText:         initialValues?.requiredText         ?? "",
     imagePrompt:          initialValues?.imagePrompt          ?? "",
     imageRatio:           initialValues?.imageRatio           ?? "1:1",
+    customW:              initialValues?.customW || RATIO_DIMS[initialValues?.imageRatio ?? "1:1"]?.w || 1200,
+    customH:              initialValues?.customH || RATIO_DIMS[initialValues?.imageRatio ?? "1:1"]?.h || 1200,
     imageModel:           initialValues?.imageModel           ?? "google/gemini-3-pro-image-preview",
     productImageUrls:     initialValues?.productImageUrls     ?? [],
     referenceImageUrls:   initialValues?.referenceImageUrls   ?? [],
@@ -179,6 +190,14 @@ export function ActivityForm({
 
   const set = <K extends keyof ActivityFormValues>(k: K, v: ActivityFormValues[K]) =>
     setValues((prev) => ({ ...prev, [k]: v }));
+
+  // 揀比例 → 自動填 W×H；改 W×H → 鎖住當前比例算另一邊（活動圖模型只收已知比例，故 aspect 保持標準）。
+  const pickRatio = (r: string) => setValues((prev) => ({ ...prev, imageRatio: r, customW: RATIO_DIMS[r]?.w ?? prev.customW, customH: RATIO_DIMS[r]?.h ?? prev.customH }));
+  const changeDim = (which: "w" | "h", v: number) => setValues((prev) => {
+    const rd = RATIO_DIMS[prev.imageRatio];
+    if (which === "w") return { ...prev, customW: v, customH: rd ? Math.round(v * rd.h / rd.w) : prev.customH };
+    return { ...prev, customH: v, customW: rd ? Math.round(v * rd.w / rd.h) : prev.customW };
+  });
 
   const addImages = async (kind: "product" | "ref", files: FileList, max: number, current: string[]) => {
     const toUpload = Array.from(files).slice(0, max - current.length);
@@ -475,19 +494,28 @@ export function ActivityForm({
       {/* ── 03 圖片比例與生圖模型（原 04；因 03 風格組件已隱藏，順序補上）─────────── */}
       <div className="space-y-4">
         <SectionLabel step="03" title="圖片尺寸比例" />
-        <div className="relative w-48">
+        <div className="relative w-full max-w-md">
           <select
             value={values.imageRatio}
-            onChange={(e) => set("imageRatio", e.target.value)}
+            onChange={(e) => pickRatio(e.target.value)}
             className="w-full appearance-none border border-gray-200 rounded-lg px-3 py-2 pr-8 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-gray-300 cursor-pointer"
           >
             {RATIOS.map((r) => (
-              <option key={r.value} value={r.value}>{r.label}</option>
+              <option key={r.value} value={r.value}>{r.label}（{RATIO_DIMS[r.value]?.w}×{RATIO_DIMS[r.value]?.h}）</option>
             ))}
           </select>
           <svg className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
           </svg>
+        </div>
+        {/* 可改實際輸出尺寸（維持所選比例）；生成會按此尺寸輸出 */}
+        <div className="flex items-center gap-2">
+          <input type="number" min={256} max={2400} value={values.customW} onChange={(e) => changeDim("w", Number(e.target.value))}
+            className="w-24 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
+          <span className="text-xs text-gray-400">×</span>
+          <input type="number" min={256} max={2400} value={values.customH} onChange={(e) => changeDim("h", Number(e.target.value))}
+            className="w-24 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
+          <span className="text-[11px] text-gray-400">px · 改任一邊自動鎖 {values.imageRatio} 比例</span>
         </div>
 
         {/* 生圖模型 */}

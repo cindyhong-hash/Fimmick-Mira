@@ -206,7 +206,10 @@ export async function POST(request: Request) {
         "9:16":{ w: 576,  h: 1024 }, "4:3": { w: 1024, h: 768  },
         "3:2": { w: 1024, h: 683  }, "16:9":{ w: 1024, h: 576  },
       };
-      const size = SIZE_MAP[ratio] ?? { w: 1024, h: 1024 };
+      // 使用者設定咗輸出尺寸就用佢（同產品圖一致）；否則用比例預設。
+      const size = (activity.customW > 0 && activity.customH > 0)
+        ? { w: activity.customW, h: activity.customH }
+        : (SIZE_MAP[ratio] ?? { w: 1024, h: 1024 });
 
       // 使用者選擇的生圖模型：fal-ai/* 走 Fal，其餘（gemini/gpt）走 OpenRouter
       const imageModel  = activity.imageModel || "google/gemini-3-pro-image-preview";
@@ -334,6 +337,21 @@ export async function POST(request: Request) {
       }
 
       console.log(`[generate] ✅ Image done: ${imageUrl.slice(0, 55)}`);
+
+      // ── 3.4 輸出尺寸：使用者設定咗就把成圖 resize 到該尺寸（比例已鎖＝純縮放）。
+      //     包 try/catch：任何失敗都保留原圖，絕不阻斷生成。
+      if (activity.customW > 0 && activity.customH > 0 && imageUrl.startsWith("/uploads/") && !imageUrl.includes("picsum")) {
+        try {
+          const sharp = (await import("sharp")).default;
+          const { join } = await import("path");
+          const { writeFile } = await import("fs/promises");
+          const fp = join(process.cwd(), "public", imageUrl.split("?")[0]);
+          const resized = await sharp(fp).resize(size.w, size.h, { fit: "cover" }).toBuffer();
+          await writeFile(fp, resized);
+        } catch (e) {
+          console.warn("[generate] 輸出尺寸 resize 失敗，保留原圖:", e);
+        }
+      }
 
       // ── 3.5 品牌 Logo 合成（像素級精準，疊在右下角）────────────────────────
       if (client.logoUrl && !imageUrl.includes("picsum")) {

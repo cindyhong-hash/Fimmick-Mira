@@ -196,12 +196,6 @@ export function ImageDetailModal({
                     <RefreshCw className="h-3.5 w-3.5" />重新生成
                   </button>
                 )}
-                {onUseAsActivityRef && imageUrl && (
-                  <button onClick={() => onUseAsActivityRef(imageUrl)} title="帶入作活動圖參考（去新增活動）"
-                    className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border whitespace-nowrap bg-white border-gray-200 text-gray-600 hover:border-blue-300 hover:text-blue-600 transition-colors">
-                    <Target className="h-3.5 w-3.5" />活動參考
-                  </button>
-                )}
                 {imageUrl && (
                   <button onClick={handleDownload} title="下載圖片"
                     className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border whitespace-nowrap bg-white border-gray-200 text-gray-600 hover:border-teal-300 hover:text-teal-600 transition-colors">
@@ -266,7 +260,13 @@ export function ImageDetailModal({
               <button onClick={() => onInject(bgComp)} disabled={injectedIds?.has(bgComp.id)}
                 className={`mt-3 w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl border transition-colors
                   ${injectedIds?.has(bgComp.id) ? "bg-gray-100 border-gray-200 text-gray-400 cursor-default" : "bg-teal-600 border-teal-600 text-white hover:bg-teal-700"}`}>
-                <ArrowRightCircle className="h-3.5 w-3.5" />{injectedIds?.has(bgComp.id) ? "已帶入生成圖片（作背景）" : "帶入生成圖片（作背景）"}
+                <ArrowRightCircle className="h-3.5 w-3.5" />{injectedIds?.has(bgComp.id) ? "已帶入產品圖生成（作背景）" : "帶入產品圖生成（作背景）"}
+              </button>
+            )}
+            {onUseAsActivityRef && imageUrl && (
+              <button onClick={() => onUseAsActivityRef(imageUrl)}
+                className="mt-3 w-full flex items-center justify-center gap-1.5 text-sm font-medium bg-blue-600 text-white px-3 py-2.5 rounded-xl hover:bg-blue-700 transition-colors">
+                <Target className="h-4 w-4" />帶入活動圖生成
               </button>
             )}
           </div>
@@ -294,12 +294,6 @@ export function ImageDetailModal({
                   title="重新生成 / 調整（帶入素材生成）"
                   className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap bg-violet-600 text-white hover:bg-violet-700 transition-colors">
                   <RefreshCw className="h-3.5 w-3.5" />重新生成
-                </button>
-              )}
-              {onUseAsActivityRef && imageUrl && (
-                <button onClick={() => onUseAsActivityRef(imageUrl)} title="帶入作活動圖參考（去新增活動）"
-                  className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border whitespace-nowrap bg-white border-gray-200 text-gray-600 hover:border-blue-300 hover:text-blue-600 transition-colors">
-                  <Target className="h-3.5 w-3.5" />活動參考
                 </button>
               )}
               {imageUrl && (
@@ -349,6 +343,12 @@ export function ImageDetailModal({
                 )}
               </div>
             )}
+            {onUseAsActivityRef && imageUrl && (
+              <button onClick={() => onUseAsActivityRef(imageUrl)}
+                className="mt-3 w-full flex items-center justify-center gap-1.5 text-sm font-medium bg-blue-600 text-white px-3 py-2.5 rounded-xl hover:bg-blue-700 transition-colors">
+                <Target className="h-4 w-4" />帶入活動圖生成
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -386,12 +386,6 @@ export function ImageDetailModal({
               </button>
             )}
             {/* Download the image */}
-            {onUseAsActivityRef && imageUrl && (
-              <button onClick={() => onUseAsActivityRef(imageUrl)} title="帶入作活動圖參考（去新增活動）"
-                className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border whitespace-nowrap bg-white border-gray-200 text-gray-600 hover:border-blue-300 hover:text-blue-600 transition-colors">
-                <Target className="h-3.5 w-3.5" />活動參考
-              </button>
-            )}
             {imageUrl && (
               <button onClick={handleDownload} title="下載圖片"
                 className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border whitespace-nowrap bg-white border-gray-200 text-gray-600 hover:border-violet-300 hover:text-violet-600 transition-colors">
@@ -509,6 +503,14 @@ export function ImageDetailModal({
               </>
             )}
           </div>
+          {onUseAsActivityRef && imageUrl && (
+            <div className="md:col-span-2">
+              <button onClick={() => onUseAsActivityRef(imageUrl)}
+                className="w-full flex items-center justify-center gap-1.5 text-sm font-medium bg-blue-600 text-white px-3 py-2.5 rounded-xl hover:bg-blue-700 transition-colors">
+                <Target className="h-4 w-4" />帶入活動圖生成
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -569,7 +571,7 @@ function ComponentRow({
               : "bg-white border-gray-200 text-gray-700 hover:border-gray-400"}`}
         >
           <ArrowRightCircle className="h-3 w-3" />
-          {injected ? "已帶入" : "帶入生成"}
+          {injected ? "已帶入" : "帶入產品圖生成"}
         </button>
         {onDelete && (
           <button

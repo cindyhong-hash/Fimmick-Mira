@@ -454,7 +454,7 @@ export function GenerateAssetModal({ clientId, onClose, onSaved, init, lockedTyp
               <span className="text-xs text-gray-400">×</span>
               <input type="number" min={256} max={2400} value={customH} onChange={(e) => changeDim("h", Number(e.target.value))}
                 className="w-24 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400" />
-              <span className="text-[10px] text-gray-400">px · {ratio === "custom" ? "自由尺寸（256–2400）" : `改任一邊自動鎖 ${ratio} 比例`}</span>
+              <span className="text-[11px] text-gray-400">px · {ratio === "custom" ? "自由尺寸（256–2400）" : `改任一邊自動鎖 ${ratio} 比例`}</span>
             </div>
           </div>
 

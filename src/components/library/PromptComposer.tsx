@@ -574,7 +574,7 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
 
           {/* 文字模式提示：人像 / 插畫 已移至「素材生成」 */}
           {inputMode === "text" && (
-            <p className="text-[10px] text-gray-400 leading-snug pt-0.5">
+            <p className="text-[11px] text-gray-400 leading-snug pt-0.5">
               產品文字 + 積木 → 生成場景圖（FLUX）。需要「真人 / 2D 插畫 / 純背景」請用右上「素材生成」。
             </p>
           )}
@@ -620,7 +620,7 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
                 </button>
               </div>
             )}
-            <p className="text-[10px] text-gray-400 leading-snug mt-1.5">
+            <p className="text-[11px] text-gray-400 leading-snug mt-1.5">
               可加最多 3 件產品，AI 會自動去背、打光並擺入所選背景（無需事先去背）。多件產品會一齊合成入同一場景。
             </p>
           </div>
@@ -659,7 +659,7 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
                           className="w-24 border border-gray-200 rounded-lg px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-rose-400 shrink-0" />
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-medium text-gray-700 leading-none">{r.label}</div>
-                          <div className="text-[10px] text-gray-400 leading-none mt-0.5 truncate">{hint}</div>
+                          <div className="text-[11px] text-gray-400 leading-none mt-0.5 truncate">{hint}</div>
                         </div>
                       </div>
                     );
@@ -687,7 +687,7 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
                   直接用背景圖
                 </button>
               </div>
-              <p className="text-[10px] text-gray-400 leading-snug">
+              <p className="text-[11px] text-gray-400 leading-snug">
                 {bgAsImage ? "合成時把產品擺入呢張背景圖。" : "把背景嘅描述拉入下面「設計描述」，AI 依文字生成場景（可再改／潤色）；唔會直接用張圖。"}
               </p>
             </div>
@@ -795,7 +795,7 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
                 </button>
               ))}
             </div>
-            <p className="text-[10px] text-gray-400 leading-snug">
+            <p className="text-[11px] text-gray-400 leading-snug">
               主力 FLUX.2 edit 中文字保真最好（已自動餵高清原圖）。三者皆支援多產品；不加背景圖、由 AI 生成場景會更自然。
             </p>
 
@@ -829,7 +829,7 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
                         window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
                       }}>
                       {!slots.background?.data?.imageUrl && (
-                        <div className="absolute inset-0 flex items-center justify-center text-[10px] text-gray-400 text-center px-2">未揀背景<br/>生成時自動鎖共用 AI 背景</div>
+                        <div className="absolute inset-0 flex items-center justify-center text-[11px] text-gray-400 text-center px-2">未揀背景<br/>生成時自動鎖共用 AI 背景</div>
                       )}
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={productUrls[0]} alt="placement" draggable={false}
@@ -878,7 +878,7 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
             <span className="text-xs text-gray-400">×</span>
             <input type="number" min={256} max={2400} value={customH} onChange={(e) => changeDim("h", Number(e.target.value))}
               className="w-24 border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400" />
-            <span className="text-[10px] text-gray-400">px · {ratio === "custom" ? "自由尺寸（256–2400）" : `改任一邊自動鎖 ${ratio} 比例`}</span>
+            <span className="text-[11px] text-gray-400">px · {ratio === "custom" ? "自由尺寸（256–2400）" : `改任一邊自動鎖 ${ratio} 比例`}</span>
           </div>
         </div>
 
@@ -894,7 +894,7 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
                 </button>
               ))}
             </div>
-            {count > 1 && <span className="text-[10px] text-gray-400">出 {count} 張揀（成本 ×{count}）</span>}
+            {count > 1 && <span className="text-[11px] text-gray-400">出 {count} 張揀（成本 ×{count}）</span>}
           </div>
         )}
 

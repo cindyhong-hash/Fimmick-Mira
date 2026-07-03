@@ -130,7 +130,7 @@ function UploadZone({
         </label>
       )}
       {urls.length >= max && (
-        <div className="text-[10px] text-gray-400 text-center">已上傳 {max}/{max} 張</div>
+        <div className="text-[11px] text-gray-400 text-center">已上傳 {max}/{max} 張</div>
       )}
     </div>
   );
@@ -140,7 +140,7 @@ function ColLabel({ title, sub }: { title: string; sub: string }) {
   return (
     <div>
       <span className="text-xs font-medium text-gray-600">{title}</span>
-      {sub && <span className="text-[10px] text-gray-400 ml-1">{sub}</span>}
+      {sub && <span className="text-[11px] text-gray-400 ml-1">{sub}</span>}
     </div>
   );
 }

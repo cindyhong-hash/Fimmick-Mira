@@ -11,6 +11,9 @@
 
 import { useState, useRef, useEffect } from "react";
 import { X, Wand2, Loader2, Check, Save, ImageIcon, UserRound, Palette, Link2, Sparkles, Upload, RefreshCw } from "lucide-react";
+import { useRotatingHint } from "@/hooks/useRotatingHint";
+
+const GEN_HINTS = ["正在生成 AI 素材…", "分析色調 / 光影…", "描繪細節中…", "快好喇，請稍候…"];
 
 type GeneratedItem = { imageUrl: string; selected: boolean };
 type AssetType = "background" | "person" | "illustration";
@@ -70,6 +73,7 @@ export function GenerateAssetModal({ clientId, onClose, onSaved, init, lockedTyp
   const [engine, setEngine] = useState<"flux" | "nano">(init?.engine ?? "flux");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [generating, setGenerating] = useState(false);
+  const genHint = useRotatingHint(generating, GEN_HINTS);
   const [polishing, setPolishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<GeneratedItem[]>([]);
@@ -472,7 +476,7 @@ export function GenerateAssetModal({ clientId, onClose, onSaved, init, lockedTyp
             disabled={!description.trim() || generating}
             className="w-full flex items-center justify-center gap-2 py-2.5 bg-violet-600 text-white text-sm font-medium rounded-xl hover:bg-violet-700 disabled:opacity-40 transition-colors">
             {generating
-              ? <><Loader2 className="h-4 w-4 animate-spin" />生成中…（每張約 10–40 秒）</>
+              ? <><Loader2 className="h-4 w-4 animate-spin" />{genHint}（每張約 10–40 秒）</>
               : <><Wand2 className="h-4 w-4" />生成 {count} 張{meta.label}</>}
           </button>
 

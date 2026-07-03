@@ -13,6 +13,9 @@ import { useState, useRef, useEffect } from "react";
 import { X, Upload, Sparkles, Loader2, Plus, Trash2, Check } from "lucide-react";
 import { CATEGORY_META, PALETTE_ROLES, getColors } from "@/types/library";
 import type { PaletteRole, StyleComponent, ComponentCategory } from "@/types/library";
+import { useRotatingHint } from "@/hooks/useRotatingHint";
+// AI 分析（生成素材積木）loading 輪播提示
+const ANALYZE_HINTS = ["AI 分析構圖中…", "抽取配色…", "解讀風格語氣…", "整理素材積木…", "快好喇…"];
 // INDUSTRY_PRESETS moved to PromptComposer (積木組合台)
 import { ColorCards } from "./ColorCards";
 
@@ -83,6 +86,7 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, prefil
 
   // ── AI ──
   const [analyzing, setAnalyzing] = useState(false);
+  const analyzeHint = useRotatingHint(analyzing, ANALYZE_HINTS);
   // Which single section is being (re)analyzed via its per-block AI button (null = none).
   const [sectionAnalyzing, setSectionAnalyzing] = useState<ComponentCategory | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -416,7 +420,7 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, prefil
                 <button onClick={handleAnalyze} disabled={analyzing}
                   className="absolute bottom-3 right-3 flex items-center gap-1.5 text-xs font-medium bg-violet-600 hover:bg-violet-700 text-white px-3 py-1.5 rounded-lg shadow transition-colors disabled:opacity-60">
                   {analyzing
-                    ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />AI 分析中…</>
+                    ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />{analyzeHint}</>
                     : <><Sparkles className="h-3.5 w-3.5" />AI 讀取圖片，填入欄位</>}
                 </button>
               </div>

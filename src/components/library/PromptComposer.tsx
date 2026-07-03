@@ -16,6 +16,10 @@ import { CATEGORY_META, getColors, PALETTE_ROLES, SHOW_SERIES_TEMPLATE } from "@
 import { ColorCards } from "./ColorCards";
 import { SlotPickerModal } from "./SlotPickerModal";
 import { INDUSTRY_PRESETS } from "@/types/presets";
+import { useRotatingHint } from "@/hooks/useRotatingHint";
+
+// 生成 loading 輪播提示（保留時間估計，額外報進度）
+const GEN_HINTS = ["正在生成 AI 圖片…", "分析構圖 / 配色…", "合成場景中…", "處理光影細節…", "快好喇，請稍候…"];
 
 type Prefill = { subject?: string; notes?: string; useFlags?: Record<string, boolean> };
 
@@ -248,6 +252,7 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
   const [engine, setEngine] = useState<"flux2edit" | "nano" | "seedream" | "qwen" | "paste">("flux2edit");
   const [describing, setDescribing] = useState(false);
   const composite = inputMode === "image" && productUrls.length > 0;
+  const genHint = useRotatingHint(generating, GEN_HINTS);
   // 五個引擎全部支援多產品，毋須單圖限制。
   const effEngine = engine;
 
@@ -872,7 +877,7 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
           className="w-full gap-2 bg-violet-600 hover:bg-violet-700 text-white disabled:opacity-40">
           {(() => {
             const series = composite && seriesMode && productUrls.length >= 2;
-            if (generating) return <><Loader2 className="h-4 w-4 animate-spin" />{series ? `生成系列中…（${productUrls.length} 張）` : composite ? `合成中…${count > 1 ? `（${count} 張）` : ""}` : "生成中…（約 10–40 秒）"}</>;
+            if (generating) { const suffix = series ? `（${productUrls.length} 張）` : composite && count > 1 ? `（${count} 張）` : "（約 10–40 秒）"; return <><Loader2 className="h-4 w-4 animate-spin" />{genHint}{suffix}</>; }
             return <><Sparkles className="h-4 w-4" />{series ? `生成系列 ${productUrls.length} 張` : composite ? (count > 1 ? `合成 ${count} 張俾你揀` : "合成產品圖到背景") : "用此 Prompt 生成新圖"}</>;
           })()}
         </Button>

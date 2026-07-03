@@ -1,11 +1,11 @@
 "use client";
 /**
  * LibraryImagePickerModal — 從素材庫（client gallery）揀一張圖做「活動圖參考圖」。
- * 列返該 client 所有素材，可按類型（產品成圖／背景／人像／插畫／參考圖）篩選；
- * 每格顯示類型標籤；搜尋涵蓋 標題 + AI Prompt 文字。點一張即回傳 imageUrl。
+ * Tag / filter banner 樣式跟返素材庫 gallery（ComponentGrid FILTER_META）：solid 色 icon pill + icon filter。
+ * 搜尋涵蓋 標題 + AI Prompt 文字。點一張即回傳 imageUrl。
  */
 import { useEffect, useMemo, useState } from "react";
-import { X, Search } from "lucide-react";
+import { X, Search, LayoutGrid, Package, Image as ImageIcon, UserRound, Palette, Paperclip, type LucideIcon } from "lucide-react";
 
 type GalleryItem = {
   kind: "generated" | "uploaded" | "material";
@@ -18,13 +18,16 @@ type GalleryItem = {
 };
 
 type TypeKey = "product" | "background" | "person" | "illustration" | "reference";
-const TYPE_META: Record<TypeKey, { label: string; cls: string }> = {
-  product:      { label: "產品成圖", cls: "bg-violet-50 text-violet-700 border-violet-200" },
-  background:   { label: "背景",     cls: "bg-teal-50 text-teal-700 border-teal-200" },
-  person:       { label: "人像",     cls: "bg-rose-50 text-rose-700 border-rose-200" },
-  illustration: { label: "插畫",     cls: "bg-amber-50 text-amber-700 border-amber-200" },
-  reference:    { label: "參考圖",   cls: "bg-blue-50 text-blue-700 border-blue-200" },
+
+// 同 ComponentGrid FILTER_META 一致：lucide icon + 每類 solid 底色（tag 用 cls，filter 選中用 activeCls）。
+const META: Record<TypeKey, { label: string; Icon: LucideIcon; cls: string; activeCls: string }> = {
+  product:      { label: "產品成圖", Icon: Package,    cls: "bg-violet-600", activeCls: "bg-violet-600 text-white border-violet-600" },
+  background:   { label: "背景",     Icon: ImageIcon,  cls: "bg-teal-600",   activeCls: "bg-teal-600 text-white border-teal-600" },
+  person:       { label: "人像",     Icon: UserRound,  cls: "bg-rose-500",   activeCls: "bg-rose-500 text-white border-rose-500" },
+  illustration: { label: "插畫",     Icon: Palette,    cls: "bg-amber-500",  activeCls: "bg-amber-500 text-white border-amber-500" },
+  reference:    { label: "參考圖",   Icon: Paperclip,  cls: "bg-blue-500",   activeCls: "bg-blue-500 text-white border-blue-500" },
 };
+const ALL_META = { label: "全部", Icon: LayoutGrid, activeCls: "bg-violet-600 text-white border-violet-600" };
 
 function itemType(it: GalleryItem): TypeKey {
   if (it.kind === "material") return "background";
@@ -73,14 +76,7 @@ export function LibraryImagePickerModal({
     return hay.includes(q.toLowerCase());
   });
 
-  const filterPills: { k: TypeKey | "ALL"; label: string }[] = [
-    { k: "ALL", label: "全部" },
-    { k: "product", label: "產品成圖" },
-    { k: "background", label: "背景" },
-    { k: "person", label: "人像" },
-    { k: "illustration", label: "插畫" },
-    { k: "reference", label: "參考圖" },
-  ];
+  const pills: (TypeKey | "ALL")[] = ["ALL", "reference", "background", "person", "illustration", "product"];
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
@@ -90,19 +86,25 @@ export function LibraryImagePickerModal({
           <h2 className="text-sm font-semibold">從素材庫揀參考圖</h2>
           <button type="button" onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100"><X className="h-4 w-4" /></button>
         </div>
-        <div className="px-4 pt-2.5 pb-2 border-b shrink-0 space-y-2">
+        <div className="px-4 pt-2.5 pb-2 border-b bg-gray-50/60 shrink-0 space-y-2">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋標題 / AI Prompt…"
-              className="w-full border border-gray-200 rounded-lg pl-9 pr-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-violet-300" />
+              className="w-full border border-gray-300 rounded-full pl-9 pr-3 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-violet-300" />
           </div>
           <div className="flex gap-1.5 flex-wrap">
-            {filterPills.map((f) => (
-              <button key={f.k} type="button" onClick={() => setTypeFilter(f.k)}
-                className={`text-xs px-3 py-1 rounded-full border transition-colors ${typeFilter === f.k ? "bg-violet-600 text-white border-violet-600" : "bg-white border-gray-200 text-gray-600 hover:border-violet-300"}`}>
-                {f.label}{f.k !== "ALL" && counts[f.k] ? ` ${counts[f.k]}` : ""}
-              </button>
-            ))}
+            {pills.map((k) => {
+              const m = k === "ALL" ? ALL_META : META[k];
+              const Icon = m.Icon;
+              const active = typeFilter === k;
+              const cnt = k === "ALL" ? withType.length : (counts[k] ?? 0);
+              return (
+                <button key={k} type="button" onClick={() => setTypeFilter(k)}
+                  className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border transition-colors ${active ? m.activeCls : "bg-white text-gray-500 border-gray-200 hover:border-gray-400"}`}>
+                  <Icon className="h-3 w-3" />{m.label} <span className="opacity-60">{cnt}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
         <div className="flex-1 overflow-y-auto p-4">
@@ -112,16 +114,21 @@ export function LibraryImagePickerModal({
             <div className="text-center text-gray-400 py-10 text-sm">冇符合嘅素材</div>
           ) : (
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
-              {filtered.map(({ it, t }) => (
-                <button type="button" key={it.imageUrl} onClick={() => onPick(it.imageUrl)} title={it.subject || it.name || ""}
-                  className="relative rounded-xl border border-gray-200 overflow-hidden hover:border-violet-400 hover:shadow-md transition-all">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={it.imageUrl} alt="" loading="lazy" decoding="async" className="w-full aspect-square object-contain bg-gray-50" />
-                  <span className={`absolute top-1.5 left-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full border ${TYPE_META[t].cls}`}>
-                    {TYPE_META[t].label}
-                  </span>
-                </button>
-              ))}
+              {filtered.map(({ it, t }) => {
+                const m = META[t];
+                const Icon = m.Icon;
+                return (
+                  <button type="button" key={it.imageUrl} onClick={() => onPick(it.imageUrl)} title={it.subject || it.name || ""}
+                    className="group relative rounded-xl border border-gray-200 overflow-hidden hover:border-violet-400 hover:shadow-md transition-all">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={it.imageUrl} alt="" loading="lazy" decoding="async" className="w-full aspect-square object-contain bg-gray-50" />
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors pointer-events-none" />
+                    <span className={`absolute top-2 left-2 flex items-center gap-1 text-[10px] font-semibold ${m.cls} text-white px-1.5 py-0.5 rounded-full shadow whitespace-nowrap pointer-events-none`}>
+                      <Icon className="h-2.5 w-2.5" />{m.label}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>

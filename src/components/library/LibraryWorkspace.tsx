@@ -8,6 +8,7 @@
  * clientId=null + unassigned=true → 未分組視圖（收 clientId 為 null 嘅素材）。
  */
 import { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle } from "react";
+import { useRouter } from "next/navigation";
 import { Check } from "lucide-react";
 import { ComponentGrid, type ComponentGridHandle } from "@/components/library/ComponentGrid";
 import { ProductComposeModal } from "@/components/library/ProductComposeModal";
@@ -27,6 +28,7 @@ export type LibraryWorkspaceHandle = { openQuickAdd: () => void; openAddPicker: 
 export const LibraryWorkspace = forwardRef<LibraryWorkspaceHandle, { clientId: string | null; unassigned?: boolean }>(
   function LibraryWorkspace({ clientId, unassigned = false }, ref) {
   const [clients, setClients] = useState<Client[]>([]);
+  const router = useRouter();
   const [slots, setSlots] = useState<PromptSlots>({ layout: null, color: null, tone: null, background: null });
   const [showCompose, setShowCompose] = useState(false); // 產品圖生成（PromptComposer modal）
   const [showQuickAdd, setShowQuickAdd] = useState(false);
@@ -77,6 +79,13 @@ export const LibraryWorkspace = forwardRef<LibraryWorkspaceHandle, { clientId: s
   const handleClearSlot = useCallback((key: keyof PromptSlots) => {
     setSlots((prev) => ({ ...prev, [key]: null }));
   }, []);
+
+  // 素材 popup →「帶入作活動圖參考」：URL 經 sessionStorage 傳（唔喺網址外露）→ 跳新增活動。
+  const handleUseAsActivityRef = useCallback((imageUrl: string) => {
+    try { sessionStorage.setItem("activityRefImage", imageUrl); } catch { /* ignore */ }
+    setDetail(null);
+    router.push(`/clients/${clientId}/activities/new`);
+  }, [clientId, router]);
 
   const handleOpenGenerateAsset = useCallback((init: GenerateAssetInit) => {
     setDetail(null);
@@ -219,6 +228,7 @@ export const LibraryWorkspace = forwardRef<LibraryWorkspaceHandle, { clientId: s
           refImageUrl={(() => { try { return JSON.parse(detail.regenerateParams || "{}").refImageUrl as string | undefined; } catch { return undefined; } })()}
           sourceImages={(() => { try { const p = JSON.parse(detail.regenerateParams || "{}"); const arr = (Array.isArray(p.productImageUrls) && p.productImageUrls.length ? p.productImageUrls : (p.productImageUrl ? [p.productImageUrl] : [])) as string[]; return arr.filter(Boolean); } catch { return []; } })()}
           onOpenGenerateAsset={handleOpenGenerateAsset}
+          onUseAsActivityRef={handleUseAsActivityRef}
           injectedIds={injectedIds}
           onInject={handleInject}
           onInjectAll={handleInjectAll}

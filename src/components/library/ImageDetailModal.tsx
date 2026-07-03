@@ -8,7 +8,7 @@
  * the generated copy and offers 「分析此圖加入素材」.
  */
 import { useEffect, useState } from "react";
-import { X, ArrowRightCircle, Sparkles, ScanSearch, Pencil, RefreshCw, Trash2, Download, Check, Loader2, Image as ImageIcon } from "lucide-react";
+import { X, ArrowRightCircle, Sparkles, ScanSearch, Pencil, RefreshCw, Trash2, Download, Check, Loader2, Image as ImageIcon, Target } from "lucide-react";
 import type { StyleComponent, ComponentCategory } from "@/types/library";
 import { CATEGORY_META, getColors } from "@/types/library";
 import { ColorCards } from "./ColorCards";
@@ -45,6 +45,8 @@ type Props = {
   onDeleteComponents?: (ids: string[]) => void;
   /** Called after the photo title is edited — lets the parent refresh its grids. */
   onRefresh?: () => void;
+  /** 帶入此圖去「新增活動」做參考圖（經 sessionStorage 傳 URL，唔會喺網址外露）。 */
+  onUseAsActivityRef?: (imageUrl: string) => void;
   onClose: () => void;
 };
 
@@ -99,6 +101,7 @@ export function ImageDetailModal({
   onDeleteComponents,
   onRefresh,
   onOpenGenerateAsset,
+  onUseAsActivityRef,
   onClose,
 }: Props) {
   const [confirmDel, setConfirmDel] = useState(false);
@@ -191,6 +194,12 @@ export function ImageDetailModal({
                     title="重新生成 / 調整（帶入素材生成）"
                     className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap bg-violet-600 text-white hover:bg-violet-700 transition-colors">
                     <RefreshCw className="h-3.5 w-3.5" />重新生成
+                  </button>
+                )}
+                {onUseAsActivityRef && imageUrl && (
+                  <button onClick={() => onUseAsActivityRef(imageUrl)} title="帶入作活動圖參考（去新增活動）"
+                    className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border whitespace-nowrap bg-white border-gray-200 text-gray-600 hover:border-blue-300 hover:text-blue-600 transition-colors">
+                    <Target className="h-3.5 w-3.5" />活動參考
                   </button>
                 )}
                 {imageUrl && (
@@ -287,6 +296,12 @@ export function ImageDetailModal({
                   <RefreshCw className="h-3.5 w-3.5" />重新生成
                 </button>
               )}
+              {onUseAsActivityRef && imageUrl && (
+                <button onClick={() => onUseAsActivityRef(imageUrl)} title="帶入作活動圖參考（去新增活動）"
+                  className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border whitespace-nowrap bg-white border-gray-200 text-gray-600 hover:border-blue-300 hover:text-blue-600 transition-colors">
+                  <Target className="h-3.5 w-3.5" />活動參考
+                </button>
+              )}
               {imageUrl && (
                 <button onClick={handleDownload} title="下載圖片"
                   className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border whitespace-nowrap bg-white border-gray-200 text-gray-600 hover:border-violet-300 hover:text-violet-600 transition-colors">
@@ -371,6 +386,12 @@ export function ImageDetailModal({
               </button>
             )}
             {/* Download the image */}
+            {onUseAsActivityRef && imageUrl && (
+              <button onClick={() => onUseAsActivityRef(imageUrl)} title="帶入作活動圖參考（去新增活動）"
+                className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border whitespace-nowrap bg-white border-gray-200 text-gray-600 hover:border-blue-300 hover:text-blue-600 transition-colors">
+                <Target className="h-3.5 w-3.5" />活動參考
+              </button>
+            )}
             {imageUrl && (
               <button onClick={handleDownload} title="下載圖片"
                 className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border whitespace-nowrap bg-white border-gray-200 text-gray-600 hover:border-violet-300 hover:text-violet-600 transition-colors">

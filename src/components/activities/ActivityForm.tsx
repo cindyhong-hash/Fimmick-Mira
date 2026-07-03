@@ -3,8 +3,9 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { X, Loader2, ImagePlus, Wand2, Sparkles, Pencil, Trash2 } from "lucide-react";
+import { X, Loader2, ImagePlus, Wand2, Sparkles, Pencil, Trash2, Images } from "lucide-react";
 import { ComponentSelector } from "@/components/activities/ComponentSelector";
+import { LibraryImagePickerModal } from "@/components/activities/LibraryImagePickerModal";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -165,6 +166,7 @@ export function ActivityForm({
   const [uploadingProduct, setUploadingProduct] = useState(false);
   const [uploadingRef,     setUploadingRef]     = useState(false);
   const [loading,          setLoading]          = useState(false);
+  const [showLibPicker,    setShowLibPicker]    = useState(false); // 從素材庫揀參考圖
 
   // AI 輔助狀態
   const [optimizingPrompt,  setOptimizingPrompt]  = useState(false);
@@ -422,6 +424,11 @@ export function ActivityForm({
               onRemove={(i) => removeImage("ref", i)}
               onAdd={(f) => addImages("ref", f, 1, values.referenceImageUrls)}
             />
+            {/* 除咗上傳，仲可以由素材庫揀一張現有圖做參考 */}
+            <button type="button" onClick={() => setShowLibPicker(true)}
+              className="w-full flex items-center justify-center gap-1 text-[11px] font-medium text-violet-600 border border-violet-200 rounded-lg py-1.5 hover:bg-violet-50 transition-colors">
+              <Images className="h-3 w-3" />從素材庫揀
+            </button>
           </div>
 
           {/* 欄 3：AI 反推提示詞 */}
@@ -512,6 +519,14 @@ export function ActivityForm({
           ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />處理中…</>
           : submitLabel}
       </Button>
+
+      {showLibPicker && (
+        <LibraryImagePickerModal
+          clientId={clientId}
+          onPick={(url) => { set("referenceImageUrls", [url]); setShowLibPicker(false); }}
+          onClose={() => setShowLibPicker(false)}
+        />
+      )}
     </form>
   );
 }

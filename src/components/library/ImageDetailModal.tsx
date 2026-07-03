@@ -264,13 +264,13 @@ export function ImageDetailModal({
                 <button onClick={() => onInject(bgComp)} disabled={injectedIds?.has(bgComp.id)}
                   className={`w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl border transition-colors
                     ${injectedIds?.has(bgComp.id) ? "bg-gray-100 border-gray-200 text-gray-400 cursor-default" : "bg-teal-600 border-teal-600 text-white hover:bg-teal-700"}`}>
-                  <ArrowRightCircle className="h-3.5 w-3.5" />{injectedIds?.has(bgComp.id) ? "已帶入產品圖（作背景）" : "帶入產品圖（作背景）"}
+                  <ArrowRightCircle className="h-3.5 w-3.5" />{injectedIds?.has(bgComp.id) ? "已帶入產品圖生成頁面（作背景積木）" : "帶入產品圖生成頁面（作背景積木）"}
                 </button>
               )}
               {onUseAsActivityRef && (
                 <button onClick={() => onUseAsActivityRef(imageUrl)}
                   className="w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors">
-                  <Target className="h-3.5 w-3.5" />帶入活動圖（作參考圖）
+                  <Target className="h-3.5 w-3.5" />帶入活動圖生成頁面（作參考圖）
                 </button>
               )}
             </div>
@@ -353,7 +353,7 @@ export function ImageDetailModal({
             <div className="px-5 py-3 border-t shrink-0">
               <button onClick={() => onUseAsActivityRef(imageUrl)}
                 className="w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors">
-                <Target className="h-3.5 w-3.5" />帶入活動圖（作參考圖）
+                <Target className="h-3.5 w-3.5" />帶入活動圖生成頁面（作參考圖）
               </button>
             </div>
           )}
@@ -515,7 +515,7 @@ export function ImageDetailModal({
           <div className="px-5 py-3 border-t shrink-0">
             <button onClick={() => onUseAsActivityRef(imageUrl)}
               className="w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors">
-              <Target className="h-3.5 w-3.5" />帶入活動圖（作參考圖）
+              <Target className="h-3.5 w-3.5" />帶入活動圖生成頁面（作參考圖）
             </button>
           </div>
         )}

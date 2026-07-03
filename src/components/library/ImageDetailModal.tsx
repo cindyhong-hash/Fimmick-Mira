@@ -225,11 +225,11 @@ export function ImageDetailModal({
               </button>
             )}
           </div>
-          <div className="p-5 overflow-y-auto">
+          <div className="p-5 overflow-y-auto flex-1 min-h-0">
             {loading ? (
               <div className="text-sm text-gray-400 py-10 text-center">載入中…</div>
             ) : imageUrl ? (
-              <ImageWithSize src={imageUrl} alt={bgComp?.name} className="w-full max-h-[65vh] object-contain rounded-xl border bg-gray-50" />
+              <ImageWithSize src={imageUrl} alt={bgComp?.name} className="w-full max-h-[60vh] object-contain rounded-xl border bg-gray-50" />
             ) : null}
             {!loading && prompt && (
               <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 p-3">
@@ -256,20 +256,25 @@ export function ImageDetailModal({
                 )}
               </div>
             )}
-            {!loading && bgComp && (
-              <button onClick={() => onInject(bgComp)} disabled={injectedIds?.has(bgComp.id)}
-                className={`mt-3 w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl border transition-colors
-                  ${injectedIds?.has(bgComp.id) ? "bg-gray-100 border-gray-200 text-gray-400 cursor-default" : "bg-teal-600 border-teal-600 text-white hover:bg-teal-700"}`}>
-                <ArrowRightCircle className="h-3.5 w-3.5" />{injectedIds?.has(bgComp.id) ? "已帶入產品圖生成（作背景）" : "帶入產品圖生成（作背景）"}
-              </button>
-            )}
-            {onUseAsActivityRef && imageUrl && (
-              <button onClick={() => onUseAsActivityRef(imageUrl)}
-                className="mt-3 w-full flex items-center justify-center gap-1.5 text-sm font-medium bg-blue-600 text-white px-3 py-2.5 rounded-xl hover:bg-blue-700 transition-colors">
-                <Target className="h-4 w-4" />帶入活動圖生成
-              </button>
-            )}
           </div>
+          {/* 固定 footer：帶入掣永遠可見（唔會被高圖 push 走）；兩條統一 outline 風格 */}
+          {!loading && imageUrl && (onUseAsActivityRef || bgComp) && (
+            <div className="px-5 py-3 border-t shrink-0 space-y-2">
+              {bgComp && (
+                <button onClick={() => onInject(bgComp)} disabled={injectedIds?.has(bgComp.id)}
+                  className={`w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl border transition-colors
+                    ${injectedIds?.has(bgComp.id) ? "bg-gray-100 border-gray-200 text-gray-400 cursor-default" : "bg-white border-teal-300 text-teal-700 hover:bg-teal-50"}`}>
+                  <ArrowRightCircle className="h-3.5 w-3.5" />{injectedIds?.has(bgComp.id) ? "已帶入產品圖生成（作背景）" : "帶入產品圖生成（作背景）"}
+                </button>
+              )}
+              {onUseAsActivityRef && (
+                <button onClick={() => onUseAsActivityRef(imageUrl)}
+                  className="w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl border border-blue-300 text-blue-700 bg-white hover:bg-blue-50 transition-colors">
+                  <Target className="h-3.5 w-3.5" />帶入活動圖生成
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -316,9 +321,9 @@ export function ImageDetailModal({
               </button>
             </div>
           </div>
-          <div className="p-5 overflow-y-auto">
+          <div className="p-5 overflow-y-auto flex-1 min-h-0">
             {imageUrl && (
-              <ImageWithSize src={imageUrl} alt="preview" className="w-full max-h-[64vh] object-contain rounded-xl border bg-gray-50" />
+              <ImageWithSize src={imageUrl} alt="preview" className="w-full max-h-[60vh] object-contain rounded-xl border bg-gray-50" />
             )}
             {prompt && (
               <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 p-3">
@@ -343,13 +348,15 @@ export function ImageDetailModal({
                 )}
               </div>
             )}
-            {onUseAsActivityRef && imageUrl && (
-              <button onClick={() => onUseAsActivityRef(imageUrl)}
-                className="mt-3 w-full flex items-center justify-center gap-1.5 text-sm font-medium bg-blue-600 text-white px-3 py-2.5 rounded-xl hover:bg-blue-700 transition-colors">
-                <Target className="h-4 w-4" />帶入活動圖生成
-              </button>
-            )}
           </div>
+          {onUseAsActivityRef && imageUrl && (
+            <div className="px-5 py-3 border-t shrink-0">
+              <button onClick={() => onUseAsActivityRef(imageUrl)}
+                className="w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl border border-blue-300 text-blue-700 bg-white hover:bg-blue-50 transition-colors">
+                <Target className="h-3.5 w-3.5" />帶入活動圖生成
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -412,7 +419,7 @@ export function ImageDetailModal({
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto p-5 grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div className="flex-1 min-h-0 overflow-y-auto p-5 grid grid-cols-1 md:grid-cols-2 gap-5">
           {/* Image */}
           <div>
             {imageUrl && (
@@ -503,15 +510,15 @@ export function ImageDetailModal({
               </>
             )}
           </div>
-          {onUseAsActivityRef && imageUrl && (
-            <div className="md:col-span-2">
-              <button onClick={() => onUseAsActivityRef(imageUrl)}
-                className="w-full flex items-center justify-center gap-1.5 text-sm font-medium bg-blue-600 text-white px-3 py-2.5 rounded-xl hover:bg-blue-700 transition-colors">
-                <Target className="h-4 w-4" />帶入活動圖生成
-              </button>
-            </div>
-          )}
         </div>
+        {onUseAsActivityRef && imageUrl && (
+          <div className="px-5 py-3 border-t shrink-0">
+            <button onClick={() => onUseAsActivityRef(imageUrl)}
+              className="w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl border border-blue-300 text-blue-700 bg-white hover:bg-blue-50 transition-colors">
+              <Target className="h-3.5 w-3.5" />帶入活動圖生成
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

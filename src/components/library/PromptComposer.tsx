@@ -53,12 +53,13 @@ function buildPaletteRows(comp: StyleComponent | null): PalRow[] {
 /** Build the Traditional-Chinese design brief (this is what the user edits; server translates → English).
  *  NOTE: 背景 is an image asset used only in 合成 mode, so it is intentionally NOT part of the text brief. */
 function buildChineseBrief(args: {
-  subject: string; layoutDesc: string; toneLabels: string[]; usedColors: PaletteColor[]; notes: string;
+  subject: string; layoutDesc: string; toneLabels: string[]; usedColors: PaletteColor[]; notes: string; backgroundDesc?: string;
 }): string {
   const lines: string[] = [];
   if (args.subject.trim()) lines.push(`主體：${args.subject.trim()}`);
   if (args.layoutDesc.trim()) lines.push(`構圖：${args.layoutDesc.trim()}`);
   if (args.usedColors.length) lines.push(`配色：${args.usedColors.map((c) => `${c.label} ${c.hex}`).join("、")}`);
+  if (args.backgroundDesc?.trim()) lines.push(`背景：${args.backgroundDesc.trim()}`);
   if (args.toneLabels.length) lines.push(`風格語氣：${args.toneLabels.join("、")}`);
   if (args.notes.trim()) lines.push(`其他要求：${args.notes.trim()}`);
   return lines.join("\n");
@@ -197,6 +198,7 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
   const [notes, setNotes] = useState("");
   const [copied, setCopied] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [bgAsImage, setBgAsImage] = useState(false); // 背景：false=作文字參考(預設) / true=直接用背景圖合成
   const [genError, setGenError] = useState<string | null>(null);
   const [pickerCategory, setPickerCategory] = useState<ComponentCategory | null>(null);
   // #3 多輸出（合成）：一次生 N 張 draft（唔即刻入庫）→ 揀邊張保留。
@@ -286,8 +288,10 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
   }, [prefillNonce]);
 
   const usedColors = enabledColors;
+  // 背景用法：預設「作文字參考」（把背景 AI Prompt 拉入設計描述、唔合成圖）；可切「直接用背景圖」合成。
+  const bgText = ((slots.background?.data?.description as string) || slots.background?.aiPromptText || slots.background?.name || "").trim();
   // The auto-built brief is Traditional Chinese; server translates it to English for FLUX.
-  const autoPrompt = buildChineseBrief({ subject, layoutDesc: effLayoutDesc, toneLabels: effToneLabels, usedColors, notes });
+  const autoPrompt = buildChineseBrief({ subject, layoutDesc: effLayoutDesc, toneLabels: effToneLabels, usedColors, notes, backgroundDesc: !bgAsImage ? bgText : "" });
   // Read-only preview: the brief is fully derived from the fields above (no manual edit here).
   const compiledPrompt = autoPrompt;
   // 潤色後用擴寫版（可編輯）做最終 brief；否則用自動產生嘅。呢個 brief 會存入結果嘅 AI Prompt。
@@ -325,7 +329,8 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
   function buildSceneBrief(): string {
     const lines: string[] = [];
     if (effLayoutDesc.trim()) lines.push(`構圖：${effLayoutDesc.trim()}`);
-    if (slots.background?.name) lines.push(`背景：${slots.background.name}`);
+    // 文字參考模式：用背景嘅完整 AI Prompt 描述場景；直接用圖模式：只放名做提示（圖會合成）。
+    if (bgText) lines.push(`背景：${bgAsImage ? (slots.background?.name ?? bgText) : bgText}`);
     if (usedColors.length) lines.push(`配色：${usedColors.map((c) => `${c.label} ${c.hex}`).join("、")}`);
     if (effToneLabels.length) lines.push(`風格語氣：${effToneLabels.join("、")}`);
     if (notes.trim()) lines.push(`其他要求：${notes.trim()}`);
@@ -334,7 +339,8 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
   // 潤色來源：合成→場景 brief；文字→完整 brief（補上背景名，令潤色會讀背景文字）。
   function buildPolishSource(): string {
     if (composite) return buildSceneBrief();
-    return slots.background?.name ? `${effectiveBrief}\n背景：${slots.background.name}` : effectiveBrief;
+    // 文字模式：背景文字已由 buildChineseBrief 併入 effectiveBrief（作文字參考時），毋須再補。
+    return effectiveBrief;
   }
 
   // #2 潤色寫手：擴寫目前 brief → 可編輯覆寫。
@@ -416,7 +422,7 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
   // Build effective slots reflecting the inline edits (so copy/tone uses the latest values).
   const buildEffectiveSlots = (): PromptSlots => ({
     layout: slots.layout ? { ...slots.layout, data: { ...slots.layout.data, description: effLayoutDesc } } : null,
-    background: slots.background, // image-only asset, used as-is in 合成 mode
+    background: bgAsImage ? slots.background : null, // 直接用背景圖→送圖合成；作文字參考→唔送圖（由 brief 文字生成場景）
     color: slots.color ? { ...slots.color, data: { ...slots.color.data, colors: enabledColors } } : null,
     tone: slots.tone ? { ...slots.tone, data: { ...slots.tone.data, toneLabels: effToneLabels } } : null,
   });
@@ -668,6 +674,24 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
           <SlotCard category="BACKGROUND" icon={<ImageIcon className="h-4 w-4" />} labelOverride="背景"
             emptyLabel="點擊選擇背景"
             component={slots.background} onClear={() => onClearSlot("background")} onPick={() => setPickerCategory("BACKGROUND")} />
+          {/* 背景用法：作文字參考（預設，拉背景描述入設計描述、AI 生成場景）／ 直接用背景圖（合成落張圖）*/}
+          {slots.background && (
+            <div className="space-y-1">
+              <div className="flex gap-1.5">
+                <button type="button" onClick={() => setBgAsImage(false)}
+                  className={`flex-1 text-[11px] px-2 py-1.5 rounded-lg border transition-colors ${!bgAsImage ? "bg-violet-600 text-white border-violet-600" : "bg-white border-gray-200 text-gray-600 hover:border-violet-300"}`}>
+                  作文字參考（預設）
+                </button>
+                <button type="button" onClick={() => setBgAsImage(true)}
+                  className={`flex-1 text-[11px] px-2 py-1.5 rounded-lg border transition-colors ${bgAsImage ? "bg-violet-600 text-white border-violet-600" : "bg-white border-gray-200 text-gray-600 hover:border-violet-300"}`}>
+                  直接用背景圖
+                </button>
+              </div>
+              <p className="text-[10px] text-gray-400 leading-snug">
+                {bgAsImage ? "合成時把產品擺入呢張背景圖。" : "把背景嘅描述拉入下面「設計描述」，AI 依文字生成場景（可再改／潤色）；唔會直接用張圖。"}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* ── 03 設計描述 ── */}
@@ -741,9 +765,11 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
               )}
               {slots.background && (slots.background.data?.imageUrl || slots.background.previewUrl) && (
                 <div className="text-[11px] text-violet-700 flex items-center gap-1.5">
-                  <ImageIcon className="h-3 w-3 shrink-0" />{productUrls.length >= 3
-                    ? `背景：3 件產品時，背景「${slots.background!.name}」只作文字參考（不直接合成）`
-                    : `背景：合成時將產品擺入背景「${slots.background!.name}」`}
+                  <ImageIcon className="h-3 w-3 shrink-0" />{!bgAsImage
+                    ? `背景「${slots.background!.name}」作文字參考（AI 依描述生成場景，不直接用圖）`
+                    : productUrls.length >= 3
+                      ? `背景：3 件產品時，背景「${slots.background!.name}」只作文字參考（不直接合成）`
+                      : `背景：合成時將產品擺入背景「${slots.background!.name}」`}
                 </div>
               )}
             </div>

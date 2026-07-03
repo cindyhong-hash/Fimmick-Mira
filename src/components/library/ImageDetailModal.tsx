@@ -193,7 +193,7 @@ export function ImageDetailModal({
                   <button onClick={() => onOpenGenerateAsset({ description: prompt ?? "", refImageUrl: effectiveRefImageUrl ?? "", type: "background", engine: derivedEngine })}
                     title="重新生成 / 調整（帶入素材生成）"
                     className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap bg-violet-600 text-white hover:bg-violet-700 transition-colors">
-                    <RefreshCw className="h-3.5 w-3.5" />重新生成
+                    <RefreshCw className="h-3.5 w-3.5" />重新生成背景
                   </button>
                 )}
                 {imageUrl && (
@@ -263,13 +263,13 @@ export function ImageDetailModal({
               {bgComp && (
                 <button onClick={() => onInject(bgComp)} disabled={injectedIds?.has(bgComp.id)}
                   className={`w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl border transition-colors
-                    ${injectedIds?.has(bgComp.id) ? "bg-gray-100 border-gray-200 text-gray-400 cursor-default" : "bg-white border-teal-300 text-teal-700 hover:bg-teal-50"}`}>
+                    ${injectedIds?.has(bgComp.id) ? "bg-gray-100 border-gray-200 text-gray-400 cursor-default" : "bg-teal-600 border-teal-600 text-white hover:bg-teal-700"}`}>
                   <ArrowRightCircle className="h-3.5 w-3.5" />{injectedIds?.has(bgComp.id) ? "已帶入產品圖生成（作背景）" : "帶入產品圖生成（作背景）"}
                 </button>
               )}
               {onUseAsActivityRef && (
                 <button onClick={() => onUseAsActivityRef(imageUrl)}
-                  className="w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl border border-blue-300 text-blue-700 bg-white hover:bg-blue-50 transition-colors">
+                  className="w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors">
                   <Target className="h-3.5 w-3.5" />帶入活動圖生成
                 </button>
               )}
@@ -298,7 +298,7 @@ export function ImageDetailModal({
                 <button onClick={() => onOpenGenerateAsset({ description: prompt ?? "", refImageUrl: effectiveRefImageUrl ?? "", type: genType as "person" | "illustration", engine: derivedEngine })}
                   title="重新生成 / 調整（帶入素材生成）"
                   className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap bg-violet-600 text-white hover:bg-violet-700 transition-colors">
-                  <RefreshCw className="h-3.5 w-3.5" />重新生成
+                  <RefreshCw className="h-3.5 w-3.5" />重新生成{genType === "person" ? "人像" : "插畫"}
                 </button>
               )}
               {imageUrl && (
@@ -352,7 +352,7 @@ export function ImageDetailModal({
           {onUseAsActivityRef && imageUrl && (
             <div className="px-5 py-3 border-t shrink-0">
               <button onClick={() => onUseAsActivityRef(imageUrl)}
-                className="w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl border border-blue-300 text-blue-700 bg-white hover:bg-blue-50 transition-colors">
+                className="w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors">
                 <Target className="h-3.5 w-3.5" />帶入活動圖生成
               </button>
             </div>
@@ -382,7 +382,7 @@ export function ImageDetailModal({
                 onClick={onRegenerate ?? (() => onInjectAll?.([...sorted, ...(bgComp ? [bgComp] : [])]))}
                 title="重新生成（用呢張圖嘅原參數 / 積木帶去生成台）"
                 className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap bg-violet-600 text-white hover:bg-violet-700 transition-colors">
-                <RefreshCw className="h-3.5 w-3.5" />重新生成
+                <RefreshCw className="h-3.5 w-3.5" />重新生成{genType === "reference" || !libraryImageId ? "參考圖" : "產品圖"}
               </button>
             )}
             {/* Image-based adjust — edit this image's 構圖/配色/語氣 together（內含「專案」下拉可換資料夾）*/}
@@ -514,7 +514,7 @@ export function ImageDetailModal({
         {onUseAsActivityRef && imageUrl && (
           <div className="px-5 py-3 border-t shrink-0">
             <button onClick={() => onUseAsActivityRef(imageUrl)}
-              className="w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl border border-blue-300 text-blue-700 bg-white hover:bg-blue-50 transition-colors">
+              className="w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors">
               <Target className="h-3.5 w-3.5" />帶入活動圖生成
             </button>
           </div>

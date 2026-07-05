@@ -89,18 +89,18 @@ export function Sidebar() {
                 pathname.startsWith(`/clients/${client.id}`) ? "bg-gray-200 font-medium" : ""
               }`}
             >
-              <FolderOpen className="h-4 w-4 text-gray-500 shrink-0" />
-              <span className="truncate flex-1">{client.name}</span>
-              {/* 釘選：已釘→紫色常顯；未釘→hover 先顯（可撳釘上頂）*/}
+              {/* 釘選：擺最左（遠離右邊刪除掣，避免撳錯）；已釘→紫色常顯，未釘→hover 淡入。slot 常留位免跳動。 */}
               <button
                 onClick={(e) => togglePin(e, client.id)}
                 title={isPinned ? "取消釘選" : "釘選置頂"}
-                className={`items-center justify-center w-5 h-5 rounded hover:bg-violet-100 transition-colors ${
-                  isPinned ? "flex text-violet-600" : "hidden group-hover:flex text-gray-400 hover:text-violet-600"
+                className={`shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-violet-100 transition-all ${
+                  isPinned ? "text-violet-600" : "text-gray-400 opacity-0 group-hover:opacity-100 hover:text-violet-600"
                 }`}
               >
-                <Pin className={`h-3 w-3 ${isPinned ? "fill-violet-600" : ""}`} />
+                <Pin className={`h-3.5 w-3.5 ${isPinned ? "fill-violet-600" : ""}`} />
               </button>
+              <FolderOpen className="h-4 w-4 text-gray-500 shrink-0" />
+              <span className="truncate flex-1">{client.name}</span>
               <button
                 onClick={(e) => handleDelete(e, client.id, client.name)}
                 disabled={deletingId === client.id}

@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
-import { FolderOpen, Plus, Trash2, Layers } from "lucide-react";
+import { FolderOpen, Plus, Trash2, Layers, Pin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type Client = { id: string; name: string; _count: { activities: number } };
@@ -19,6 +19,28 @@ export function Sidebar() {
   const router = useRouter();
   const [clients, setClients] = useState<Client[]>([]);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // 釘選品牌（localStorage）：{ brandId: 釘選時間戳 }。釘咗永遠置頂，最新釘嘅最上。
+  const [pinned, setPinned] = useState<Record<string, number>>({});
+  useEffect(() => {
+    try { setPinned(JSON.parse(localStorage.getItem("pinnedBrands") || "{}")); } catch { /* ignore */ }
+  }, []);
+  const togglePin = (e: React.MouseEvent, id: string) => {
+    e.preventDefault(); e.stopPropagation();
+    setPinned((prev) => {
+      const next = { ...prev };
+      if (next[id]) delete next[id]; else next[id] = Date.now();
+      try { localStorage.setItem("pinnedBrands", JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  };
+  // 釘選（依釘選時間新→舊）置頂，其餘保持原有次序。
+  const sortedClients = [...clients].sort((a, b) => {
+    const pa = pinned[a.id], pb = pinned[b.id];
+    if (pa && pb) return pb - pa;
+    if (pa) return -1;
+    if (pb) return 1;
+    return 0;
+  });
 
   const loadClients = () => {
     fetch("/api/clients")
@@ -58,28 +80,38 @@ export function Sidebar() {
         <div className="px-2 text-xs text-gray-400">尚無客戶，點 + 新增</div>
       )}
 
-      {clients.map((client) => (
-        <Link key={client.id} href={`/clients/${client.id}`} className="block group">
-          <div
-            className={`flex items-center gap-2 px-2 py-2 rounded-md text-sm cursor-pointer hover:bg-gray-100 ${
-              pathname.startsWith(`/clients/${client.id}`) ? "bg-gray-200 font-medium" : ""
-            }`}
-          >
-            <FolderOpen className="h-4 w-4 text-gray-500 shrink-0" />
-            <span className="truncate flex-1">{client.name}</span>
-            <span className="text-xs text-gray-400 group-hover:hidden">
-              {client._count.activities}
-            </span>
-            <button
-              onClick={(e) => handleDelete(e, client.id, client.name)}
-              disabled={deletingId === client.id}
-              className="hidden group-hover:flex items-center justify-center w-5 h-5 rounded hover:bg-red-100 text-gray-400 hover:text-red-500 transition-colors"
+      {sortedClients.map((client) => {
+        const isPinned = !!pinned[client.id];
+        return (
+          <Link key={client.id} href={`/clients/${client.id}`} className="block group">
+            <div
+              className={`flex items-center gap-2 px-2 py-2 rounded-md text-sm cursor-pointer hover:bg-gray-100 ${
+                pathname.startsWith(`/clients/${client.id}`) ? "bg-gray-200 font-medium" : ""
+              }`}
             >
-              <Trash2 className="h-3 w-3" />
-            </button>
-          </div>
-        </Link>
-      ))}
+              <FolderOpen className="h-4 w-4 text-gray-500 shrink-0" />
+              <span className="truncate flex-1">{client.name}</span>
+              {/* 釘選：已釘→紫色常顯；未釘→hover 先顯（可撳釘上頂）*/}
+              <button
+                onClick={(e) => togglePin(e, client.id)}
+                title={isPinned ? "取消釘選" : "釘選置頂"}
+                className={`items-center justify-center w-5 h-5 rounded hover:bg-violet-100 transition-colors ${
+                  isPinned ? "flex text-violet-600" : "hidden group-hover:flex text-gray-400 hover:text-violet-600"
+                }`}
+              >
+                <Pin className={`h-3 w-3 ${isPinned ? "fill-violet-600" : ""}`} />
+              </button>
+              <button
+                onClick={(e) => handleDelete(e, client.id, client.name)}
+                disabled={deletingId === client.id}
+                className="hidden group-hover:flex items-center justify-center w-5 h-5 rounded hover:bg-red-100 text-gray-400 hover:text-red-500 transition-colors"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+            </div>
+          </Link>
+        );
+      })}
 
       {/* 未分類素材（clientId=null）入口已隱藏 —— 見上方 SHOW_UNASSIGNED_LINK 註解。 */}
       {SHOW_UNASSIGNED_LINK && (

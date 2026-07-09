@@ -112,9 +112,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (body.copyText !== undefined) data.copyText = body.copyText;
     if (body.subject !== undefined) data.subject = body.subject || null; // editable photo title
     if (body.clientId !== undefined) data.clientId = body.clientId; // 專案 re-homing (null = 全部)
-    // Bump createdAt so an edited generated image re-sorts to the newest position in the
-    // gallery / 圖片紀錄 — matching how edited uploaded components jump to the top.
-    if (Object.keys(data).length > 0) data.createdAt = new Date();
+    // 「調整風格積木」＝改 metadata，唔算重新生成 → 唔好 bump createdAt（唔好令舊圖跳去 gallery 最新）。
+    // 只有真正改到圖內容（文案 / 標題）先 re-sort。
+    const blockOnlyEdit = (body.blockEdits !== undefined || body.slots !== undefined)
+      && body.copyText === undefined && body.subject === undefined;
+    if (Object.keys(data).length > 0 && !blockOnlyEdit) data.createdAt = new Date();
 
     const updated = await db.libraryImage.update({ where: { id }, data });
     return NextResponse.json({ ok: true, id: updated.id });

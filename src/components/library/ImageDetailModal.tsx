@@ -35,7 +35,7 @@ type Props = {
   onInject: (comp: StyleComponent) => void;
   /** 一次過帶入全部積木（構圖/配色/語氣/背景）到生成圖片並切 tab。 */
   onInjectAll?: (comps: StyleComponent[]) => void;
-  onAnalyze?: (imageUrl: string) => void;
+  onAnalyze?: (imageUrl: string, libraryImageId?: string) => void;
   /** Image-based edit: adjust this image's 構圖/配色/語氣 together.
    *  libraryImageId is forwarded so a generated image saves back into its paramsJson snapshot. */
   onAdjust?: (imageUrl: string, components: StyleComponent[], libraryImageId?: string) => void;
@@ -478,7 +478,7 @@ export function ImageDetailModal({
                 <p className="text-xs text-gray-400 mb-4">分析後可取得構圖・配色・語氣，並加入素材庫</p>
                 {imageUrl && onAnalyze && (
                   <button
-                    onClick={() => onAnalyze(imageUrl)}
+                    onClick={() => onAnalyze(imageUrl, libraryImageId)}
                     className="inline-flex items-center gap-1.5 text-xs font-medium bg-violet-600 text-white px-3 py-1.5 rounded-lg hover:bg-violet-700 transition-colors"
                   >
                     <Sparkles className="h-3.5 w-3.5" />

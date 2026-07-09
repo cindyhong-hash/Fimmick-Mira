@@ -106,9 +106,12 @@ export const LibraryWorkspace = forwardRef<LibraryWorkspaceHandle, { clientId: s
     setShowGenerateAsset(true);
   }, []);
 
-  const handleAnalyze = useCallback((url: string) => {
+  const handleAnalyze = useCallback((url: string, libraryImageId?: string) => {
     setEditComponent(null);
     setQuickAddImageUrl(url);
+    // 傳 libraryImageId → QuickAddModal 會經「接回圖」分支：分析出嚟嘅 block 除咗入 picker，
+    // 亦寫返落呢張圖嘅 slots（detail 唔再顯示「尚未分析風格」）。
+    setAdjustLibraryImageId(libraryImageId ?? null);
     setShowQuickAdd(true);
     setDetail(null);
   }, []);

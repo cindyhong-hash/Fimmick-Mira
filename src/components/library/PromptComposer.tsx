@@ -5,7 +5,7 @@
  * 色盤逐色開關；其他注意事項。生成走 POST /api/library/generate。
  */
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import {
   X, Copy, Check, Sparkles, LayoutTemplate, Palette,
   Image as ImageIcon, StickyNote, Loader2, Upload, Plus, Trash2, Type, Lock, Wand2, RotateCcw,
@@ -31,7 +31,12 @@ type Props = {
   onGenerated?: () => void;
   prefill?: Prefill;
   prefillNonce?: number;
+  // 通知上層（modal header）：組裝台有冇內容（用嚟決定 header「清空重來」掣顯示與否）。
+  onDirtyChange?: (dirty: boolean) => void;
 };
+
+// 暴露俾上層（ProductComposeModal header）調用嘅 handle。
+export type PromptComposerHandle = { reset: () => void };
 
 // A palette row mirrors QuickAddModal: fixed 5 roles, checkbox toggles enabled.
 type PalRow = { role: PaletteRole; label: string; hex: string; enabled: boolean };
@@ -193,7 +198,8 @@ function SectionLabel({ step, title, hint }: { step: string; title: string; hint
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────
-export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGenerated, prefill, prefillNonce }: Props) {
+export const PromptComposer = forwardRef<PromptComposerHandle, Props>(function PromptComposer(
+  { slots, onClearSlot, onPickSlot, clientId, onGenerated, prefill, prefillNonce, onDirtyChange }, ref) {
   const [subject, setSubject] = useState("");
   const [notes, setNotes] = useState("");
   const [copied, setCopied] = useState(false);
@@ -268,6 +274,9 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
   const enabledColors: PaletteColor[] = effRows.filter((r) => r.enabled).map((r) => ({ hex: r.hex, role: r.role, label: r.label }));
   const effLayoutDesc = layoutDescOv ?? ((slots.layout?.data?.description as string) ?? "");
   const effToneLabels = toneLabelsOv ?? ((slots.tone?.data?.toneLabels as string[]) ?? []);
+  // 有冇「臨時改咗」揀落嗰個 block（用嚟決定儲存嗰陣要唔要起一個新 block，唔好靜雞雞冒認舊 id）。
+  const colorEdited = paletteRows !== null && JSON.stringify(paletteRows) !== JSON.stringify(buildPaletteRows(slots.color));
+  const layoutEdited = layoutDescOv !== null && layoutDescOv !== ((slots.layout?.data?.description as string) ?? "");
 
   // Reset overrides when a slot's source material changes — using React's documented
   // "adjust state during render by comparing to previous state" pattern (no effects),
@@ -423,7 +432,7 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
   const buildEffectiveSlots = (): PromptSlots => ({
     layout: slots.layout ? { ...slots.layout, data: { ...slots.layout.data, description: effLayoutDesc } } : null,
     background: bgAsImage ? slots.background : null, // 直接用背景圖→送圖合成；作文字參考→唔送圖（由 brief 文字生成場景）
-    color: slots.color ? { ...slots.color, data: { ...slots.color.data, colors: enabledColors } } : null,
+    color: slots.color ? { ...slots.color, data: { ...slots.color.data, colors: enabledColors, primaryColor: enabledColors.find((c) => c.role === "primary")?.hex, secondaryColor: enabledColors.find((c) => c.role === "secondary")?.hex } } : null,
     tone: slots.tone ? { ...slots.tone, data: { ...slots.tone.data, toneLabels: effToneLabels } } : null,
   });
 
@@ -487,6 +496,53 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
     }
   }
 
+  // 清空成個組裝台，返初始空白狀態（開新設計）。
+  // 兩處會 call：① saveDrafts 儲存成功後自動清；② header「清空重來」手動掣。
+  // 只清設計內容（主體/產品圖/積木/說明/潤色/範本），保留輸出設定（比例/引擎/數量）。
+  function resetComposer() {
+    setSubject("");
+    setNotes("");
+    setProductUrls([]);
+    setPolishedBrief(null);
+    setActivePreset(null);
+    setInputMode("image");
+    setSeriesMode(false);
+    setBgAsImage(false);
+    setLayoutDescOv(null);
+    setToneLabelsOv(null);
+    setPaletteRows(null);
+    (["layout", "color", "tone", "background"] as (keyof PromptSlots)[]).forEach((k) => onClearSlot(k));
+  }
+
+  // 暴露 reset 俾 modal header 調用；並通知上層「有冇內容」（決定 header「清空重來」掣顯示）。
+  useImperativeHandle(ref, () => ({ reset: resetComposer }));
+  const composerDirty = !!(subject || notes || productUrls.length > 0 || slots.layout || slots.color || slots.tone || slots.background || polishedBrief || activePreset);
+  useEffect(() => { onDirtyChange?.(composerDirty);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composerDirty]);
+
+  // 臨時改咗先生成 → 儲存嗰陣：改咗就起一個新 StyleComponent（新 id），未改就照用原本嗰個 id，
+  // 唔好用返舊 id 夾帶新內容（否則個 id 會同 library 入面「真身」對唔上，見 docs 討論）。
+  // previewUrl = 生成出嚟嗰張圖 → picker card 顯示返該產品圖（唔止色塊）。
+  async function materializeEditedSlots(ownerImageUrl?: string): Promise<PromptSlots> {
+    const base = buildEffectiveSlots();
+    if (layoutEdited && base.layout) {
+      const res = await fetch("/api/components", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: `${base.layout.name}（已調整）`, type: "COMPOSITION", clientId, data: base.layout.data, aiPromptText: base.layout.aiPromptText, previewUrl: ownerImageUrl }),
+      });
+      if (res.ok) { const saved = await res.json(); base.layout = { ...base.layout, id: saved.id, name: saved.name, previewUrl: saved.previewUrl ?? null }; }
+    }
+    if (colorEdited && base.color) {
+      const res = await fetch("/api/components", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: `${base.color.name}（已調整）`, type: "COLOR_SCHEME", clientId, data: base.color.data, aiPromptText: base.color.aiPromptText, previewUrl: ownerImageUrl }),
+      });
+      if (res.ok) { const saved = await res.json(); base.color = { ...base.color, id: saved.id, name: saved.name, previewUrl: saved.previewUrl ?? null }; }
+    }
+    return base;
+  }
+
   // #3 揀完 draft → 逐張存入圖庫（save-image，建 LibraryImage）。
   async function saveDrafts() {
     const sel = (drafts ?? []).filter((d) => d.selected);
@@ -495,7 +551,8 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
     setGenError(null);
     try {
       const palette = buildPalette();
-      const effectiveSlots = buildEffectiveSlots();
+      // 用第一張選定 draft 嘅圖做 owner（materialize 出嚟嘅 block 由呢批 draft 共用）。
+      const effectiveSlots = await materializeEditedSlots(sel[0]?.imageUrl);
       await Promise.all(sel.map((d) => {
         const isComposite = d.productImageUrls.length > 0;
         const promptStr = isComposite
@@ -510,6 +567,7 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
         });
       }));
       setDrafts(null);
+      resetComposer(); // 儲存後自動清空成個組裝台（開新設計）；亦可撳 header「清空重來」手動清。
       onGenerated?.();
     } catch (e: unknown) {
       setGenError(e instanceof Error ? e.message : "儲存失敗，請重試");
@@ -957,4 +1015,4 @@ export function PromptComposer({ slots, onClearSlot, onPickSlot, clientId, onGen
       )}
     </div>
   );
-}
+});

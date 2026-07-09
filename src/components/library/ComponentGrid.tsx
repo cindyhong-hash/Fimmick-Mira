@@ -402,7 +402,11 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
       let slotComps: StyleComponent[] = [];
       try {
         const p = JSON.parse(item.paramsJson ?? "{}");
-        slotComps = Object.values(p.slots ?? {}).filter(Boolean) as StyleComponent[];
+        // 引用模型：圖只係「指住」一個真實 block（靠 id）。顯示時即場查返 live `components` 嗰行，
+        // 令圖 detail 同「選擇積木 picker」永遠一致、永遠現行版本。
+        // 安全網：真實行俾人刪咗（查唔返）先 fallback 用 paramsJson 凝低嗰份快照，唔會白版。
+        slotComps = (Object.values(p.slots ?? {}).filter(Boolean) as StyleComponent[])
+          .map((snap) => components.find((c) => c.id === snap.id) ?? snap);
       } catch { /* ignore */ }
       onOpenImage({ imageUrl: item.imageUrl, presetComponents: slotComps, copyText: item.copyText, subject: item.subject, regenerateParams: item.paramsJson, prompt: item.prompt, libraryImageId: item.libraryImageId });
     } else if (item.kind === "material") {

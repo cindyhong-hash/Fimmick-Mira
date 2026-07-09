@@ -37,7 +37,72 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data: Record<string, any> = {};
-    if (body.slots !== undefined) {
+
+    // 「調整」：擁有權規則決定每個 block 係就地改定 fork。
+    if (body.blockEdits !== undefined) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let parsed: Record<string, any> = {};
+      try { parsed = JSON.parse(existing.paramsJson || "{}"); } catch { /* keep {} */ }
+      const myImageUrl = existing.imageUrl;
+      const editClientId = body.clientId !== undefined ? body.clientId : existing.clientId;
+
+      // block 係咪「借用」（唔屬於呢張圖）？→ 有其他圖引用、或係第二個素材（previewUrl）分析出嚟嘅家 block。
+      const allImages = await db.libraryImage.findMany({ select: { id: true, paramsJson: true } });
+      const isShared = (blockId: string, previewUrl: string | null): boolean => {
+        if (previewUrl && previewUrl !== myImageUrl) return true; // 係第二個素材嘅家 block
+        for (const im of allImages) {
+          if (im.id === id) continue;
+          try {
+            const pj = JSON.parse(im.paramsJson || "{}");
+            for (const s of Object.values(pj.slots ?? {})) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              if (s && (s as any).id === blockId) return true;
+            }
+          } catch { /* ignore */ }
+        }
+        return false;
+      };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const snap = (row: any, type: string) => ({
+        id: row.id, type, name: row.name,
+        data: typeof row.data === "string" ? JSON.parse(row.data) : row.data,
+        aiPromptText: row.aiPromptText, clientId: row.clientId,
+        sourceLayoutId: row.sourceLayoutId ?? "", previewUrl: row.previewUrl ?? null,
+        createdAt: row.createdAt,
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const resolveSlot = async (edit: any) => {
+        if (!edit) return null; // unchecked → 移除
+        const { type, name, data: sdata, aiPromptText, prevBlockId, changed } = edit;
+        const realId = prevBlockId && !String(prevBlockId).startsWith("edited-")
+          && !String(prevBlockId).startsWith("imp-") && !String(prevBlockId).startsWith("preset-");
+        const prev = realId ? await db.styleComponent.findUnique({ where: { id: prevBlockId } }) : null;
+
+        // 冇改動 + 原 block 仲喺 → 原封不動指返佢。
+        if (!changed && prev) return snap(prev, type);
+
+        // 借用（或原 block 已冇）→ fork 一個屬於自己嘅新 block；自己專屬 → 就地改。
+        // previewUrl = 擁有嗰張圖 → picker card 會顯示返該產品/參考圖（唔止色塊）。
+        if (prev && !isShared(prevBlockId, prev.previewUrl)) {
+          const upd = await db.styleComponent.update({
+            where: { id: prevBlockId },
+            data: { name, data: JSON.stringify(sdata ?? {}), aiPromptText: aiPromptText ?? "", clientId: editClientId ?? null, previewUrl: myImageUrl, createdAt: new Date() },
+          });
+          return snap(upd, type);
+        }
+        const created = await db.styleComponent.create({
+          data: { name, type, data: JSON.stringify(sdata ?? {}), aiPromptText: aiPromptText ?? "", clientId: editClientId ?? null, sourceLayoutId: "manual", previewUrl: myImageUrl },
+        });
+        return snap(created, type);
+      };
+
+      const be = body.blockEdits;
+      const [layout, color, tone] = await Promise.all([resolveSlot(be.layout), resolveSlot(be.color), resolveSlot(be.tone)]);
+      parsed.slots = { layout, color, tone, background: body.background ?? (parsed.slots?.background ?? null) };
+      data.paramsJson = JSON.stringify(parsed);
+    } else if (body.slots !== undefined) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let parsed: Record<string, any> = {};
       try { parsed = JSON.parse(existing.paramsJson || "{}"); } catch { /* keep {} */ }

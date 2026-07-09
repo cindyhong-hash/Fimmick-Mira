@@ -283,33 +283,29 @@ export function QuickAddModal({ clientId, initialImageUrl, editComponent, prefil
     setSaving(true);
     setSaveError(null);
 
-    // Generated-image edit: rewrite the image's paramsJson.slots (NOT StyleComponent rows).
-    // The generated-image modal reads its 構圖/配色/語氣 from paramsJson, and the prefilled
-    // components' ids belong to the ORIGINAL source library assets — so we must neither write
-    // orphan StyleComponents nor DELETE by those ids here.
+    // Generated-image edit（「調整」）：只把「調整意圖」送去 server，由 server 用「擁有權規則」決定
+    // 每個 block 係「改自己」定「fork 新 block」——因為要判斷 block 有冇俾其他圖共用，需要掃 DB（server 先做到）。
+    //   • 自己專屬（冇其他圖用、亦唔係第二張圖分析出嚟嘅 block）→ 就地改（change itself）
+    //   • 借用（其他圖／參考圖擁有）→ fork 一個屬於自己嘅新 block，唔郁原本嗰個
     if (libraryImageId) {
       const byType = Object.fromEntries((prefillComponents ?? []).map((c) => [c.type, c]));
-      const mkSlot = (type: ComponentCategory) => {
-        if (!include[type]) return null; // unchecked → drop from the snapshot
+      const mkEdit = (type: ComponentCategory) => {
+        if (!include[type]) return null; // unchecked → 由快照移除
         const p = payloadFor(type)!;
         const orig = byType[type];
-        return {
-          ...(orig ?? { id: `edited-${type}`, clientId: editClientId, sourceLayoutId: "", previewUrl: null, createdAt: new Date().toISOString() }),
-          type,
-          name: p.name,
-          data: p.data,
-          aiPromptText: p.aiPromptText,
-        };
-      };
-      const slots = {
-        layout: mkSlot("COMPOSITION"),
-        color: mkSlot("COLOR_SCHEME"),
-        tone: mkSlot("COPY_TONE"),
-        background: byType["BACKGROUND"] ?? null, // 背景 is not editable here — keep as-is
+        const changed = !orig
+          || orig.name !== p.name
+          || (orig.aiPromptText ?? "") !== (p.aiPromptText ?? "")
+          || JSON.stringify(orig.data ?? {}) !== JSON.stringify(p.data ?? {});
+        return { type, name: p.name, data: p.data, aiPromptText: p.aiPromptText, prevBlockId: orig?.id ?? null, changed };
       };
       const res = await fetch(`/api/library/images/${libraryImageId}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slots, clientId: editClientId ?? null }),
+        body: JSON.stringify({
+          blockEdits: { layout: mkEdit("COMPOSITION"), color: mkEdit("COLOR_SCHEME"), tone: mkEdit("COPY_TONE") },
+          background: byType["BACKGROUND"] ?? null, // 背景 here is not editable — keep as-is
+          clientId: editClientId ?? null,
+        }),
       });
       setSaving(false);
       if (!res.ok) { setSaveError("儲存失敗，請重試"); return; }

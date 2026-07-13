@@ -178,6 +178,8 @@ export function ActivityForm({
   const [uploadingRef,     setUploadingRef]     = useState(false);
   const [loading,          setLoading]          = useState(false);
   const [showLibPicker,    setShowLibPicker]    = useState(false); // 從素材庫揀參考圖
+  // 由素材庫揀嗰張參考圖已有嘅 AI Prompt（有就直接用，免再 call analyze API）；上傳新圖時清空。
+  const [refStylePrompt,   setRefStylePrompt]   = useState<string>("");
 
   // AI 輔助狀態
   const [optimizingPrompt,  setOptimizingPrompt]  = useState(false);
@@ -205,12 +207,14 @@ export function ActivityForm({
     kind === "product" ? setUploadingProduct(true) : setUploadingRef(true);
     const urls = await Promise.all(toUpload.map(uploadFile));
     set(kind === "product" ? "productImageUrls" : "referenceImageUrls", [...current, ...urls].slice(0, max));
+    if (kind === "ref") setRefStylePrompt(""); // 上傳新參考圖 → 無現成 prompt，改用 analyze API
     kind === "product" ? setUploadingProduct(false) : setUploadingRef(false);
   };
 
   const removeImage = (kind: "product" | "ref", i: number) => {
     const key = kind === "product" ? "productImageUrls" : "referenceImageUrls";
     set(key, values[key].filter((_, idx) => idx !== i));
+    if (kind === "ref") setRefStylePrompt("");
   };
 
   // ── AI 功能一：優化 Prompt ───────────────────────────────────────────────────
@@ -268,6 +272,15 @@ export function ActivityForm({
   const handleAnalyzeStyle = async () => {
     const refUrl = values.referenceImageUrls[0];
     if (!refUrl) return;
+    const appendStyle = (desc: string) => {
+      const separator = values.imagePrompt.trim() ? "\n\n風格參考：" : "風格參考：";
+      set("imagePrompt", values.imagePrompt + separator + desc);
+    };
+    // 由素材庫揀嘅圖已有 AI Prompt → 直接用，唔使再 call analyze API（即時、慳一次呼叫）。
+    if (refStylePrompt.trim()) {
+      appendStyle(refStylePrompt.trim());
+      return;
+    }
     setAnalyzingImage(true);
     try {
       const res = await fetch("/api/ai/analyze-image", {
@@ -277,8 +290,7 @@ export function ActivityForm({
       });
       const data = await res.json();
       if (data.styleDescription) {
-        const separator = values.imagePrompt.trim() ? "\n\n風格參考：" : "風格參考：";
-        set("imagePrompt", values.imagePrompt + separator + data.styleDescription);
+        appendStyle(data.styleDescription);
       } else {
         alert(data.error ?? "解析失敗，請稍後再試");
       }
@@ -472,7 +484,7 @@ export function ActivityForm({
                 <><Loader2 className="h-5 w-5 animate-spin text-violet-500" /><span className="text-xs text-violet-500">分析中…</span></>
               ) : (
                 <><Sparkles className={`h-5 w-5 ${hasRefImages ? "text-violet-400" : "text-gray-200"}`} />
-                <span className="text-xs font-medium">{hasRefImages ? "分析風格，帶入提示詞" : "需先上傳風格參考圖"}</span></>
+                <span className="text-xs font-medium">{!hasRefImages ? "需先加風格參考圖" : refStylePrompt.trim() ? "帶入參考圖提示詞" : "分析風格，帶入提示詞"}</span></>
               )}
             </button>
           </div>
@@ -551,7 +563,7 @@ export function ActivityForm({
       {showLibPicker && (
         <LibraryImagePickerModal
           clientId={clientId}
-          onPick={(url) => { set("referenceImageUrls", [url]); setShowLibPicker(false); }}
+          onPick={(url, promptText) => { set("referenceImageUrls", [url]); setRefStylePrompt(promptText ?? ""); setShowLibPicker(false); }}
           onClose={() => setShowLibPicker(false)}
         />
       )}

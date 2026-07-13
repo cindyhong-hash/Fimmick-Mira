@@ -47,7 +47,7 @@ export function LibraryImagePickerModal({
   onClose,
 }: {
   clientId: string;
-  onPick: (url: string) => void;
+  onPick: (url: string, promptText?: string) => void; // 連帶回傳該圖已有嘅 AI Prompt（免再分析）
   onClose: () => void;
 }) {
   const [items, setItems] = useState<GalleryItem[]>([]);
@@ -118,7 +118,7 @@ export function LibraryImagePickerModal({
                 const m = META[t];
                 const Icon = m.Icon;
                 return (
-                  <button type="button" key={it.imageUrl} onClick={() => onPick(it.imageUrl)} title={it.subject || it.name || ""}
+                  <button type="button" key={it.imageUrl} onClick={() => onPick(it.imageUrl, it.prompt || it.aiPromptText || "")} title={it.subject || it.name || ""}
                     className="group relative rounded-xl border border-gray-200 overflow-hidden hover:border-violet-400 hover:shadow-md transition-all">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={it.imageUrl} alt="" loading="lazy" decoding="async" className="w-full aspect-square object-contain bg-gray-50" />

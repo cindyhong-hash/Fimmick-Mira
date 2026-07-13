@@ -18,3 +18,4 @@
 - 2026-06-18 · main@0707c94 · 加 Setup 安裝指南，老闆 clone 後跟 GUIDE 就可以起動
 - 2026-06-18 · main@2d67a98 · CLAUDE.md 加 demo sync 規矩（內部）；GUIDE 加 Setup 章節
 - 2026-06-18 · main@eaf162d · GUIDE 補 prisma generate 步驟（setup 必要）
+- 2026-07-13 · main@7858224 · 積木邏輯全面一致化（引用模型/擁有權fork/picker顯圖）+ 活動參考圖帶入AI Prompt + save-image自我修復

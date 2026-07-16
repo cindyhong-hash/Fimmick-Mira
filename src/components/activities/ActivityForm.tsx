@@ -182,29 +182,39 @@ export function ActivityForm({
   const [showLibPicker,    setShowLibPicker]    = useState(false); // 從素材庫揀參考圖
   // 由素材庫揀嗰張參考圖已有嘅 AI Prompt（有就直接用，免再 call analyze API）；上傳新圖時清空。
   const [refStylePrompt,   setRefStylePrompt]   = useState<string>("");
-  // 03 風格積木（構圖 / 顏色 / 背景）— 揀完會以標籤注入 AI Prompt。
+  // 03 風格積木（構圖 / 顏色 / 背景）— 揀完會把標籤直接寫入「畫面描述 Prompt」，可再喺嗰度改字。
   const [styleBlocks, setStyleBlocks] = useState<{ layout: StyleComponent | null; color: StyleComponent | null; background: StyleComponent | null }>({ layout: null, color: null, background: null });
   const [pickerCat, setPickerCat] = useState<ComponentCategory | null>(null);
-
-  // 把揀咗嘅積木砌成注入標籤：[構圖:…][配色:…][背景:…]
-  const buildBlockTags = (): string => {
-    const parts: string[] = [];
-    if (styleBlocks.layout) {
-      const d = (styleBlocks.layout.data?.description as string) || styleBlocks.layout.aiPromptText || styleBlocks.layout.name;
-      if (d) parts.push(`[構圖:${d}]`);
-    }
-    if (styleBlocks.color) {
-      const hexes = getColors(styleBlocks.color.data).map((c) => c.hex);
-      const c = hexes.length ? hexes.join("、") : (styleBlocks.color.aiPromptText || styleBlocks.color.name);
-      if (c) parts.push(`[配色:${c}]`);
-    }
-    if (styleBlocks.background) {
-      const d = (styleBlocks.background.data?.description as string) || styleBlocks.background.aiPromptText || styleBlocks.background.name;
-      if (d) parts.push(`[背景:${d}]`);
-    }
-    return parts.join("");
+  const CAT_META = {
+    COMPOSITION:  { slot: "layout"     as const, label: "構圖" },
+    COLOR_SCHEME: { slot: "color"      as const, label: "配色" },
+    BACKGROUND:   { slot: "background" as const, label: "背景" },
   };
-  const CAT_SLOT: Record<string, "layout" | "color" | "background"> = { COMPOSITION: "layout", COLOR_SCHEME: "color", BACKGROUND: "background" };
+  // 由 block 砌出該類標籤內容，如 [構圖:…]
+  const tagFor = (cat: keyof typeof CAT_META, comp: StyleComponent): string => {
+    const { label } = CAT_META[cat];
+    let body = "";
+    if (cat === "COLOR_SCHEME") {
+      const hexes = getColors(comp.data).map((c) => c.hex);
+      body = hexes.length ? hexes.join("、") : (comp.aiPromptText || comp.name);
+    } else {
+      body = (comp.data?.description as string) || comp.aiPromptText || comp.name;
+    }
+    return body ? `[${label}:${body}]` : "";
+  };
+  // 揀 / 清除積木：更新 card 狀態 + 直接寫入畫面描述 Prompt（先移除舊同類標籤，再加返新）。
+  const applyBlock = (cat: keyof typeof CAT_META, comp: StyleComponent | null) => {
+    const { slot, label } = CAT_META[cat];
+    setStyleBlocks((p) => ({ ...p, [slot]: comp }));
+    setValues((prev) => {
+      let txt = prev.imagePrompt.replace(new RegExp(`\\[${label}:[^\\]]*\\]`, "g"), "").replace(/\n{2,}/g, "\n").trim();
+      if (comp) {
+        const tag = tagFor(cat, comp);
+        if (tag) txt = txt ? `${txt}\n${tag}` : tag;
+      }
+      return { ...prev, imagePrompt: txt };
+    });
+  };
 
   // AI 輔助狀態
   const [optimizingPrompt,  setOptimizingPrompt]  = useState(false);
@@ -329,12 +339,8 @@ export function ActivityForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    // 揀咗嘅風格積木以標籤注入 AI Prompt（送去生成，亦一併存低）。
-    const tags = buildBlockTags();
-    const finalPrompt = tags
-      ? `${values.imagePrompt}${values.imagePrompt.trim() ? "\n" : ""}${tags}`
-      : values.imagePrompt;
-    try { await onSubmit({ ...values, imagePrompt: finalPrompt }); } finally { setLoading(false); }
+    // 積木標籤已經即時寫入 values.imagePrompt（見 applyBlock），直接送。
+    try { await onSubmit(values); } finally { setLoading(false); }
   };
 
   return (
@@ -537,7 +543,7 @@ export function ActivityForm({
                 <div className="flex items-center justify-between mb-1">
                   <span className="flex items-center gap-1 text-xs font-medium text-gray-600">{icon}{label}</span>
                   {comp && (
-                    <button type="button" onClick={() => setStyleBlocks((p) => ({ ...p, [slot]: null }))}
+                    <button type="button" onClick={() => applyBlock(cat, null)}
                       className="text-gray-400 hover:text-red-500" title="清除"><X className="h-3.5 w-3.5" /></button>
                   )}
                 </div>
@@ -545,7 +551,10 @@ export function ActivityForm({
                   className={`w-full rounded-xl border overflow-hidden text-left transition-all ${comp ? "border-violet-200" : "border-dashed border-gray-200 hover:border-violet-300"}`}>
                   {comp ? (
                     <>
-                      {comp.previewUrl ? (
+                      {/* 顏色：優先顯示色板（睇色 pattern）；其餘：優先顯示圖 */}
+                      {slot === "color" && colors.length ? (
+                        <div className="flex h-20">{colors.map((c, i) => <div key={i} style={{ background: c.hex }} className="flex-1" />)}</div>
+                      ) : comp.previewUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={comp.previewUrl} alt={comp.name} className="w-full h-20 object-cover" />
                       ) : colors.length ? (
@@ -553,7 +562,15 @@ export function ActivityForm({
                       ) : (
                         <div className="h-20 bg-violet-50" />
                       )}
-                      <div className="px-2 py-1.5 text-[11px] text-gray-700 truncate">{comp.name}</div>
+                      {/* 顏色：色板下顯示 hex，方便核對 */}
+                      {slot === "color" && colors.length ? (
+                        <div className="px-2 py-1.5">
+                          <div className="text-[11px] text-gray-700 truncate">{comp.name}</div>
+                          <div className="text-[10px] text-gray-400 font-mono truncate">{colors.map((c) => c.hex).join(" · ")}</div>
+                        </div>
+                      ) : (
+                        <div className="px-2 py-1.5 text-[11px] text-gray-700 truncate">{comp.name}</div>
+                      )}
                     </>
                   ) : (
                     <div className="h-[104px] flex flex-col items-center justify-center gap-1 text-gray-400">
@@ -566,12 +583,7 @@ export function ActivityForm({
             );
           })}
         </div>
-        {buildBlockTags() && (
-          <div className="rounded-lg border border-violet-100 bg-violet-50/50 px-3 py-2">
-            <div className="text-[10px] text-violet-500 mb-0.5">將加入 AI Prompt：</div>
-            <div className="text-[11px] font-mono text-gray-600 break-all">{buildBlockTags()}</div>
-          </div>
-        )}
+        <p className="text-[11px] text-gray-400">揀咗會即時加入上方「畫面描述 Prompt」，可再喺嗰度改字。</p>
       </div>
 
       {/* ── 04 圖片尺寸比例 ─────────── */}
@@ -644,7 +656,7 @@ export function ActivityForm({
         <SlotPickerModal
           category={pickerCat}
           clientId={clientId}
-          onPick={(comp) => { setStyleBlocks((p) => ({ ...p, [CAT_SLOT[pickerCat]]: comp })); setPickerCat(null); }}
+          onPick={(comp) => { applyBlock(pickerCat as keyof typeof CAT_META, comp); setPickerCat(null); }}
           onClose={() => setPickerCat(null)}
         />
       )}

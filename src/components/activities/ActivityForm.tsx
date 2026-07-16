@@ -3,9 +3,11 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { X, Loader2, ImagePlus, Wand2, Sparkles, Pencil, Trash2, Images } from "lucide-react";
-import { ComponentSelector } from "@/components/activities/ComponentSelector";
+import { X, Loader2, ImagePlus, Wand2, Sparkles, Pencil, Trash2, Images, LayoutTemplate, Palette, Image as ImageIcon } from "lucide-react";
 import { LibraryImagePickerModal } from "@/components/activities/LibraryImagePickerModal";
+import { SlotPickerModal } from "@/components/library/SlotPickerModal";
+import { getColors } from "@/types/library";
+import type { StyleComponent, ComponentCategory } from "@/types/library";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -180,6 +182,29 @@ export function ActivityForm({
   const [showLibPicker,    setShowLibPicker]    = useState(false); // 從素材庫揀參考圖
   // 由素材庫揀嗰張參考圖已有嘅 AI Prompt（有就直接用，免再 call analyze API）；上傳新圖時清空。
   const [refStylePrompt,   setRefStylePrompt]   = useState<string>("");
+  // 03 風格積木（構圖 / 顏色 / 背景）— 揀完會以標籤注入 AI Prompt。
+  const [styleBlocks, setStyleBlocks] = useState<{ layout: StyleComponent | null; color: StyleComponent | null; background: StyleComponent | null }>({ layout: null, color: null, background: null });
+  const [pickerCat, setPickerCat] = useState<ComponentCategory | null>(null);
+
+  // 把揀咗嘅積木砌成注入標籤：[構圖:…][配色:…][背景:…]
+  const buildBlockTags = (): string => {
+    const parts: string[] = [];
+    if (styleBlocks.layout) {
+      const d = (styleBlocks.layout.data?.description as string) || styleBlocks.layout.aiPromptText || styleBlocks.layout.name;
+      if (d) parts.push(`[構圖:${d}]`);
+    }
+    if (styleBlocks.color) {
+      const hexes = getColors(styleBlocks.color.data).map((c) => c.hex);
+      const c = hexes.length ? hexes.join("、") : (styleBlocks.color.aiPromptText || styleBlocks.color.name);
+      if (c) parts.push(`[配色:${c}]`);
+    }
+    if (styleBlocks.background) {
+      const d = (styleBlocks.background.data?.description as string) || styleBlocks.background.aiPromptText || styleBlocks.background.name;
+      if (d) parts.push(`[背景:${d}]`);
+    }
+    return parts.join("");
+  };
+  const CAT_SLOT: Record<string, "layout" | "color" | "background"> = { COMPOSITION: "layout", COLOR_SCHEME: "color", BACKGROUND: "background" };
 
   // AI 輔助狀態
   const [optimizingPrompt,  setOptimizingPrompt]  = useState(false);
@@ -304,7 +329,12 @@ export function ActivityForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    try { await onSubmit(values); } finally { setLoading(false); }
+    // 揀咗嘅風格積木以標籤注入 AI Prompt（送去生成，亦一併存低）。
+    const tags = buildBlockTags();
+    const finalPrompt = tags
+      ? `${values.imagePrompt}${values.imagePrompt.trim() ? "\n" : ""}${tags}`
+      : values.imagePrompt;
+    try { await onSubmit({ ...values, imagePrompt: finalPrompt }); } finally { setLoading(false); }
   };
 
   return (
@@ -491,21 +521,62 @@ export function ActivityForm({
         </div>
       </div>
 
-      {/* ── 03 風格組件（暫時隱藏；要叫回來把下面整段 {false && (...)} 改回 true 或移除外層即可）─── */}
-      {false && (
+      {/* ── 03 套用風格積木（構圖 / 顏色 / 背景）→ 內容注入 AI Prompt ─────────── */}
       <div className="space-y-3">
-        <SectionLabel step="03" title="套用風格組件" hint="選填，AI 會沿用已有的視覺設定" />
-        <ComponentSelector
-          clientId={clientId}
-          selectedIds={values.selectedComponentIds}
-          onChange={(ids) => set("selectedComponentIds", ids)}
-        />
+        <SectionLabel step="03" title="套用風格積木" hint="選填 · 揀咗會加入 AI Prompt 做生成參考" />
+        <div className="grid grid-cols-3 gap-3">
+          {([
+            { cat: "COMPOSITION",  slot: "layout",     label: "構圖", icon: <LayoutTemplate className="h-4 w-4" /> },
+            { cat: "COLOR_SCHEME", slot: "color",      label: "顏色", icon: <Palette className="h-4 w-4" /> },
+            { cat: "BACKGROUND",   slot: "background", label: "背景", icon: <ImageIcon className="h-4 w-4" /> },
+          ] as const).map(({ cat, slot, label, icon }) => {
+            const comp = styleBlocks[slot];
+            const colors = comp && slot === "color" ? getColors(comp.data) : [];
+            return (
+              <div key={cat}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="flex items-center gap-1 text-xs font-medium text-gray-600">{icon}{label}</span>
+                  {comp && (
+                    <button type="button" onClick={() => setStyleBlocks((p) => ({ ...p, [slot]: null }))}
+                      className="text-gray-400 hover:text-red-500" title="清除"><X className="h-3.5 w-3.5" /></button>
+                  )}
+                </div>
+                <button type="button" onClick={() => setPickerCat(cat)}
+                  className={`w-full rounded-xl border overflow-hidden text-left transition-all ${comp ? "border-violet-200" : "border-dashed border-gray-200 hover:border-violet-300"}`}>
+                  {comp ? (
+                    <>
+                      {comp.previewUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={comp.previewUrl} alt={comp.name} className="w-full h-20 object-cover" />
+                      ) : colors.length ? (
+                        <div className="flex h-20">{colors.map((c, i) => <div key={i} style={{ background: c.hex }} className="flex-1" />)}</div>
+                      ) : (
+                        <div className="h-20 bg-violet-50" />
+                      )}
+                      <div className="px-2 py-1.5 text-[11px] text-gray-700 truncate">{comp.name}</div>
+                    </>
+                  ) : (
+                    <div className="h-[104px] flex flex-col items-center justify-center gap-1 text-gray-400">
+                      <span className="text-lg">＋</span>
+                      <span className="text-[11px]">點擊選取{label}</span>
+                    </div>
+                  )}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        {buildBlockTags() && (
+          <div className="rounded-lg border border-violet-100 bg-violet-50/50 px-3 py-2">
+            <div className="text-[10px] text-violet-500 mb-0.5">將加入 AI Prompt：</div>
+            <div className="text-[11px] font-mono text-gray-600 break-all">{buildBlockTags()}</div>
+          </div>
+        )}
       </div>
-      )}
 
-      {/* ── 03 圖片比例與生圖模型（原 04；因 03 風格組件已隱藏，順序補上）─────────── */}
+      {/* ── 04 圖片尺寸比例 ─────────── */}
       <div className="space-y-4">
-        <SectionLabel step="03" title="圖片尺寸比例" />
+        <SectionLabel step="04" title="圖片尺寸比例" />
         <div className="relative w-full max-w-md">
           <select
             value={values.imageRatio}
@@ -565,6 +636,16 @@ export function ActivityForm({
           clientId={clientId}
           onPick={(url, promptText) => { set("referenceImageUrls", [url]); setRefStylePrompt(promptText ?? ""); setShowLibPicker(false); }}
           onClose={() => setShowLibPicker(false)}
+        />
+      )}
+
+      {/* 03 積木選取 picker（同素材庫一致）*/}
+      {pickerCat && (
+        <SlotPickerModal
+          category={pickerCat}
+          clientId={clientId}
+          onPick={(comp) => { setStyleBlocks((p) => ({ ...p, [CAT_SLOT[pickerCat]]: comp })); setPickerCat(null); }}
+          onClose={() => setPickerCat(null)}
         />
       )}
     </form>

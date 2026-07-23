@@ -562,18 +562,11 @@ export function ActivityForm({
                       ) : (
                         <div className="h-20 bg-violet-50" />
                       )}
-                      {/* 顏色：色板下顯示 hex，方便核對 */}
-                      {slot === "color" && colors.length ? (
-                        <div className="px-2 py-1.5">
-                          <div className="text-[11px] text-gray-700 truncate">{comp.name}</div>
-                          <div className="text-[10px] text-gray-400 font-mono truncate">{colors.map((c) => c.hex).join(" · ")}</div>
-                        </div>
-                      ) : (
-                        <div className="px-2 py-1.5 text-[11px] text-gray-700 truncate">{comp.name}</div>
-                      )}
+                      {/* 三類卡統一：色板/圖 + 單行名稱（高度對齊；hex 已由色板呈現，唔另出灰字）*/}
+                      <div className="px-2 py-1.5 text-[11px] text-gray-700 truncate">{comp.name}</div>
                     </>
                   ) : (
-                    <div className="h-[104px] flex flex-col items-center justify-center gap-1 text-gray-400">
+                    <div className="h-[109px] flex flex-col items-center justify-center gap-1 text-gray-400">
                       <span className="text-lg">＋</span>
                       <span className="text-[11px]">點擊選取{label}</span>
                     </div>

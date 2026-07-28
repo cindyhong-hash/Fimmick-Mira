@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { anthropic } from "@/lib/anthropic";
 import { generateImageFal, generateImageFluxSchnell, describeStyle, describeProduct, editImageFal } from "@/lib/fal";
-import { generateImageOpenRouter } from "@/lib/openrouter";
+import { generateImageOpenRouter, chatTextOpenRouter } from "@/lib/openrouter";
 
 /** 背景生成：優先 OpenRouter Gemini（更寫實），備援 Fal FLUX */
 async function generateBackground(opts: {
@@ -77,15 +76,11 @@ async function analyzeBrandStyle(pastPostUrls: string[]): Promise<string | null>
   // 如果有多張，用 Claude 合併成一段風格指南
   if (valid.length === 1) return valid[0];
 
-  const res = await anthropic.messages.create({
-    model: "claude-haiku-4-5",
-    max_tokens: 200,
-    messages: [{
-      role: "user",
-      content: `Below are visual style descriptions of a brand's past posts. Synthesize them into ONE concise brand visual style guide (2-3 sentences) for an image generation AI. English only.\n\n${valid.map((d, i) => `Post ${i + 1}: ${d}`).join("\n")}`,
-    }],
-  });
-  return (res.content[0] as { text: string }).text.trim();
+  const synthesized = await chatTextOpenRouter(
+    `Below are visual style descriptions of a brand's past posts. Synthesize them into ONE concise brand visual style guide (2-3 sentences) for an image generation AI. English only.\n\n${valid.map((d, i) => `Post ${i + 1}: ${d}`).join("\n")}`,
+    200,
+  );
+  return synthesized ?? valid[0];
 }
 
 export async function POST(request: Request) {
@@ -159,12 +154,7 @@ export async function POST(request: Request) {
         taboos,
         forceTitle: isLockedLayout,
       });
-      const copyResponse = await anthropic.messages.create({
-        model: "claude-opus-4-5",
-        max_tokens: 500,
-        messages: [{ role: "user", content: copyPrompt }],
-      });
-      const rawCopy = (copyResponse.content[0] as { text: string }).text;
+      const rawCopy = (await chatTextOpenRouter(copyPrompt, 500)) ?? "";
 
       // 圖上文字（短版）：主標題 + 圖上副標
       const { title: aiTitle, imageSubtitle: aiImageSubtitle } = parseImageText(rawCopy);

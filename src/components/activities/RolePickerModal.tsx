@@ -3,7 +3,7 @@
  * RolePickerModal — 揀一張素材圖之後，決定佢喺活動圖生成裡面嘅角色。
  * 三邊共用（Mode A② 用素材庫圖片 / Mode B 素材庫圖片 pop-up「帶入活動圖生成」）→ 行為一致。
  *   ① 作參考圖  → 借風格，AI 另生成新畫面（塞入 referenceImageUrls，行現有流程）
- *   ② 作活動圖底圖 → 成張相 100% 做背景、唔重新生圖，之後喺圖上生成文字（交 Cindy）
+ *   ② 作活動圖底圖 → 成張相 100% 做背景、唔重新生圖，之後喺圖上生成文字（後續文字排版階段）
  */
 import { Target, ImageDown, X } from "lucide-react";
 

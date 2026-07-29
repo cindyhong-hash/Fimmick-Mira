@@ -56,7 +56,7 @@ model GeneratedLayout {
   isSelected      Boolean  @default(false)
   textBurnedIn    Boolean  @default(false)  // [COLLEAGUE] 文字是否已由 AI 燒入圖片
   savedToLibrary  Boolean  @default(false)  // [COLLEAGUE] 是否已加入素材庫（策展）
-  textLayerJson   String   @default("{}")   // [2b] 底圖模式：交俾 Cindy 嘅文字層 JSON（見 docs/CINDY-TEXT-LAYER-SCHEMA.md）
+  textLayerJson   String   @default("{}")   // [2b] 底圖模式：交俾後續文字排版階段嘅文字層 JSON
   createdAt       DateTime @default(now())
 }
 

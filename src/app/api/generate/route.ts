@@ -58,7 +58,7 @@ function parseImageText(raw: string): { title: string; imageSubtitle: string } {
   };
 }
 
-/** 讀圖片實際像素尺寸（底圖模式供 Cindy 排版用）；失敗回 0×0，唔阻斷流程。 */
+/** 讀圖片實際像素尺寸（底圖模式供後續文字排版用）；失敗回 0×0，唔阻斷流程。 */
 async function readImageSize(url: string): Promise<{ w: number; h: number }> {
   try {
     const sharp = (await import("sharp")).default;
@@ -121,7 +121,7 @@ export async function POST(request: Request) {
   const { client } = activity;
 
   // ── [2b] 底圖模式：成張相 100% 做背景，唔重新生圖 ──────────────────────────
-  //     只生成文案 + 打包一份「文字層 schema」交俾 Cindy（見 docs/CINDY-TEXT-LAYER-SCHEMA.md）。
+  //     只生成文案 + 打包一份「文字層 schema」交俾後續文字排版階段。
   if (activity.baseImageUrl) {
     try {
       const tones: string[] = client.toneLabels ? JSON.parse(client.toneLabels) : [];
@@ -199,7 +199,7 @@ export async function POST(request: Request) {
           finalUrl = baseUrl; burnedIn = false;
         }
 
-        // ── 每款各自打包 schema（Cindy 契約，文案/位置跟該款）──
+        // ── 每款各自打包 schema（文字層契約，文案/位置跟該款）──
         const zoneTag = v.zone === "bottom-full" ? "bottom" : "top";
         const textElements: TextEl[] = [
           headline ? { role: "headline", content: headline, zone: zoneTag, emphasis: "high"   } : null,

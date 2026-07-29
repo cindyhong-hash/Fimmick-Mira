@@ -17,10 +17,10 @@ const LAYOUT_META: Record<string, { label: string; description: string }> = {
   A: { label: "產品置中", description: "清晰展示" },
   B: { label: "視覺強烈", description: "設計感強" },
   C: { label: "氣氛感", description: "品牌形象" },
-  // 底圖模式 3 款文字版面（同一底圖，文字擺位唔同）
-  "BASE-TL": { label: "左上文字", description: "標題置左上" },
-  "BASE-TF": { label: "頂部橫排", description: "標題橫跨頂部" },
-  "BASE-BF": { label: "底部文字", description: "標題置底部" },
+  // 底圖模式 3 款：位置拉開 + 唔同字效
+  "BASE-TOP": { label: "品牌漸層", description: "品牌色漸層 · 頂部" },
+  "BASE-MID": { label: "柔和陰影", description: "白字陰影 · 左上" },
+  "BASE-BOT": { label: "描邊白字", description: "白字描邊 · 底部" },
 };
 
 // 解析 Claude 原始文案，移除「主標題：」等標籤

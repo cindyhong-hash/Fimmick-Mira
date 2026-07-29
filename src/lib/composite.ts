@@ -50,10 +50,19 @@ function wrapLines(text: string, maxChars: number, maxLines = 2): string[] {
 
 // ── 文字 SVG（無色塊，純文字 + drop-shadow）─────────────────────────────────
 
+// 文字設計風格：
+//   classic   = 黑漸層遮罩 + 白字（一般模式產品合成用）
+//   brandGrad = 品牌主色漸層 + 白字（有品牌感、非實色 banner）
+//   shadow    = 純白字 + 柔和陰影（無底板、唔遮產品）
+//   outline   = 白字 + 深色描邊（無底板）
+type TextStyle = "classic" | "brandGrad" | "shadow" | "outline";
+
 function buildTextSvg(
   w: number, h: number,
   title: string, subtitle: string,
-  zone: Placement["textZone"]
+  zone: Placement["textZone"],
+  style: TextStyle = "classic",
+  brandColor = "#111111",
 ): Buffer | null {
   if (zone === "none" || (!title?.trim() && !subtitle?.trim())) return null;
 
@@ -71,47 +80,50 @@ function buildTextSvg(
   let texts = "";
   let gradId = 0;
 
-  // 文字渲染 helper — 用漸層遮罩取代生硬黑色色塊，模擬真實攝影暗角
+  // 文字渲染 helper — 依 style 決定底板同字效。
+  //   classic/brandGrad 用漸層遮罩（黑 / 品牌色）；shadow/outline 無底板、唔遮產品。
   const addBlock = (
     blockX: number, blockY: number, blockW: number, blockH: number,
     titleLines: string[], subLines: string[],
     textX: number, anchor: "start" | "middle"
   ) => {
-    // 漸層遮罩：上方半透明黑 → 下方透明（feather 邊緣，非硬色塊）
-    const gid = `tg${gradId++}`;
-    const featherH = blockH + pad * 1.2;
-    defs += `<linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%"   stop-color="rgba(0,0,0,0.55)"/>
-      <stop offset="65%"  stop-color="rgba(0,0,0,0.38)"/>
-      <stop offset="100%" stop-color="rgba(0,0,0,0)"/>
-    </linearGradient>`;
-    rects += `<rect x="0" y="${Math.max(0, blockY - pad * 0.3)}" width="${w}" height="${featherH}" fill="url(#${gid})"/>`;
+    // ── 底板：只有 classic / brandGrad 用漸層（唔係實色 banner）──
+    if (style === "classic" || style === "brandGrad") {
+      const gid = `tg${gradId++}`;
+      const featherH = blockH + pad * 1.2;
+      const c  = style === "brandGrad" ? brandColor : "#000000";
+      const o1 = style === "brandGrad" ? "0.82" : "0.55";
+      const o2 = style === "brandGrad" ? "0.5"  : "0.38";
+      defs += `<linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="${c}" stop-opacity="${o1}"/>
+        <stop offset="65%"  stop-color="${c}" stop-opacity="${o2}"/>
+        <stop offset="100%" stop-color="${c}" stop-opacity="0"/>
+      </linearGradient>`;
+      rects += `<rect x="0" y="${Math.max(0, blockY - pad * 0.3)}" width="${w}" height="${featherH}" fill="url(#${gid})"/>`;
+    }
+
+    // ── 文字：依 style 出唔同字效 ──
+    const emit = (l: string, y: number, size: number, weight: string) => {
+      if (style === "shadow") {
+        // 多層遞增偏移黑字模擬柔和陰影（唔靠 filter，libr/resvg 相容）
+        ([[5, 0.16], [3, 0.26], [2, 0.36]] as [number, number][]).forEach(([off, op]) => {
+          texts += `<text x="${textX + off}" y="${y + off}" font-family="${FONT}" font-size="${size}" font-weight="${weight}" fill="black" opacity="${op}" text-anchor="${anchor}">${esc(l)}</text>`;
+        });
+        texts += `<text x="${textX}" y="${y}" font-family="${FONT}" font-size="${size}" font-weight="${weight}" fill="white" text-anchor="${anchor}">${esc(l)}</text>`;
+      } else if (style === "outline") {
+        texts += `<text x="${textX}" y="${y}" font-family="${FONT}" font-size="${size}" font-weight="${weight}" fill="none" stroke="rgba(0,0,0,0.6)" stroke-width="${Math.max(2.5, size * 0.07)}" stroke-linejoin="round" text-anchor="${anchor}">${esc(l)}</text>`;
+        texts += `<text x="${textX}" y="${y}" font-family="${FONT}" font-size="${size}" font-weight="${weight}" fill="white" text-anchor="${anchor}">${esc(l)}</text>`;
+      } else {
+        // classic / brandGrad：偏移投影 + 白字
+        texts += `<text x="${textX + 2}" y="${y + 2}" font-family="${FONT}" font-size="${size}" font-weight="${weight}" fill="black" opacity="0.35" text-anchor="${anchor}">${esc(l)}</text>`;
+        texts += `<text x="${textX}" y="${y}" font-family="${FONT}" font-size="${size}" font-weight="${weight}" fill="white" text-anchor="${anchor}">${esc(l)}</text>`;
+      }
+    };
 
     let cy = blockY + pad * 0.7;
-    titleLines.forEach(l => {
-      // 柔和投影（偏移描邊）→ 模擬光源陰影
-      texts += `<text x="${textX + 2}" y="${cy + tSize + 2}"
-        font-family="${FONT}"
-        font-size="${tSize}" font-weight="bold"
-        fill="black" text-anchor="${anchor}" opacity="0.35">${esc(l)}</text>`;
-      texts += `<text x="${textX}" y="${cy + tSize}"
-        font-family="${FONT}"
-        font-size="${tSize}" font-weight="bold"
-        fill="white" text-anchor="${anchor}">${esc(l)}</text>`;
-      cy += tLineH;
-    });
+    titleLines.forEach(l => { emit(l, cy + tSize, tSize, "bold"); cy += tLineH; });
     cy += sSize * 0.15;
-    subLines.forEach(l => {
-      texts += `<text x="${textX + 1}" y="${cy + sSize + 1}"
-        font-family="${FONT}"
-        font-size="${sSize}"
-        fill="black" text-anchor="${anchor}" opacity="0.30">${esc(l)}</text>`;
-      texts += `<text x="${textX}" y="${cy + sSize}"
-        font-family="${FONT}"
-        font-size="${sSize}"
-        fill="rgba(255,255,255,0.95)" text-anchor="${anchor}">${esc(l)}</text>`;
-      cy += sLineH;
-    });
+    subLines.forEach(l => { emit(l, cy + sSize, sSize, "normal"); cy += sLineH; });
   };
 
   if (zone === "top-left") {
@@ -424,11 +436,15 @@ export async function compositeImage(opts: {
   seed?: string;
   /** 直接指定文字版面（底圖模式用；唔傳就跟 layoutType 的 PLACEMENT）。 */
   textZone?: Placement["textZone"];
+  /** 文字設計風格（底圖模式用）。 */
+  textStyle?: TextStyle;
+  /** brandGrad 用嘅品牌主色（hex）。 */
+  primaryColor?: string;
 }): Promise<string> {
   await mkdir(UPLOADS, { recursive: true });
 
   const { backgroundUrl, productImageUrl, layoutType, canvasWidth, canvasHeight,
-          titleText, subtitleText, seed, textZone } = opts;
+          titleText, subtitleText, seed, textZone, textStyle, primaryColor } = opts;
   const pl = PLACEMENT[layoutType] ?? PLACEMENT["A"];
 
   // 1. 背景
@@ -470,7 +486,9 @@ export async function compositeImage(opts: {
     const textSvg = buildTextSvg(
       canvasWidth, canvasHeight,
       titleText ?? "", subtitleText ?? "",
-      textZone ?? pl.textZone
+      textZone ?? pl.textZone,
+      textStyle ?? "classic",
+      primaryColor ?? "#111111",
     );
     if (textSvg) layers.push({ input: textSvg, top: 0, left: 0 });
   }

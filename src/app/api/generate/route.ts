@@ -176,10 +176,11 @@ export async function POST(request: Request) {
       const size = (activity.customW > 0 && activity.customH > 0)
         ? { w: activity.customW, h: activity.customH }
         : { w: dims.w || 1024, h: dims.h || 1024 };
-      const VARIANTS: { type: string; zone: "top-left" | "top-full" | "bottom-full" }[] = [
-        { type: "BASE-TL", zone: "top-left"    },
-        { type: "BASE-TF", zone: "top-full"    },
-        { type: "BASE-BF", zone: "bottom-full" },
+      // 3 款：位置拉開（頂 / 左上 / 底）+ 唔同字效；只有頂款用品牌色漸層，其餘純文字 effect（唔用漸層）。
+      const VARIANTS: { type: string; zone: "top-full" | "top-left" | "bottom-full"; style: "brandGrad" | "shadow" | "outline" }[] = [
+        { type: "BASE-TOP", zone: "top-full",    style: "brandGrad" },  // 頂部 · 品牌色漸層 + 白字
+        { type: "BASE-MID", zone: "top-left",    style: "shadow"    },  // 左上 · 純白字柔和陰影（無漸層）
+        { type: "BASE-BOT", zone: "bottom-full", style: "outline"   },  // 底部 · 白字描邊（無漸層）
       ];
       const saved: Awaited<ReturnType<typeof db.generatedLayout.create>>[] = [];
       for (const v of VARIANTS) {
@@ -191,6 +192,8 @@ export async function POST(request: Request) {
               backgroundUrl: baseUrl,
               layoutType:    "A",
               textZone:      v.zone,
+              textStyle:     v.style,
+              primaryColor:  client.primaryColor,
               canvasWidth:   size.w,
               canvasHeight:  size.h,
               titleText:     headline || undefined,
@@ -214,6 +217,7 @@ export async function POST(request: Request) {
         const variantLayer = {
           ...textLayer,
           templateHint: v.zone,
+          styleHint: v.style,   // 我哋 basic 版用嘅字效；Cindy 可覆蓋
           textElements: textElements.map((t) => ({ ...t, zone: zoneTag })),
         };
         const layout = await db.generatedLayout.create({

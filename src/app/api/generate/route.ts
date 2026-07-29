@@ -147,11 +147,12 @@ export async function POST(request: Request) {
       const dims = await readImageSize(baseUrl);
 
       // 3. 打包文字層 schema（Cindy 契約）
-      const textElements = [
-        headline && { role: "headline", content: headline, zone: "top",    emphasis: "high"   },
-        aiSub    && { role: "subtitle", content: aiSub,    zone: "top",    emphasis: "medium" },
-        ctaText  && { role: "cta",      content: ctaText,  zone: "bottom", emphasis: "high"   },
-      ].filter(Boolean);
+      type TextEl = { role: string; content: string; zone: string; emphasis: string };
+      const textElements: TextEl[] = [
+        headline ? { role: "headline", content: headline, zone: "top",    emphasis: "high"   } : null,
+        aiSub    ? { role: "subtitle", content: aiSub,    zone: "top",    emphasis: "medium" } : null,
+        ctaText  ? { role: "cta",      content: ctaText,  zone: "bottom", emphasis: "high"   } : null,
+      ].filter((x): x is TextEl => x !== null);
       const textLayer = {
         version: "0.1",
         jobId: activityId,
@@ -169,51 +170,67 @@ export async function POST(request: Request) {
         templateHint: null,   // Q6 版面模板待定
       };
 
-      // 4. Sharp 疊字出成品（basic 版：headline + subtitle + logo；CTA 留 schema 俾 Cindy 精修）
-      //    唔重新生圖 — 底圖 100% 保留，只喺上面像素級疊字。失敗就退返原底圖，唔阻斷。
-      let finalUrl = baseUrl;
-      let burnedIn = false;
-      try {
-        const size = (activity.customW > 0 && activity.customH > 0)
-          ? { w: activity.customW, h: activity.customH }
-          : { w: dims.w || 1024, h: dims.h || 1024 };
-        if (headline || aiSub) {
-          finalUrl = await compositeImage({
-            backgroundUrl: baseUrl,
-            layoutType:    "A",          // top-left 文字區（底圖模式暫用固定版面；Q6 定案後再擴充）
-            canvasWidth:   size.w,
-            canvasHeight:  size.h,
-            titleText:     headline || undefined,
-            subtitleText:  aiSub    || undefined,
-            seed:          `${activityId}-base`,
-          });
-          burnedIn = true;
+      // 4. Sharp 疊字出「3 款文字版面」變體（basic 版；底圖 100% 保留、唔重新生圖）。
+      //    同一底圖 + 同一文案，只係文字擺位唔同（左上 / 頂部橫排 / 底部）俾用戶揀最襯嗰款。
+      //    CTA 仍留 schema 俾 Cindy 精修。任何一款失敗都退返原底圖，唔阻斷其餘。
+      const size = (activity.customW > 0 && activity.customH > 0)
+        ? { w: activity.customW, h: activity.customH }
+        : { w: dims.w || 1024, h: dims.h || 1024 };
+      const VARIANTS: { type: string; zone: "top-left" | "top-full" | "bottom-full" }[] = [
+        { type: "BASE-TL", zone: "top-left"    },
+        { type: "BASE-TF", zone: "top-full"    },
+        { type: "BASE-BF", zone: "bottom-full" },
+      ];
+      const saved: Awaited<ReturnType<typeof db.generatedLayout.create>>[] = [];
+      for (const v of VARIANTS) {
+        let finalUrl = baseUrl;
+        let burnedIn = false;
+        try {
+          if (headline || aiSub) {
+            finalUrl = await compositeImage({
+              backgroundUrl: baseUrl,
+              layoutType:    "A",
+              textZone:      v.zone,
+              canvasWidth:   size.w,
+              canvasHeight:  size.h,
+              titleText:     headline || undefined,
+              subtitleText:  aiSub    || undefined,
+              seed:          `${activityId}-${v.type}`,
+            });
+            burnedIn = true;
+          }
+          if (client.logoUrl && finalUrl !== baseUrl) {
+            finalUrl = await overlayLogo({
+              imageUrl: finalUrl, logoUrl: client.logoUrl,
+              textZone: v.zone, seed: `${activityId}-${v.type}-logo`,
+            });
+          }
+        } catch (e) {
+          console.warn(`[generate] 底圖疊字失敗(${v.type})，保留原底圖:`, e);
+          finalUrl = baseUrl; burnedIn = false;
         }
-        if (client.logoUrl && finalUrl !== baseUrl) {
-          finalUrl = await overlayLogo({
-            imageUrl: finalUrl, logoUrl: client.logoUrl,
-            textZone: "top-left", seed: `${activityId}-base-logo`,
-          });
-        }
-      } catch (e) {
-        console.warn("[generate] 底圖疊字失敗，保留原底圖:", e);
-        finalUrl = baseUrl; burnedIn = false;
+        // 每款嘅 schema：文字位跟該變體（templateHint + textElements.zone）
+        const zoneTag = v.zone === "bottom-full" ? "bottom" : "top";
+        const variantLayer = {
+          ...textLayer,
+          templateHint: v.zone,
+          textElements: textElements.map((t) => ({ ...t, zone: zoneTag })),
+        };
+        const layout = await db.generatedLayout.create({
+          data: {
+            activityId,
+            layoutType: v.type,
+            imageUrl: finalUrl,
+            copyText: postCopy,
+            textLayerJson: JSON.stringify(variantLayer),
+            textBurnedIn: burnedIn,   // Sharp 已燒 headline/subtitle；CTA 仍待 Cindy
+          },
+        });
+        saved.push(layout);
       }
 
-      // 5. 存 GeneratedLayout（imageUrl = 疊字成品；textLayerJson 保留原底圖俾 Cindy 精修）
-      const savedLayout = await db.generatedLayout.create({
-        data: {
-          activityId,
-          layoutType: "BASE",
-          imageUrl: finalUrl,
-          copyText: postCopy,
-          textLayerJson: JSON.stringify(textLayer),
-          textBurnedIn: burnedIn,   // Sharp 已燒 headline/subtitle；CTA 仍待 Cindy
-        },
-      });
-
       await db.activity.update({ where: { id: activityId }, data: { status: "DONE" } });
-      return NextResponse.json({ layouts: [savedLayout], mode: "BASE_IMAGE" });
+      return NextResponse.json({ layouts: saved, mode: "BASE_IMAGE" });
     } catch (err) {
       console.error("[generate] ❌ 底圖模式失敗:", err);
       await db.activity.update({ where: { id: activityId }, data: { status: "FAILED" } });

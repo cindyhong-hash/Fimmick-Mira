@@ -422,11 +422,13 @@ export async function compositeImage(opts: {
   titleText?: string;
   subtitleText?: string;
   seed?: string;
+  /** 直接指定文字版面（底圖模式用；唔傳就跟 layoutType 的 PLACEMENT）。 */
+  textZone?: Placement["textZone"];
 }): Promise<string> {
   await mkdir(UPLOADS, { recursive: true });
 
   const { backgroundUrl, productImageUrl, layoutType, canvasWidth, canvasHeight,
-          titleText, subtitleText, seed } = opts;
+          titleText, subtitleText, seed, textZone } = opts;
   const pl = PLACEMENT[layoutType] ?? PLACEMENT["A"];
 
   // 1. 背景
@@ -463,12 +465,12 @@ export async function compositeImage(opts: {
     }
   }
 
-  // 3. 文字燒入
+  // 3. 文字燒入（textZone 有傳就用佢，否則跟 layoutType 的 PLACEMENT）
   if (titleText?.trim() || subtitleText?.trim()) {
     const textSvg = buildTextSvg(
       canvasWidth, canvasHeight,
       titleText ?? "", subtitleText ?? "",
-      pl.textZone
+      textZone ?? pl.textZone
     );
     if (textSvg) layers.push({ input: textSvg, top: 0, left: 0 });
   }

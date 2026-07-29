@@ -21,6 +21,8 @@ export type ActivityFormValues = {
   productImageUrls: string[];
   referenceImageUrls: string[];
   selectedComponentIds: string[];
+  /** [2b] 底圖模式：成張相 100% 做背景，唔重新生圖。空 = 一般 AI 生成流程。 */
+  baseImageUrl?: string;
 };
 
 // ── 可選生圖模型 ───────────────────────────────────────────────────────────────
@@ -174,7 +176,11 @@ export function ActivityForm({
     productImageUrls:     initialValues?.productImageUrls     ?? [],
     referenceImageUrls:   initialValues?.referenceImageUrls   ?? [],
     selectedComponentIds: initialValues?.selectedComponentIds ?? [],
+    baseImageUrl:         initialValues?.baseImageUrl,
   });
+
+  // 底圖模式：成張相做背景、唔重新生圖 → 收起生圖模型/積木/參考圖等生成相關 UI。
+  const isBaseMode = !!values.baseImageUrl;
 
   const [uploadingProduct, setUploadingProduct] = useState(false);
   const [uploadingRef,     setUploadingRef]     = useState(false);
@@ -346,6 +352,26 @@ export function ActivityForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-8 max-w-2xl">
 
+      {/* ── 底圖模式 banner（成張相做背景，唔重新生圖）─────────── */}
+      {isBaseMode && (
+        <div className="flex items-start gap-3 rounded-xl border border-violet-200 bg-violet-50 p-3.5">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={values.baseImageUrl} alt="活動圖底圖" className="w-16 h-16 rounded-lg border object-cover bg-white shrink-0" />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 text-sm font-semibold text-violet-700">
+              <ImageIcon className="h-4 w-4" />活動圖底圖模式
+            </div>
+            <p className="text-[11px] text-violet-600/90 mt-1 leading-relaxed">
+              呢張相會 <b>100% 做背景</b>，唔會重新生圖。填下面嘅文字內容，系統會幫你生成文案，再交排版加落圖上。
+            </p>
+          </div>
+          <button type="button" onClick={() => set("baseImageUrl", undefined)}
+            className="text-violet-400 hover:text-red-500 shrink-0" title="取消底圖模式">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
       {/* ── 01 基本資訊 ─────────────────────────────────────── */}
       <div className="space-y-4">
         <SectionLabel step="01" title="基本資訊" />
@@ -462,6 +488,8 @@ export function ActivityForm({
         </Field>
       </div>
 
+      {/* 底圖模式唔重新生圖 → 唔需要素材上傳(02) / 風格積木(03) */}
+      {!isBaseMode && (<>
       {/* ── 02 素材上傳 ─────────────────────────────────────── */}
       <div className="space-y-4">
         <SectionLabel step="02" title="素材上傳" />
@@ -578,10 +606,11 @@ export function ActivityForm({
         </div>
         <p className="text-[11px] text-gray-400">揀咗會即時加入上方「畫面描述 Prompt」，可再喺嗰度改字。</p>
       </div>
+      </>)}
 
-      {/* ── 04 圖片尺寸比例 ─────────── */}
+      {/* ── 04 圖片尺寸比例（底圖模式冇 02/03 → 順延做 02）─────────── */}
       <div className="space-y-4">
-        <SectionLabel step="04" title="圖片尺寸比例" />
+        <SectionLabel step={isBaseMode ? "02" : "04"} title="圖片尺寸比例" />
         <div className="relative w-full max-w-md">
           <select
             value={values.imageRatio}
@@ -606,7 +635,8 @@ export function ActivityForm({
           <span className="text-[11px] text-gray-400">px · 改任一邊自動鎖 {values.imageRatio} 比例</span>
         </div>
 
-        {/* 生圖模型 */}
+        {/* 生圖模型（底圖模式唔重新生圖 → 唔顯示）*/}
+        {!isBaseMode && (
         <div className="space-y-1">
           <Label className="text-sm font-medium">生圖模型</Label>
           <div className="relative w-full max-w-md">
@@ -627,18 +657,20 @@ export function ActivityForm({
             {IMAGE_MODELS.find((m) => m.value === values.imageModel)?.hint ?? ""}
           </p>
         </div>
+        )}
       </div>
 
       {/* ── Submit ──────────────────────────────────────────── */}
       <Button type="submit" disabled={loading} className="w-full">
         {loading
           ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />處理中…</>
-          : submitLabel}
+          : (isBaseMode ? "建立活動（用此底圖生成文案）" : submitLabel)}
       </Button>
 
       {showLibPicker && (
         <LibraryImagePickerModal
           clientId={clientId}
+          title="從素材庫揀參考圖"
           onPick={(url, promptText) => { set("referenceImageUrls", [url]); setRefStylePrompt(promptText ?? ""); setShowLibPicker(false); }}
           onClose={() => setShowLibPicker(false)}
         />

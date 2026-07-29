@@ -53,10 +53,22 @@
   - ① 作參考圖（只借風格，另生成新畫面）
   - ② 作活動圖底圖（**成張相 100% 用做背景** → 用戶喺相上加文字 → **系統自動生成文案** → Cindy 做文字排版/生成）。
 
-**❓ 待傾（開工前）**
-- (Q6) 文字層**版面 / 模板 layout**（用戶指明遲啲傾）。
-- (Q7) Mode A② 「用素材庫圖片」揀完，係咪都要分 參考圖 / 底圖（同 Mode B 一致）？
-- (Q8) 同 Cindy 對接嘅**模板 schema / 介面**（先定佢先郁得手）。
+**✅ 已定 + 已做（2026-07-29）**
+- (Q7) **要分，兩邊一致** → Mode A② 同 Mode B 共用 `RolePickerModal`（參考圖 / 底圖）。
+- (Q8) **已起草 schema** → `docs/CINDY-TEXT-LAYER-SCHEMA.md`（v0.1，等 Verna + Cindy review）。
+- Mode A 入口採 **方案 B**（「新增活動」先彈 ①新生成 / ②用素材庫圖片）。
+
+**✅ 2b 已實作 + 端到端驗證通過**
+- Prisma：`Activity.baseImageUrl`、`GeneratedLayout.textLayerJson`（db push 完）。
+- 共用 `RolePickerModal`（參考圖 / 底圖）；`NewActivityModal`（Mode A ①/②）；`BrandWorkspaceHeader`「新增活動」改開 pop-up。
+- Mode B：`LibraryWorkspace` 素材圖 popup「帶入活動圖生成」→ RolePicker。
+- `ActivityForm` 底圖模式（banner + 收起生成 UI）；`/api/activities` 收 baseImageUrl。
+- `generate` route 底圖模式：**唔重新生圖**，只生文案 + 打包 `textLayerJson`（Cindy schema）。
+- 驗證：Mode A → 揀圖 → RolePicker → 底圖模式表單 → 建立 → DB textLayerJson 正確（headline/subtitle/cta/postCopy 齊）。
+
+**❓ 仲要傾（交俾 Cindy 之前）**
+- (Q6) 文字層**版面 / 模板 layout** —— schema 內 `zone`/`emphasis`/`templateHint` 現屬建議性質，等傾完收緊。
+- Cindy review `docs/CINDY-TEXT-LAYER-SCHEMA.md` 尾段 4 條問題（role 夠唔夠 / zone 用區域定座標 / 顏色點指定 / 交付介面）。
 
 ---
 

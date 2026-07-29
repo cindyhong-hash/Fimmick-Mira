@@ -58,6 +58,25 @@ function parseImageText(raw: string): { title: string; imageSubtitle: string } {
   };
 }
 
+/** 讀圖片實際像素尺寸（底圖模式供 Cindy 排版用）；失敗回 0×0，唔阻斷流程。 */
+async function readImageSize(url: string): Promise<{ w: number; h: number }> {
+  try {
+    const sharp = (await import("sharp")).default;
+    let buf: Buffer;
+    if (url.startsWith("/")) {
+      const { readFile } = await import("fs/promises");
+      const { join } = await import("path");
+      buf = await readFile(join(process.cwd(), "public", url.split("?")[0]));
+    } else {
+      buf = Buffer.from(await (await fetch(url)).arrayBuffer());
+    }
+    const m = await sharp(buf).metadata();
+    return { w: m.width ?? 0, h: m.height ?? 0 };
+  } catch {
+    return { w: 0, h: 0 };
+  }
+}
+
 /** 取出完整發文文案 */
 function parsePostCopy(raw: string): string {
   const match = raw.match(/發文文案[：:]\s*([\s\S]+)/);
@@ -100,6 +119,76 @@ export async function POST(request: Request) {
   await db.activity.update({ where: { id: activityId }, data: { status: "GENERATING" } });
 
   const { client } = activity;
+
+  // ── [2b] 底圖模式：成張相 100% 做背景，唔重新生圖 ──────────────────────────
+  //     只生成文案 + 打包一份「文字層 schema」交俾 Cindy（見 docs/CINDY-TEXT-LAYER-SCHEMA.md）。
+  if (activity.baseImageUrl) {
+    try {
+      const tones: string[] = client.toneLabels ? JSON.parse(client.toneLabels) : [];
+      const baseUrl = activity.baseImageUrl;
+
+      // 1. 生成文案（用 A 版型鎖定使用者文字；冇 OpenRouter 時降級用原文）
+      const copyPrompt = buildCopyPrompt({
+        theme:      activity.theme,
+        focusPoint: activity.focusPoint ?? "",
+        titleText:  activity.titleText  ?? "",
+        toneLabels: tones,
+        layoutType: "A",
+        taboos:     [],
+        forceTitle: true,
+      });
+      const rawCopy = (await chatTextOpenRouter(copyPrompt, 500)) ?? "";
+      const { title: aiTitle, imageSubtitle: aiSub } = parseImageText(rawCopy);
+      const headline = aiTitle || (activity.titleText?.trim() ?? "");
+      const ctaText = rawCopy.match(/CTA[：:]\s*(.+)/)?.[1]?.trim() || "";
+      const postCopy = parsePostCopy(rawCopy) || rawCopy;
+
+      // 2. 讀底圖實際尺寸（供 Cindy 排版用）
+      const dims = await readImageSize(baseUrl);
+
+      // 3. 打包文字層 schema（Cindy 契約）
+      const textElements = [
+        headline && { role: "headline", content: headline, zone: "top",    emphasis: "high"   },
+        aiSub    && { role: "subtitle", content: aiSub,    zone: "top",    emphasis: "medium" },
+        ctaText  && { role: "cta",      content: ctaText,  zone: "bottom", emphasis: "high"   },
+      ].filter(Boolean);
+      const textLayer = {
+        version: "0.1",
+        jobId: activityId,
+        mode: "BASE_IMAGE",
+        baseImage: { url: baseUrl, width: dims.w, height: dims.h, ratio: activity.imageRatio ?? "1:1" },
+        brand: {
+          name:           client.name,
+          primaryColor:   client.primaryColor,
+          secondaryColor: client.secondaryColor ?? null,
+          logoUrl:        client.logoUrl ?? null,
+          fontHint:       client.commonText || "",
+        },
+        textElements,
+        postCopy,
+        templateHint: null,   // Q6 版面模板待定
+      };
+
+      // 4. 存一個 GeneratedLayout（imageUrl = 底圖本身；文字層留俾 Cindy）
+      const savedLayout = await db.generatedLayout.create({
+        data: {
+          activityId,
+          layoutType: "BASE",
+          imageUrl: baseUrl,
+          copyText: postCopy,
+          textLayerJson: JSON.stringify(textLayer),
+          textBurnedIn: false,   // 文字未燒入 — 交 Cindy 排版
+        },
+      });
+
+      await db.activity.update({ where: { id: activityId }, data: { status: "DONE" } });
+      return NextResponse.json({ layouts: [savedLayout], mode: "BASE_IMAGE" });
+    } catch (err) {
+      console.error("[generate] ❌ 底圖模式失敗:", err);
+      await db.activity.update({ where: { id: activityId }, data: { status: "FAILED" } });
+      return NextResponse.json({ error: String(err) }, { status: 500 });
+    }
+  }
 
   // ── JSON 防呆解析 ──────────────────────────────────────────────────────────
   const toneLabels: string[]      = client.toneLabels        ? JSON.parse(client.toneLabels)        : [];

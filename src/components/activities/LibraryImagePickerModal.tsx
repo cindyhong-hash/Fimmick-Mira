@@ -45,10 +45,12 @@ export function LibraryImagePickerModal({
   clientId,
   onPick,
   onClose,
+  title = "從素材庫揀圖",
 }: {
   clientId: string;
   onPick: (url: string, promptText?: string) => void; // 連帶回傳該圖已有嘅 AI Prompt（免再分析）
   onClose: () => void;
+  title?: string;
 }) {
   const [items, setItems] = useState<GalleryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,7 +85,7 @@ export function LibraryImagePickerModal({
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-3xl h-[80vh] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3.5 border-b shrink-0">
-          <h2 className="text-sm font-semibold">從素材庫揀參考圖</h2>
+          <h2 className="text-sm font-semibold">{title}</h2>
           <button type="button" onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100"><X className="h-4 w-4" /></button>
         </div>
         <div className="px-4 pt-2.5 pb-2 border-b bg-gray-50/60 shrink-0 space-y-2">

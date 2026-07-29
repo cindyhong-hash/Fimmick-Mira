@@ -127,63 +127,49 @@ export async function POST(request: Request) {
       const tones: string[] = client.toneLabels ? JSON.parse(client.toneLabels) : [];
       const baseUrl = activity.baseImageUrl;
 
-      // 1. 生成文案（用 A 版型鎖定使用者文字；冇 OpenRouter 時降級用原文）
-      const copyPrompt = buildCopyPrompt({
-        theme:      activity.theme,
-        focusPoint: activity.focusPoint ?? "",
-        titleText:  activity.titleText  ?? "",
-        toneLabels: tones,
-        layoutType: "A",
-        taboos:     [],
-        forceTitle: true,
-      });
-      const rawCopy = (await chatTextOpenRouter(copyPrompt, 500)) ?? "";
-      const { title: aiTitle, imageSubtitle: aiSub } = parseImageText(rawCopy);
-      const headline = aiTitle || (activity.titleText?.trim() ?? "");
-      const ctaText = rawCopy.match(/CTA[：:]\s*(.+)/)?.[1]?.trim() || "";
-      const postCopy = parsePostCopy(rawCopy) || rawCopy;
-
-      // 2. 讀底圖實際尺寸（供 Cindy 排版用）
+      // 讀底圖尺寸 + 品牌資料（3 款共用）
       const dims = await readImageSize(baseUrl);
-
-      // 3. 打包文字層 schema（Cindy 契約）
-      type TextEl = { role: string; content: string; zone: string; emphasis: string };
-      const textElements: TextEl[] = [
-        headline ? { role: "headline", content: headline, zone: "top",    emphasis: "high"   } : null,
-        aiSub    ? { role: "subtitle", content: aiSub,    zone: "top",    emphasis: "medium" } : null,
-        ctaText  ? { role: "cta",      content: ctaText,  zone: "bottom", emphasis: "high"   } : null,
-      ].filter((x): x is TextEl => x !== null);
-      const textLayer = {
-        version: "0.1",
-        jobId: activityId,
-        mode: "BASE_IMAGE",
-        baseImage: { url: baseUrl, width: dims.w, height: dims.h, ratio: activity.imageRatio ?? "1:1" },
-        brand: {
-          name:           client.name,
-          primaryColor:   client.primaryColor,
-          secondaryColor: client.secondaryColor ?? null,
-          logoUrl:        client.logoUrl ?? null,
-          fontHint:       client.commonText || "",
-        },
-        textElements,
-        postCopy,
-        templateHint: null,   // Q6 版面模板待定
-      };
-
-      // 4. Sharp 疊字出「3 款文字版面」變體（basic 版；底圖 100% 保留、唔重新生圖）。
-      //    同一底圖 + 同一文案，只係文字擺位唔同（左上 / 頂部橫排 / 底部）俾用戶揀最襯嗰款。
-      //    CTA 仍留 schema 俾 Cindy 精修。任何一款失敗都退返原底圖，唔阻斷其餘。
       const size = (activity.customW > 0 && activity.customH > 0)
         ? { w: activity.customW, h: activity.customH }
         : { w: dims.w || 1024, h: dims.h || 1024 };
-      // 3 款：位置拉開（頂 / 左上 / 底）+ 唔同字效；只有頂款用品牌色漸層，其餘純文字 effect（唔用漸層）。
-      const VARIANTS: { type: string; zone: "top-full" | "top-left" | "bottom-full"; style: "brandGrad" | "shadow" | "outline" }[] = [
-        { type: "BASE-TOP", zone: "top-full",    style: "brandGrad" },  // 頂部 · 品牌色漸層 + 白字
-        { type: "BASE-MID", zone: "top-left",    style: "shadow"    },  // 左上 · 純白字柔和陰影（無漸層）
-        { type: "BASE-BOT", zone: "bottom-full", style: "outline"   },  // 底部 · 白字描邊（無漸層）
+      const brand = {
+        name:           client.name,
+        primaryColor:   client.primaryColor,
+        secondaryColor: client.secondaryColor ?? null,
+        logoUrl:        client.logoUrl ?? null,
+        fontHint:       client.commonText || "",
+      };
+      type TextEl = { role: string; content: string; zone: string; emphasis: string };
+
+      // 3 款：每款各自 AI 生「唔同文案」（頂款鎖用戶必放文字；中/底款 AI 自由發揮）
+      //       + 位置拉開（頂/左上/底）+ 唔同字效。底圖 100% 保留、唔重新生圖。
+      const VARIANTS: {
+        type: string; zone: "top-full" | "top-left" | "bottom-full";
+        style: "brandGrad" | "shadow" | "outline"; copyLayout: "A" | "B" | "C";
+      }[] = [
+        { type: "BASE-TOP", zone: "top-full",    style: "brandGrad", copyLayout: "A" },  // 頂 · 品牌漸層 · 鎖用戶文字
+        { type: "BASE-MID", zone: "top-left",    style: "shadow",    copyLayout: "B" },  // 左上 · 陰影 · AI 發揮
+        { type: "BASE-BOT", zone: "bottom-full", style: "outline",   copyLayout: "C" },  // 底 · 描邊 · AI 發揮
       ];
       const saved: Awaited<ReturnType<typeof db.generatedLayout.create>>[] = [];
       for (const v of VARIANTS) {
+        // ── 每款各自生文案（A 鎖定使用者文字；B/C 自由發揮 → 3 款文字唔同）──
+        const copyPrompt = buildCopyPrompt({
+          theme:      activity.theme,
+          focusPoint: activity.focusPoint ?? "",
+          titleText:  activity.titleText  ?? "",
+          toneLabels: tones,
+          layoutType: v.copyLayout,
+          taboos:     [],
+          forceTitle: v.copyLayout === "A",
+        });
+        const rawCopy = (await chatTextOpenRouter(copyPrompt, 500)) ?? "";
+        const { title: aiTitle, imageSubtitle: aiSub } = parseImageText(rawCopy);
+        const headline = aiTitle || (v.copyLayout === "A" ? (activity.titleText?.trim() ?? "") : "");
+        const ctaText = rawCopy.match(/CTA[：:]\s*(.+)/)?.[1]?.trim() || "";
+        const postCopy = parsePostCopy(rawCopy) || rawCopy;
+
+        // ── Sharp 疊字（唔重新生圖）──
         let finalUrl = baseUrl;
         let burnedIn = false;
         try {
@@ -212,13 +198,24 @@ export async function POST(request: Request) {
           console.warn(`[generate] 底圖疊字失敗(${v.type})，保留原底圖:`, e);
           finalUrl = baseUrl; burnedIn = false;
         }
-        // 每款嘅 schema：文字位跟該變體（templateHint + textElements.zone）
+
+        // ── 每款各自打包 schema（Cindy 契約，文案/位置跟該款）──
         const zoneTag = v.zone === "bottom-full" ? "bottom" : "top";
+        const textElements: TextEl[] = [
+          headline ? { role: "headline", content: headline, zone: zoneTag, emphasis: "high"   } : null,
+          aiSub    ? { role: "subtitle", content: aiSub,    zone: zoneTag, emphasis: "medium" } : null,
+          ctaText  ? { role: "cta",      content: ctaText,  zone: "bottom", emphasis: "high"  } : null,
+        ].filter((x): x is TextEl => x !== null);
         const variantLayer = {
-          ...textLayer,
+          version: "0.1",
+          jobId: activityId,
+          mode: "BASE_IMAGE",
+          baseImage: { url: baseUrl, width: dims.w, height: dims.h, ratio: activity.imageRatio ?? "1:1" },
+          brand,
+          textElements,
+          postCopy,
           templateHint: v.zone,
-          styleHint: v.style,   // 我哋 basic 版用嘅字效；Cindy 可覆蓋
-          textElements: textElements.map((t) => ({ ...t, zone: zoneTag })),
+          styleHint: v.style,
         };
         const layout = await db.generatedLayout.create({
           data: {
@@ -227,7 +224,7 @@ export async function POST(request: Request) {
             imageUrl: finalUrl,
             copyText: postCopy,
             textLayerJson: JSON.stringify(variantLayer),
-            textBurnedIn: burnedIn,   // Sharp 已燒 headline/subtitle；CTA 仍待 Cindy
+            textBurnedIn: burnedIn,
           },
         });
         saved.push(layout);

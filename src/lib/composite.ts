@@ -63,6 +63,7 @@ function buildTextSvg(
   zone: Placement["textZone"],
   style: TextStyle = "classic",
   brandColor = "#111111",
+  gradColor?: string,   // brandGrad 用：已 blend 好嘅自適應漸層色（rgb 字串）；無就用 brandColor
 ): Buffer | null {
   if (zone === "none" || (!title?.trim() && !subtitle?.trim())) return null;
 
@@ -91,12 +92,13 @@ function buildTextSvg(
     if (style === "classic" || style === "brandGrad") {
       const gid = `tg${gradId++}`;
       const featherH = blockH + pad * 1.2;
-      const c  = style === "brandGrad" ? brandColor : "#000000";
-      const o1 = style === "brandGrad" ? "0.82" : "0.55";
-      const o2 = style === "brandGrad" ? "0.5"  : "0.38";
+      // brandGrad：用自適應色（檢測底圖該區 + blend 品牌色）+ 低 opacity 半透明，融入相片
+      const c  = style === "brandGrad" ? (gradColor ?? brandColor) : "#000000";
+      const o1 = style === "brandGrad" ? "0.58" : "0.55";
+      const o2 = style === "brandGrad" ? "0.32" : "0.38";
       defs += `<linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%"   stop-color="${c}" stop-opacity="${o1}"/>
-        <stop offset="65%"  stop-color="${c}" stop-opacity="${o2}"/>
+        <stop offset="60%"  stop-color="${c}" stop-opacity="${o2}"/>
         <stop offset="100%" stop-color="${c}" stop-opacity="0"/>
       </linearGradient>`;
       rects += `<rect x="0" y="${Math.max(0, blockY - pad * 0.3)}" width="${w}" height="${featherH}" fill="url(#${gid})"/>`;
@@ -225,6 +227,31 @@ async function sampleRegionBusyness(
   const std = Math.sqrt(variance);
   // std 0~~80 對應到 0~1（80 以上視為很忙）
   return Math.min(1, std / 80);
+}
+
+// 抽取區域平均 RGB（供自適應漸層用：檢測底圖該區實際顏色）
+async function sampleRegionAvgColor(
+  src: sharp.Sharp,
+  region: { left: number; top: number; width: number; height: number }
+): Promise<{ r: number; g: number; b: number }> {
+  const { data } = await src
+    .clone()
+    .extract(region)
+    .resize(16, 16, { fit: "fill" })
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  let r = 0, g = 0, b = 0;
+  const n = data.length / 3;
+  for (let i = 0; i < data.length; i += 3) { r += data[i]; g += data[i + 1]; b += data[i + 2]; }
+  return { r: Math.round(r / n), g: Math.round(g / n), b: Math.round(b / n) };
+}
+
+// hex → RGB（品牌色 blend 用）
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  const h = hex.replace("#", "");
+  if (h.length < 6) return { r: 17, g: 17, b: 17 };
+  return { r: parseInt(h.slice(0, 2), 16), g: parseInt(h.slice(2, 4), 16), b: parseInt(h.slice(4, 6), 16) };
 }
 
 function classifyBrightness(luma: number): BgTone {
@@ -483,12 +510,32 @@ export async function compositeImage(opts: {
 
   // 3. 文字燒入（textZone 有傳就用佢，否則跟 layoutType 的 PLACEMENT）
   if (titleText?.trim() || subtitleText?.trim()) {
+    const zone = textZone ?? pl.textZone;
+    // brandGrad：檢測底圖文字區平均色 → 加深 + blend 品牌色 → 自適應半透明漸層（融入相片）
+    let gradColor: string | undefined;
+    if (textStyle === "brandGrad") {
+      try {
+        const isBottom = zone === "bottom-full";
+        const region = {
+          left: 0,
+          top: isBottom ? Math.floor(canvasHeight * 0.72) : 0,
+          width: canvasWidth,
+          height: Math.max(1, Math.floor(canvasHeight * 0.28)),
+        };
+        const avg = await sampleRegionAvgColor(sharp(bgResized), region);
+        const br = hexToRgb(primaryColor ?? "#111111");
+        // 相片色加深（×0.45）+ 品牌色輕 tint（×0.25）→ 融入相片、保留品牌識別、夠暗令白字清晰
+        const mix = (p: number, b: number) => Math.min(255, Math.round(p * 0.45 + b * 0.25));
+        gradColor = `rgb(${mix(avg.r, br.r)},${mix(avg.g, br.g)},${mix(avg.b, br.b)})`;
+      } catch { /* 失敗就用 fallback brandColor */ }
+    }
     const textSvg = buildTextSvg(
       canvasWidth, canvasHeight,
       titleText ?? "", subtitleText ?? "",
-      textZone ?? pl.textZone,
+      zone,
       textStyle ?? "classic",
       primaryColor ?? "#111111",
+      gradColor,
     );
     if (textSvg) layers.push({ input: textSvg, top: 0, left: 0 });
   }

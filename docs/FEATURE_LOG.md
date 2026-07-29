@@ -12,8 +12,45 @@
 | **2026-06-15** | **合成引擎大改 + 分類/文案升級** | **FLUX.2 edit 升主力**（實測中文字保真遠勝，推翻「只有保留原像素先保到中文」）；加 Seedream 4.5；**退役 Bria/GPT**；Qwen/貼圖收起；合成餵高清原圖；persona 入 system role + 潤色寫手；圖庫 5 類 + 改名；reassign |
 | **2026-06-17** | **來源圖顯示 + 多輸出 + 系列圖（固定模板）** | #2 popup 顯示來源產品圖；#3 合成一次出 1–5 張揀；#4 系列圖 = **固定模板貼圖**（接地+投射陰影、可選 AI 融合打光、1800×1200）—— 因生成式（FLUX/nano/Seedream）做唔到「固定元素+固定產品大小」 |
 | **2026-06-18** | **popup 帶入生成 + Nano 純文字生圖** | 背景 popup 加「帶入生成圖片（作背景）」；「圖片風格」popup 加「全部帶入生成圖片」一鍵 inject 構圖/配色/語氣/背景 + 跳 tab；主 popup 按 `libraryImageId` 分**「參考圖 / 產品成圖」**（參考圖右欄頂「全部帶入」；產品成圖右欄頂不放掣、「重新生成」留左下）；**Nano Banana 解除「需參考圖」限制**：有參考圖→edit 風格遷移、無→`fal-ai/nano-banana` 純文字生圖（後端自動切）|
+| **2026-07-29** | **v0.10.0 · 素材庫→活動圖生成（2b）+ Onboarding + 全面 OpenRouter** | Onboarding 預設落第一個品牌廣告活動圖 tab；活動圖 03 積木注入 AI Prompt；版本號 0.10.0（側欄左下）；inpaint/transform-copy/generate 全轉 OpenRouter（移除 Anthropic 依賴）；**2b**：Mode A（「新增活動」pop-up ①新生成/②用素材庫圖片）/ Mode B（素材圖 popup「帶入活動圖生成」）共用 `RolePickerModal`（參考圖/底圖）；**底圖模式**唔重生圖、Sharp 疊字出 **3 款**（各款 AI 生唔同文案 + 位置 + 字效：品牌自適應漸層 / 陰影 / 描邊）；文字層 `textLayerJson` schema 交 Cindy |
 
 > 每個里程碑嘅詳細決定/討論見下面分節同 [DECISIONS.md](./DECISIONS.md)；引擎細節見 [AI-ENGINES.md](./AI-ENGINES.md)；函數速查見 [FUNCTIONS.md](./FUNCTIONS.md)。
+
+---
+
+## 2026-07-29：v0.10.0 — 素材庫「活動圖生成」入口（2b）+ Onboarding + 版本號 + 全面 OpenRouter
+
+### 供應商全面轉 OpenRouter（移除 Anthropic 依賴）
+- `generate`（風格分析/文案）、`transform-copy`（文案轉換）、`inpaint`（讀圖抽文字 + 中→英翻譯）由直連 Anthropic 改用 OpenRouter（`chatTextOpenRouter` / `describeImageOpenRouter`）。prompt 內容全部不變、行為一致。
+- 刪走 `src/lib/anthropic.ts` → 全專案唔再需要 `ANTHROPIC_API_KEY`，一個 OpenRouter key 搞掂文字/vision。
+
+### User Onboarding（預設首頁）
+- `/`（`clients/page.tsx`）：有品牌 → 自動 redirect 落**第一個品牌**（釘選置頂優先，同側欄排序一致）嘅**廣告活動圖 tab**（`/clients/[id]`）；一個品牌都冇先顯示「還沒有客戶」空狀態。
+
+### 活動圖 03 積木注入 AI Prompt
+- `ActivityForm` 復原 section 03：圖片式積木 picker（構圖 / 顏色 / 背景，同素材庫 `SlotPickerModal` 一致）。
+- 揀完即時將結構化標籤 `[構圖:…][配色:…][背景:…]` 寫入「畫面描述 Prompt」textarea（可再手改）；顏色卡顯示色板。原「圖片尺寸比例」順延做 04。
+
+### 版本號
+- `package.json` `0.1.0` → `0.10.0`（single source）；`next.config.ts` 注入 `NEXT_PUBLIC_APP_VERSION`；側欄左下角顯示 `v0.10.0`（`sticky` 底部）。
+
+### 2b — 素材庫「活動圖生成」入口（WF3 v3 方案 B）
+兩個入口、共用角色分流：
+- **Mode A（廣告活動圖頁）**：`BrandWorkspaceHeader`「新增活動」由 `<Link>` 改開 `NewActivityModal` → ① 新活動圖生成（入空白表單）/ ② 用素材庫圖片（`LibraryImagePickerModal` 揀圖 → `RolePickerModal`）。
+- **Mode B（素材庫圖片 popup）**：`ImageDetailModal`「帶入活動圖生成」→ `LibraryWorkspace` 開 `RolePickerModal`。
+- **共用 `RolePickerModal`**（Q7 兩邊一致）：① 作參考圖（塞 `referenceImageUrls`，行現有生圖流程）/ ② 作活動圖底圖。圖經 sessionStorage（`activityRefImage` / `activityBaseImage`）傳去新增活動頁，唔喺網址外露。
+- **跨品牌揀圖**：`LibraryImagePickerModal` 加「全部品牌」切換（預設鎖當前品牌），同積木 picker 一致；gallery API 唔傳 `clientId` = 攞晒。留 WIP 註記（將來接 login 要 scope 落用戶自己 account 品牌）。
+
+### 底圖模式（`generate` route）
+- `Activity.baseImageUrl` 有值 → **唔重新生圖**、底圖 100% 保留；`GeneratedLayout.textLayerJson` 存交俾 Cindy 嘅文字層 JSON（見 [CINDY-TEXT-LAYER-SCHEMA.md](./CINDY-TEXT-LAYER-SCHEMA.md)）。
+- Sharp 疊字（`compositeImage` + `overlayLogo`，`src/lib/composite.ts`）出 **3 款**，每款：
+  - **各自 AI 生唔同文案**（`copyLayout` A 鎖用戶必放文字 / B / C 自由發揮 → 3 款文字唔同，同一般模式一致）；
+  - **唔同位置**（頂 / 左上 / 底）；
+  - **唔同字效**：`brandGrad`（自適應漸層：`sampleRegionAvgColor` 檢測底圖該區平均色 ×0.45 + 品牌色 ×0.25 blend，opacity 0.58 半透明，融入相片、唔遮產品）/ `shadow`（純白字柔和陰影，無底板）/ `outline`（白字描邊，無底板）。
+  - CTA 仍留 schema 俾 Cindy 精修（basic 版燒 headline/subtitle）。
+- `LayoutPicker` 識 `BASE-*` layoutType（label：品牌漸層 / 柔和陰影 / 描邊白字）+「🖼️ 底圖」badge；一般模式 A/B/C 行為不變（`classic` 漸層款保留）。
+
+> 設計取捨過程（banner→純 effect→自適應漸層、單一 style→3 款位置→各款 AI 文案）詳見 commit 歷史；文字精緻排版最終交 Cindy，我哋側做 basic 版交接前先 work。
 
 ---
 

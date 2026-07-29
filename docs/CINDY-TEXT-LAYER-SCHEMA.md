@@ -105,3 +105,13 @@
 - 角色分流（Q7 已定：Mode A② 同 Mode B 一致）：
   - **參考圖** → append 落 `referenceImageUrls`，行現有 generate 流程。
   - **底圖** → set `baseImageUrl`，generate 時**跳過生圖**，直接用底圖 + 打包呢份 schema。
+
+## 6. 現況：basic 版已喺我哋側疊字（交接前先 work）
+
+- generate route 底圖模式已接 **Sharp 疊字**（`compositeImage` + `overlayLogo`，見 `src/lib/composite.ts`）：
+  - 用底圖做背景（**100% 保留、唔重新生圖**），像素級疊 **headline + subtitle**（Noto Sans TC）+ 品牌 logo。
+  - `GeneratedLayout.imageUrl` = 疊字成品；`textLayerJson.baseImage.url` 仍指向**原底圖**，俾 Cindy 精修時用返乾淨底圖。
+- **basic 版限制**（交 Cindy 精修時處理）：
+  - 只燒 headline + subtitle；**CTA 仍留喺 schema**，未燒上圖。
+  - 版面固定 top-left（＝ Q6 未定，暫用固定版面）。
+  - 質感 = 基本商業感（白字 + 投影 + 漸層遮罩）；Cindy 版做品牌級精緻排版。

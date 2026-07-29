@@ -169,15 +169,46 @@ export async function POST(request: Request) {
         templateHint: null,   // Q6 版面模板待定
       };
 
-      // 4. 存一個 GeneratedLayout（imageUrl = 底圖本身；文字層留俾 Cindy）
+      // 4. Sharp 疊字出成品（basic 版：headline + subtitle + logo；CTA 留 schema 俾 Cindy 精修）
+      //    唔重新生圖 — 底圖 100% 保留，只喺上面像素級疊字。失敗就退返原底圖，唔阻斷。
+      let finalUrl = baseUrl;
+      let burnedIn = false;
+      try {
+        const size = (activity.customW > 0 && activity.customH > 0)
+          ? { w: activity.customW, h: activity.customH }
+          : { w: dims.w || 1024, h: dims.h || 1024 };
+        if (headline || aiSub) {
+          finalUrl = await compositeImage({
+            backgroundUrl: baseUrl,
+            layoutType:    "A",          // top-left 文字區（底圖模式暫用固定版面；Q6 定案後再擴充）
+            canvasWidth:   size.w,
+            canvasHeight:  size.h,
+            titleText:     headline || undefined,
+            subtitleText:  aiSub    || undefined,
+            seed:          `${activityId}-base`,
+          });
+          burnedIn = true;
+        }
+        if (client.logoUrl && finalUrl !== baseUrl) {
+          finalUrl = await overlayLogo({
+            imageUrl: finalUrl, logoUrl: client.logoUrl,
+            textZone: "top-left", seed: `${activityId}-base-logo`,
+          });
+        }
+      } catch (e) {
+        console.warn("[generate] 底圖疊字失敗，保留原底圖:", e);
+        finalUrl = baseUrl; burnedIn = false;
+      }
+
+      // 5. 存 GeneratedLayout（imageUrl = 疊字成品；textLayerJson 保留原底圖俾 Cindy 精修）
       const savedLayout = await db.generatedLayout.create({
         data: {
           activityId,
           layoutType: "BASE",
-          imageUrl: baseUrl,
+          imageUrl: finalUrl,
           copyText: postCopy,
           textLayerJson: JSON.stringify(textLayer),
-          textBurnedIn: false,   // 文字未燒入 — 交 Cindy 排版
+          textBurnedIn: burnedIn,   // Sharp 已燒 headline/subtitle；CTA 仍待 Cindy
         },
       });
 

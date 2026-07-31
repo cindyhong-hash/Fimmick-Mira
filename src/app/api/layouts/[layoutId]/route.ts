@@ -15,6 +15,7 @@ export async function PATCH(
       ...(body.copyText  !== undefined && { copyText:  body.copyText }),
       ...(body.isSelected !== undefined && { isSelected: body.isSelected }),
       ...(body.savedToLibrary !== undefined && { savedToLibrary: body.savedToLibrary }),
+      ...(body.cellImageUrls !== undefined && { cellImageUrls: body.cellImageUrls }),
     },
   });
 

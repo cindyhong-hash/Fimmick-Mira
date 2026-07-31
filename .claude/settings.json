@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"執行前審核(grilling)：若本則使用者訊息是要求你進行實作或執行動作(新增/修改檔案、執行指令、或多步驟變更)，動手前務必先依 .claude/skills/grilling 進行一次審核——一次只問一個問題、每題附上你建議的答案、逐一釐清決策；能從檔案或工具查到的事實自己查，決策交給使用者定奪；未獲使用者明確確認達成共識前，不要開始 Edit/Write/Bash 等執行動作。若只是提問、查詢、讀取、解釋，或使用者已表示『直接做、不用問』，則略過審核、正常進行。\"}}'"
+          }
+        ]
+      }
+    ]
+  }
+}

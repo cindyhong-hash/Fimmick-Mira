@@ -35,7 +35,13 @@ model Activity {
   selectedComponentIds String            @default("[]") // 選取的風格組件 IDs
   imageRatio           String            @default("1:1") // 圖片比例
   imageModel           String            @default("google/gemini-3-pro-image-preview") // 生圖模型
+  layoutId             String            @default("single")  // 多圖版型 id（single = 單圖）
+  genMode              String            @default("unified") // 多圖生成模式：unified（統一主題）| perCell（各圖獨立）
+  cells                String            @default("[]")      // 各格資料 JSON: [{description, mustText, assetUrls[]}]
+  logoMode             String            @default("first")   // LOGO 位置：first | all | none
+  variantCount         Int               @default(1)         // 多圖統一主題：生成幾組（1 或 2＝A導購+B敘事）
   status               String            @default("PENDING")
+  errorMessage         String?           // 生成失敗時的真正錯誤原因（顯示在 UI，免翻 log）
   createdAt            DateTime          @default(now())
   generatedLayouts     GeneratedLayout[]
 }
@@ -51,6 +57,7 @@ model GeneratedLayout {
   isSelected      Boolean  @default(false)
   textBurnedIn    Boolean  @default(false)  // 文字是否已由 AI 燒入圖片
   savedToLibrary  Boolean  @default(false)  // 是否已加入素材庫（策展）
+  cellImageUrls   String   @default("[]")   // 多圖拼版：各格子圖 URL（供日後個別編輯）
   createdAt       DateTime @default(now())
 }
 

@@ -48,6 +48,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
     updateData.referenceImageUrls = JSON.stringify(body.referenceImageUrls);
   if (body.selectedComponentIds !== undefined)
     updateData.selectedComponentIds = JSON.stringify(body.selectedComponentIds);
+  // 多圖：cells 是陣列，需序列化成字串存
+  if (body.cells !== undefined)
+    updateData.cells = typeof body.cells === "string" ? body.cells : JSON.stringify(body.cells);
 
   // Regenerate flag: wipe old layouts, reset to PENDING
   if (body._regenerate) {

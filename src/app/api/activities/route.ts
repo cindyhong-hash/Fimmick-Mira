@@ -8,6 +8,7 @@ export async function POST(request: Request) {
       clientId,
       requiredText, imagePrompt, imageRatio, imageModel,
       productImageUrls, referenceImageUrls, selectedComponentIds,
+      layoutId, genMode, cells, logoMode, variantCount,
     } = body;
 
     if (!clientId) {
@@ -33,6 +34,11 @@ export async function POST(request: Request) {
         selectedComponentIds: JSON.stringify(selectedComponentIds ?? []),
         imageRatio:           imageRatio ?? "1:1",
         imageModel:           imageModel ?? "google/gemini-3-pro-image-preview",
+        layoutId:             layoutId ?? "single",
+        genMode:              genMode ?? "unified",
+        cells:                JSON.stringify(cells ?? []),
+        logoMode:             logoMode ?? "first",
+        variantCount:         variantCount === 2 ? 2 : 1,
         status: "PENDING",
       },
     });

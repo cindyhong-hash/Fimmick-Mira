@@ -128,16 +128,17 @@ export async function generateImageOpenRouter(
       }
     }
 
-    // 加入風格參考圖（最多 2 張，不與 baseImage / productImages 混用）
-    const refs = (baseImageUrl || hasProductImages)
+    // 多圖模式：即使有產品圖，也允許帶入 styleReferenceImages 作為視覺錨點
+    // 產品圖放前面（告訴 Gemini 產品長什麼樣），風格參考放後面（告訴 Gemini 整體視覺要像什麼）
+    const refs = baseImageUrl
       ? []
-      : (styleReferenceImages ?? []).slice(0, 2);
-    if (!baseImageUrl && !hasProductImages) {
+      : (styleReferenceImages ?? []).slice(0, 2);  // 最多 2 張視覺錨點（hero 色調字體 + 第一張副圖版面）
+    if (!baseImageUrl && refs.length > 0) {
       for (const refUrl of refs) {
         const dataUrl = await toBase64DataUrl(refUrl);
         if (dataUrl) {
           contentParts.push({ type: "image_url", image_url: { url: dataUrl } });
-          console.log("[openrouter] Added style reference image");
+          console.log("[openrouter] Added style reference (visual anchor)");
         }
       }
     }
@@ -256,6 +257,40 @@ Option 3: Headline centered vertically on the text zone, subtitle below with gen
 
 BREATHING ROOM: Text never touches the frame edge. Padding = at least 8% of image width.
 
+TEXT CONTAINMENT (CRITICAL): If you draw ANY text inside a box, card, banner, pill, or container, EVERY character must stay FULLY INSIDE that container with comfortable padding on all sides — text must NEVER touch, cross, or spill past the container edge. If the text is too long for the container, make the text smaller or make the container larger so it fits; do NOT let it overflow.
+
+NEVER COVER THE SUBJECT (CRITICAL): Text, headlines, badges, pills, and any container/frame must NOT overlap, cover, or sit on top of the product or any person/face/body. Place ALL text and frames only in the empty negative space of the scene (sky, wall, table surface, out-of-focus background). If there is not enough empty space, shrink the text or move it — but keep the product and people fully visible and unobstructed. The text must sit where it is easiest to read (strong contrast, calm background).
+
+NO OVERLAPPING / DUPLICATE TEXT (CRITICAL): Every piece of text appears EXACTLY ONCE. Do NOT stack, repeat, echo, or shadow the headline or any word behind/over itself. Text blocks must not overlap each other — keep clear spacing between headline, subtitle, and any label.
+
+LOGO SPACE (CRITICAL): Keep the TOP-RIGHT corner (roughly the top-right 22% width × 14% height) completely EMPTY and clean — no product, no person, no text — because a real brand logo will be composited there afterward. Also, do NOT draw or render any brand logo, wordmark, or free-floating brand-name text as a design element anywhere in the image (the real logo is added separately; drawing your own causes duplicates). The product's own printed label on its packaging stays as-is — that is fine.
+
+**MULTI-CELL CAROUSEL TYPOGRAPHY TEMPLATE (follow this structure every cell):**
+Pick ONE of these layouts per cell — vary across cells but stay within this system:
+
+Layout Option 1 — "Bold Statement":
+  [ICON or thin rule 1px]
+  [HEADLINE — 2-4 characters, ultra-bold, 60-70% of text zone height]
+  [thin horizontal rule]
+  [SUBTITLE — 1 line, light weight, 30% opacity contrast]
+  Position: left-aligned, left 40% of image
+
+Layout Option 2 — "Product Feature Card":
+  [BRAND/PRODUCT NAME — small caps, tracking +200]
+  [FEATURE LINE 1 — bold, large]
+  [FEATURE LINE 2 — regular, smaller]
+  [BADGE — pill shape, contrasting color, price or CTA]
+  Position: right-aligned, upper or lower third
+
+Layout Option 3 — "Lifestyle Caption":
+  [SCENE HEADLINE — italic or thin weight, 2 lines max]
+  [CTA or tag line — small, letter-spaced]
+  Position: centered, bottom third with gradient overlay
+
+NEVER: floating text with no visual anchor, text touching the edge, all caps on subtitle if headline is also all caps.
+
+CRITICAL: If a headline text is already burned into the image via the prompt's headline parameter, do NOT generate that same text again anywhere else in the scene. Each text element must appear exactly ONCE.
+
 ## LAYOUT-SPECIFIC RULES:
 
 ${activeLayoutRule}
@@ -274,6 +309,9 @@ The ${productCount} image(s) sent above show the EXACT physical product(s) to fe
 - Show the product rotated up to 45° for a more dynamic composition
 - Slightly adjust scale or position to fit the layout composition
 - Add natural reflections, cast shadows, or surface gloss consistent with the scene and the product's actual material
+- Change props or lifestyle elements around the product (towels, flowers, bags)
+
+DO NOT: Add any product, bottle, lotion, or item that does not appear in the reference images. The ONLY product(s) allowed in this image are the exact ones shown in the reference photo(s). If you add any additional product not in the reference, this output is REJECTED.
 
 ## WHAT YOU MUST NEVER CHANGE (brand identity — non-negotiable):
 1. BRAND NAME & LOGO: The brand name and logo on the label must be legible and IDENTICAL to the reference — exact spelling, exact characters. Do NOT invent, replace, paraphrase, or omit the brand name.
@@ -293,6 +331,7 @@ The ${productCount} image(s) sent above show the EXACT physical product(s) to fe
 6. Secondary label text legibility
 
 ## FAILURE CONDITIONS (output will be rejected if any of these occur):
+- Any additional product, bottle, or item appears that was NOT in the reference images (e.g. adding a lotion bottle when only a razor was shown)
 - Product looks like a DIFFERENT brand or a generic substitute
 - Brand name / logo is missing, blurred, misspelled, or replaced
 - Bottle shape is drastically different (e.g., reference is tall & slim → output is short & wide)
@@ -304,11 +343,26 @@ The ${productCount} image(s) sent above show the EXACT physical product(s) to fe
 Think of yourself as a commercial photographer: you choose the angle and light, but the client's product — with its exact branding — must be instantly recognizable.\n\n`
       : "";
 
+    // 有產品圖時：明確區分「產品圖=唯一產品真相」vs「風格圖=只參考美學」，
+    // 避免「以這些參考圖的視覺風格生成」這句把產品圖也當成可自由詮釋的風格素材（導致副圖產品走樣）
+    const styleRefNote = hasProductImages
+      ? `The LAST ${refs.length} reference image(s) are STYLE REFERENCES ONLY — match their color grade, lighting mood, and composition, but do NOT copy, borrow, or reinterpret any product appearance from them (the product in those images may already be slightly altered). The product(s) MUST exactly match the PRODUCT REFERENCE image(s) placed first — same brand, label, shape, color, material, closure. If the style reference shows a product that differs from the product references, follow the product references.`
+      : `These images show the brand's visual style. Generate a new image in the SAME visual aesthetic, composition style, color grading, and atmosphere as these reference images.`;
     const fullPrompt = refs.length > 0
-      ? `${productPrefix}${systemPrefix}These images show the brand's visual style. Generate a new image in the SAME visual aesthetic, composition style, color grading, and atmosphere as these reference images.\n\n${prompt}`
+      ? `${productPrefix}${systemPrefix}${styleRefNote}\n\n${prompt}`
       : `${productPrefix}${editPrefix}${systemPrefix}${prompt}`;
 
     contentParts.push({ type: "text", text: fullPrompt });
+
+    // 有產品圖時，在所有圖片「之前」放一段圖片角色標注（產品圖在前、風格圖在後）
+    if (hasProductImages) {
+      const styleRefCount = refs.length;
+      const guide =
+`IMAGE REFERENCE GUIDE (read before looking at images):
+- Image(s) 1 to ${productCount}: PRODUCT REFERENCE — ground truth for product appearance, packaging, logo, color, silhouette. Reproduce exactly.
+${styleRefCount > 0 ? `- Image(s) ${productCount + 1} onward: STYLE REFERENCE ONLY — use only for color temperature, typography style, and layout composition. Ignore the product appearance in these images.` : ""}`;
+      contentParts.unshift({ type: "text", text: guide });
+    }
 
     const content = contentParts.length === 1 ? fullPrompt : contentParts;
 
@@ -350,6 +404,8 @@ Think of yourself as a commercial photographer: you choose the angle and light, 
               ? { image_config: { aspect_ratio: geminiAspectRatio } }
               : {}),
           }),
+          // 逾時保護：單次呼叫超過 90 秒視為卡住 → 中止（交給重試/降級），避免整個生成無限吊住
+          signal: AbortSignal.timeout(90_000),
         });
 
         const rawBody = await res.text();

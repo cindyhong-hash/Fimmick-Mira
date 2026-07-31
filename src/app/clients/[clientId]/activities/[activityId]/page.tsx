@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
 type GeneratedLayout = { id: string; layoutType: string; imageUrl: string; copyText: string; textBurnedIn?: boolean; savedToLibrary?: boolean };
-type Activity = { id: string; theme: string; focusPoint: string; status: string; generatedLayouts: GeneratedLayout[] };
+type Activity = { id: string; theme: string; focusPoint: string; status: string; errorMessage?: string | null; generatedLayouts: GeneratedLayout[] };
 
 export default function ActivityPage({ params }: { params: Promise<{ clientId: string; activityId: string }> }) {
   const [clientId, setClientId] = useState<string>("");
@@ -109,9 +109,14 @@ export default function ActivityPage({ params }: { params: Promise<{ clientId: s
         <div className="text-3xl">⚠️</div>
         <div className="font-medium text-gray-700">生成失敗</div>
         <div className="text-sm text-gray-400 text-center max-w-sm">
-          AI 圖片生成時發生錯誤（可能是 OpenAI 額度不足）。<br />
-          文案仍可重試。
+          AI 生成時發生錯誤（可能是 API 額度不足或服務暫時異常）。<br />
+          請稍後重試，或確認 OpenRouter 帳號額度。
         </div>
+        {activity.errorMessage && (
+          <div className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-md px-3 py-2 text-left max-w-sm break-words whitespace-pre-wrap">
+            {activity.errorMessage}
+          </div>
+        )}
         <Link href={`/clients/${clientId}/activities/${activityId}/edit`}>
           <Button variant="outline" size="sm">
             <Pencil className="h-4 w-4 mr-1" />重新生成

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { editImageFal, eraseImageFal } from "@/lib/fal";
 import { generateImageOpenRouter } from "@/lib/openrouter";
-import Anthropic from "@anthropic-ai/sdk";
+import { anthropic } from "@/lib/anthropic";
 import sharp from "sharp";
 import { readFile, writeFile, mkdir } from "fs/promises";
 import { join } from "path";
@@ -233,8 +233,7 @@ function extractFontChange(prompt: string): { fontName: string; cssDescription: 
 
 async function extractTextFromImage(imageUrl: string): Promise<string | null> {
   try {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) return null;
+    if (!process.env.OPENROUTER_API_KEY) return null;
 
     const imgBuf = imageUrl.startsWith("/")
       ? await readFile(join(process.cwd(), "public", imageUrl))
@@ -242,8 +241,7 @@ async function extractTextFromImage(imageUrl: string): Promise<string | null> {
     const ext  = imageUrl.split(".").pop()?.toLowerCase() ?? "jpg";
     const mime = ext === "png" ? "image/png" : "image/jpeg";
 
-    const client = new Anthropic({ apiKey });
-    const res = await client.messages.create({
+    const res = await anthropic.messages.create({
       model: "claude-haiku-4-5",
       max_tokens: 300,
       messages: [{
@@ -561,10 +559,8 @@ async function editWithReferenceImage(opts: {
 // ── 中文 → 英文 ───────────────────────────────────────────────────────────────
 async function translateToEnglish(chinesePrompt: string): Promise<string | null> {
   try {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) return null;
-    const client = new Anthropic({ apiKey });
-    const res = await client.messages.create({
+    if (!process.env.OPENROUTER_API_KEY) return null;
+    const res = await anthropic.messages.create({
       model: "claude-haiku-4-5",
       max_tokens: 80,
       messages: [{

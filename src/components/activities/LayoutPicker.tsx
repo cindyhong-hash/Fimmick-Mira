@@ -3,6 +3,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Check, Flame, BookmarkPlus, BookmarkCheck, BookmarkX, Loader2 } from "lucide-react";
+import { getMultiLayout } from "@/types/multiLayout";
 
 type Layout = {
   id: string;
@@ -18,6 +19,9 @@ const LAYOUT_META: Record<string, { label: string; description: string }> = {
   B: { label: "視覺強烈", description: "設計感強" },
   C: { label: "氣氛感", description: "品牌形象" },
 };
+
+// 多圖版型（four-grid 等）→ 顯示用標題
+const isAbc = (t: string) => t === "A" || t === "B" || t === "C";
 
 // 解析 Claude 原始文案，移除「主標題：」等標籤
 function parseCopyDisplay(raw: string) {
@@ -118,9 +122,13 @@ export function LayoutPicker({ layouts, selectedId, activityId, clientId, onSele
 
               <div className="p-3">
                 <div className="font-medium text-sm">
-                  Layout {layout.layoutType} — {meta?.label}
+                  {isAbc(layout.layoutType)
+                    ? `Layout ${layout.layoutType} — ${meta?.label ?? ""}`
+                    : (getMultiLayout(layout.layoutType)?.label ?? "拼版")}
                 </div>
-                <div className="text-xs text-gray-500 mt-0.5">{meta?.description}</div>
+                <div className="text-xs text-gray-500 mt-0.5">
+                  {isAbc(layout.layoutType) ? meta?.description : "多圖拼版"}
+                </div>
 
                 {layout.textBurnedIn ? (
                   // 文字已燒入圖片 → 顯示乾淨的文案摘要（不顯示原始標籤）

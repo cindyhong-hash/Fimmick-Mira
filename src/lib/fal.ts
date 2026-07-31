@@ -3,7 +3,7 @@
  */
 
 import { fal } from "@fal-ai/client";
-import Anthropic from "@anthropic-ai/sdk";
+import { anthropic } from "@/lib/anthropic";
 
 function initFal() {
   const key = process.env.FAL_KEY;
@@ -25,15 +25,13 @@ const RATIO_TO_SIZE: Record<string, { width: number; height: number }> = {
 // ── Claude Vision helpers ─────────────────────────────────────────────────────
 
 async function describeWithClaude(imageUrl: string, prompt: string): Promise<string | null> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
+  if (!process.env.OPENROUTER_API_KEY) return null;
   try {
     const dataUrl = await resolveToDataUrl(imageUrl);
     if (!dataUrl) return null;
     const match = dataUrl.match(/^data:(image\/\w+);base64,(.+)/);
     if (!match) return null;
-    const client = new Anthropic({ apiKey });
-    const res = await client.messages.create({
+    const res = await anthropic.messages.create({
       model: "claude-haiku-4-5",
       max_tokens: 200,
       messages: [{ role: "user", content: [

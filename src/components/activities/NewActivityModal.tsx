@@ -21,6 +21,8 @@ export function NewActivityModal({ clientId, onClose }: { clientId: string; onCl
   const [picked, setPicked] = useState<string | null>(null);
 
   const gotoNew = () => router.push(`/clients/${clientId}/activities/new`);
+  // [MULTI] ① 新活動圖生成 → 接多圖/單圖版型選擇流程（版型選 single 仍走他的單圖生成）
+  const gotoMulti = () => router.push(`/clients/${clientId}/activities/new/multi`);
 
   const handleRole = (role: ActivityImageRole) => {
     if (!picked) return;
@@ -59,8 +61,8 @@ export function NewActivityModal({ clientId, onClose }: { clientId: string; onCl
         </div>
         <div className="p-5 space-y-2.5">
           <p className="text-xs text-gray-500">點樣開始？</p>
-          {/* ① 新生成 */}
-          <button type="button" onClick={gotoNew}
+          {/* ① 新生成（接多圖/單圖版型選擇流程） */}
+          <button type="button" onClick={gotoMulti}
             className="w-full flex items-start gap-3 text-left rounded-xl border border-gray-200 p-3.5 hover:border-violet-400 hover:bg-violet-50/40 transition-colors">
             <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-600">
               <Sparkles className="h-4.5 w-4.5" />

@@ -102,6 +102,11 @@ export default function ActivityPage({ params }: { params: Promise<{ clientId: s
 
   if (!activity) return <div className="text-gray-400">載入中...</div>;
 
+  // [MULTI] 多圖活動 → 編輯導去多圖頁(edit 模式)，還原原本填寫；單圖走他的編輯頁
+  const editHref = activity.layoutId && activity.layoutId !== "single"
+    ? `/clients/${clientId}/activities/new/multi?edit=${activityId}`
+    : `/clients/${clientId}/activities/${activityId}/edit`;
+
   if (
     activity.status === "GENERATING" ||
     activity.status === "PENDING" ||
@@ -133,7 +138,7 @@ export default function ActivityPage({ params }: { params: Promise<{ clientId: s
           AI 圖片生成失敗（可能係 API 額度／逾時／網路問題）。<br />
           文案仍可重試。
         </div>
-        <Link href={`/clients/${clientId}/activities/${activityId}/edit`}>
+        <Link href={editHref}>
           <Button variant="outline" size="sm">
             <Pencil className="h-4 w-4 mr-1" />重新生成
           </Button>
@@ -163,7 +168,7 @@ export default function ActivityPage({ params }: { params: Promise<{ clientId: s
             {activity.theme}
           </h1>
         )}
-        <Link href={`/clients/${clientId}/activities/${activityId}/edit`}>
+        <Link href={editHref}>
           <Button variant="outline" size="sm">
             <Pencil className="h-4 w-4 mr-1" />編輯 / 重新生成
           </Button>

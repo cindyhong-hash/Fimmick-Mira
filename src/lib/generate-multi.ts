@@ -481,7 +481,9 @@ export async function generateMulti(activityId: string): Promise<NextResponse> {
       // 刮鬍刀走真圖合成時，不算進 Gemini 要畫的產品數
       const geminiProductUrls = useRazorComposite ? aiDrawProductUrls : productImageUrls;
       const productCount = geminiProductUrls.length;
-      const hasProductImages = productCount > 0;
+      // [MULTI] perCell 模式產品是「逐格上傳」、活動層級可能為空 → 只要任一格有產品就算「有產品」
+      const anyCellAsset = cd.some((c) => (c.assetUrls?.length ?? 0) > 0);
+      const hasProductImages = productCount > 0 || anyCellAsset;
       const PRODUCT_IDENTITY_LOCK = hasProductImages
         ? `PRODUCT IDENTITY — CRITICAL RULES:
 IMAGE ROLES — you are receiving TWO sets of reference images in this request:
@@ -535,7 +537,8 @@ Think of yourself as a commercial photographer: you choose the angle and light, 
         const hasOwnAsset = (c.assetUrls?.length ?? 0) > 0;
         // hero 走全產品真圖合成 → 場景完全不畫產品（不傳產品圖給 Gemini）
         const heroComposite = useProductComposite && i === 0;
-        const cellAssets = heroComposite ? [] : (hasOwnAsset ? c.assetUrls : geminiProductUrls);
+        // [MULTI] 只用「這格自己上傳的產品」；沒上傳就不傳任何產品參考（不再拿活動層級產品硬塞）
+        const cellAssets = heroComposite ? [] : (hasOwnAsset ? c.assetUrls : (activity.genMode === "perCell" ? [] : geminiProductUrls));
         const hasAsset = cellAssets.length > 0;
         const hasMustText = !!(c.mustText?.trim());
 
@@ -575,11 +578,10 @@ If the style reference images show a product that looks slightly different from 
         const noProductWarning = !hasProductImages
           ? `\n\nCRITICAL — NO PRODUCT IN THIS CAROUSEL: Do NOT invent, generate, hallucinate, or add any product, packaging, bottle, box, razor, device, or branded object anywhere in the image. The scene must contain ONLY people, environment, and lifestyle elements. Any product that was not provided in the reference images is strictly forbidden — this is a serious error.`
           : "";
-        const cellNoProduct = !hasProductImages
-          ? `\nSTRICT: NO product, packaging, or branded object of any kind. Person and environment only.`
-          : hasOwnAsset
-            ? `\nMANDATORY PRODUCT: The product image(s) uploaded for THIS cell MUST appear prominently and clearly — reproduce faithfully as a focal element. Do NOT omit them.`
-            : "";
+        // [MULTI] 逐格判斷：這格有上傳產品 → 必放且忠實還原；沒上傳 → 嚴禁畫任何產品（只出人物/場景）
+        const cellNoProduct = hasOwnAsset
+          ? `\nMANDATORY PRODUCT: The product image(s) uploaded for THIS cell MUST appear prominently and clearly — reproduce faithfully as a focal element. Do NOT omit them.`
+          : `\nSTRICT: NO product, packaging, bottle, box, razor, device, or branded object of any kind in this cell. Person and environment ONLY. Do NOT invent or add any product that was not uploaded for this cell.`;
         // hero：整張不畫任何產品，右側留乾淨檯面供真圖合成
         const cellProductFreeNote = heroComposite
           ? `\n\nCRITICAL — NO PRODUCT DRAWN IN THIS IMAGE: Do NOT draw, render, or include ANY product, bottle, tube, jar, pump, razor, or packaging anywhere in this image. Generate ONLY the background scene/setting with beautiful commercial lighting. Leave the RIGHT ~48% of the frame a clean, uncluttered, well-lit flat surface (e.g. marble counter) with NOTHING on it — the real product(s) will be composited there afterward.`

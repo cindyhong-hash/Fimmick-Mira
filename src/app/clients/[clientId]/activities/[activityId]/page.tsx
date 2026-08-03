@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
 type GeneratedLayout = { id: string; layoutType: string; imageUrl: string; copyText: string; textBurnedIn?: boolean; savedToLibrary?: boolean };
-type Activity = { id: string; theme: string; focusPoint: string; status: string; generatedLayouts: GeneratedLayout[] };
+type Activity = { id: string; theme: string; focusPoint: string; status: string; layoutId?: string; variantCount?: number; generatedLayouts: GeneratedLayout[] };
 
 export default function ActivityPage({ params }: { params: Promise<{ clientId: string; activityId: string }> }) {
   const [clientId, setClientId] = useState<string>("");
@@ -110,7 +110,15 @@ export default function ActivityPage({ params }: { params: Promise<{ clientId: s
     return (
       <div className="flex flex-col items-center justify-center h-64 gap-4 text-gray-500">
         <Loader2 className="h-8 w-8 animate-spin" />
-        <div className="font-medium">AI 正在生成 3 款版型，請稍候...</div>
+        <div className="font-medium">
+          {(() => {
+            // 多圖：款數＝生成組數（variantCount）；單圖：固定 3 款(A/B/C)
+            const isMulti = !!activity.layoutId && activity.layoutId !== "single";
+            const n = isMulti ? (activity.variantCount === 2 ? 2 : 1) : 3;
+            const cn = ["", "一", "兩", "三"][n] ?? String(n);
+            return `AI 正在生成${cn}款版型，請稍候...`;
+          })()}
+        </div>
         <div className="text-sm text-gray-400">通常需要 30–60 秒</div>
       </div>
     );

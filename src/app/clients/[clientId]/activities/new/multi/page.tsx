@@ -82,7 +82,9 @@ export default function NewMultiActivityPage({ params }: { params: Promise<{ cli
         setCells(!override && parsed.length ? parsed : Array.from({ length: l?.count ?? 1 }, emptyCell));
       });
     } else {
-      const p = sp.get("layout") ?? "single";
+      // [MULTI] 這頁是「多圖」頁，預設就選一個多圖版型（避免預設顯示「單圖」造成誤會）；
+      //         單圖是刻意選擇 → 由版型選單導去他的單圖頁 /activities/new。
+      const p = sp.get("layout") ?? "three-h-top";
       setLayoutId(p);
       const l = getMultiLayout(p);
       setCells(Array.from({ length: l?.count ?? 1 }, emptyCell));

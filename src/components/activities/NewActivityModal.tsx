@@ -12,8 +12,9 @@ import { useRouter } from "next/navigation";
 import { Sparkles, Images, X } from "lucide-react";
 import { LibraryImagePickerModal } from "@/components/activities/LibraryImagePickerModal";
 import { RolePickerModal, ACTIVITY_REF_KEY, ACTIVITY_BASE_KEY, type ActivityImageRole } from "@/components/activities/RolePickerModal";
+import { MultiLayoutPicker } from "@/components/activities/MultiLayoutPicker";
 
-type Step = "choose" | "pick" | "role";
+type Step = "choose" | "pick" | "role" | "layout";
 
 export function NewActivityModal({ clientId, onClose }: { clientId: string; onClose: () => void }) {
   const router = useRouter();
@@ -21,8 +22,11 @@ export function NewActivityModal({ clientId, onClose }: { clientId: string; onCl
   const [picked, setPicked] = useState<string | null>(null);
 
   const gotoNew = () => router.push(`/clients/${clientId}/activities/new`);
-  // [MULTI] ① 新活動圖生成 → 接多圖/單圖版型選擇流程（版型選 single 仍走他的單圖生成）
-  const gotoMulti = () => router.push(`/clients/${clientId}/activities/new/multi`);
+  // [MULTI] 版型選擇：single → 他的單圖頁；其餘 → 多圖頁並帶 layout 參數
+  const handleLayout = (id: string) => {
+    if (id === "single") gotoNew();
+    else router.push(`/clients/${clientId}/activities/new/multi?layout=${id}`);
+  };
 
   const handleRole = (role: ActivityImageRole) => {
     if (!picked) return;
@@ -47,6 +51,10 @@ export function NewActivityModal({ clientId, onClose }: { clientId: string; onCl
   if (step === "role" && picked) {
     return <RolePickerModal imageUrl={picked} onPick={handleRole} onClose={onClose} />;
   }
+  // [MULTI] 揀版型：single→單圖頁、其餘→多圖頁
+  if (step === "layout") {
+    return <MultiLayoutPicker onSelect={handleLayout} onClose={onClose} />;
+  }
 
   // step === "choose"
   return (
@@ -61,8 +69,8 @@ export function NewActivityModal({ clientId, onClose }: { clientId: string; onCl
         </div>
         <div className="p-5 space-y-2.5">
           <p className="text-xs text-gray-500">點樣開始？</p>
-          {/* ① 新生成（接多圖/單圖版型選擇流程） */}
-          <button type="button" onClick={gotoMulti}
+          {/* ① 新生成（先揀版型：單圖 / 多圖拼版） */}
+          <button type="button" onClick={() => setStep("layout")}
             className="w-full flex items-start gap-3 text-left rounded-xl border border-gray-200 p-3.5 hover:border-violet-400 hover:bg-violet-50/40 transition-colors">
             <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-600">
               <Sparkles className="h-4.5 w-4.5" />

@@ -111,7 +111,7 @@ export default function NewMultiActivityPage({ params }: { params: Promise<{ cli
         setShowPicker(false);
         return;
       }
-      router.push(`/clients/${clientId}/activities/new/single`);
+      router.push(`/clients/${clientId}/activities/new`);  // [MULTI] 選單圖 → 走他的單圖流程
       return;
     }
     // 換成不同的多圖版型 → 重設格數（有內容先確認）

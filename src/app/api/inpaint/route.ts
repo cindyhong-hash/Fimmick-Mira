@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { editImageFal, eraseImageFal } from "@/lib/fal";
 import { generateImageOpenRouter, chatTextOpenRouter, describeImageOpenRouter } from "@/lib/openrouter";
 import sharp from "sharp";
-import { readFile, writeFile, mkdir } from "fs/promises";
+import { readFile } from "fs/promises";
 import { join } from "path";
+import { loadBuffer, saveBuffer } from "@/lib/storage";
 
 export const maxDuration = 120;
 
@@ -36,12 +37,7 @@ async function addTextToImage(
   text: string,
   bounds?: { x: number; y: number; width: number; height: number }
 ): Promise<string> {
-  const uploadsDir = join(process.cwd(), "public/uploads");
-  await mkdir(uploadsDir, { recursive: true });
-
-  const imgBuf = imageUrl.startsWith("/")
-    ? await readFile(join(process.cwd(), "public", imageUrl))
-    : Buffer.from(await (await fetch(imageUrl)).arrayBuffer());
+  const imgBuf = await loadBuffer(imageUrl);
 
   const meta = await sharp(imgBuf).metadata();
   const W = meta.width  ?? 1024;
@@ -81,9 +77,7 @@ async function addTextToImage(
     .jpeg({ quality: 95 })
     .toBuffer();
 
-  const filename = `ai-text-${Date.now()}.jpg`;
-  await writeFile(join(uploadsDir, filename), result);
-  return `/uploads/${filename}`;
+  return saveBuffer(result, "jpg", "ai-text-");
 }
 
 // ── 品牌 Logo 疊加（讀取真實 logo，不讓 AI 生成）─────────────────────────────
@@ -135,17 +129,20 @@ async function getBrandLogoPath(directUrl?: string): Promise<string | null> {
   } catch { /* 檔案不存在或格式錯誤 → 繼續 */ }
 
   // b. 掃描 public/uploads/ 找名稱含 "logo" 的圖片檔
-  try {
-    const { readdir } = await import("fs/promises");
-    const files = await readdir(join(process.cwd(), "public", "uploads"));
-    const logoFile = files.find(
-      (f) => /logo/i.test(f) && /\.(png|jpe?g|webp)$/i.test(f)
-    );
-    if (logoFile) {
-      console.log(`[logo] Found logo file in uploads: ${logoFile}`);
-      return `/uploads/${logoFile}`;
-    }
-  } catch { /* 目錄不存在 → 繼續 */ }
+  //    Blob storage 冇「list 本地目錄」呢個概念 → 有 BLOB_READ_WRITE_TOKEN 時直接跳過此步。
+  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    try {
+      const { readdir } = await import("fs/promises");
+      const files = await readdir(join(process.cwd(), "public", "uploads"));
+      const logoFile = files.find(
+        (f) => /logo/i.test(f) && /\.(png|jpe?g|webp)$/i.test(f)
+      );
+      if (logoFile) {
+        console.log(`[logo] Found logo file in uploads: ${logoFile}`);
+        return `/uploads/${logoFile}`;
+      }
+    } catch { /* 目錄不存在 → 繼續 */ }
+  }
 
   // c. 都找不到
   return null;
@@ -157,16 +154,8 @@ async function addLogoToImage(
   position: LogoPosition,
   bounds?: { x: number; y: number; width: number; height: number }
 ): Promise<string> {
-  const uploadsDir = join(process.cwd(), "public/uploads");
-  await mkdir(uploadsDir, { recursive: true });
-
-  const imgBuf = imageUrl.startsWith("/")
-    ? await readFile(join(process.cwd(), "public", imageUrl))
-    : Buffer.from(await (await fetch(imageUrl)).arrayBuffer());
-
-  const logoBuf = logoPath.startsWith("/")
-    ? await readFile(join(process.cwd(), "public", logoPath))
-    : Buffer.from(await (await fetch(logoPath)).arrayBuffer());
+  const imgBuf = await loadBuffer(imageUrl);
+  const logoBuf = await loadBuffer(logoPath);
 
   const meta = await sharp(imgBuf).metadata();
   const W = meta.width  ?? 1024;
@@ -206,10 +195,9 @@ async function addLogoToImage(
     .jpeg({ quality: 95 })
     .toBuffer();
 
-  const filename = `ai-logo-${Date.now()}.jpg`;
-  await writeFile(join(uploadsDir, filename), result);
-  console.log(`[logo] ✅ Logo added at ${position} (${left},${top}): /uploads/${filename}`);
-  return `/uploads/${filename}`;
+  const url = await saveBuffer(result, "jpg", "ai-logo-");
+  console.log(`[logo] ✅ Logo added at ${position} (${left},${top}): ${url}`);
+  return url;
 }
 
 // ── 字體更改（Gemini AI，鎖定文字內容只換字型）───────────────────────────────
@@ -232,9 +220,7 @@ function extractFontChange(prompt: string): { fontName: string; cssDescription: 
 
 async function extractTextFromImage(imageUrl: string): Promise<string | null> {
   try {
-    const imgBuf = imageUrl.startsWith("/")
-      ? await readFile(join(process.cwd(), "public", imageUrl))
-      : Buffer.from(await (await fetch(imageUrl)).arrayBuffer());
+    const imgBuf = await loadBuffer(imageUrl);
     const ext  = imageUrl.split(".").pop()?.toLowerCase() ?? "jpg";
     const mime = ext === "png" ? "image/png" : "image/jpeg";
 
@@ -287,12 +273,7 @@ async function eraseRegion(
   imageUrl: string,
   bounds: { x: number; y: number; width: number; height: number }
 ): Promise<string> {
-  const uploadsDir = join(process.cwd(), "public/uploads");
-  await mkdir(uploadsDir, { recursive: true });
-
-  const imgBuf = imageUrl.startsWith("/")
-    ? await readFile(join(process.cwd(), "public", imageUrl))
-    : Buffer.from(await (await fetch(imageUrl)).arrayBuffer());
+  const imgBuf = await loadBuffer(imageUrl);
 
   const meta = await sharp(imgBuf).metadata();
   const W = meta.width  ?? 1024;
@@ -342,10 +323,9 @@ async function eraseRegion(
     .jpeg({ quality: 95 })
     .toBuffer();
 
-  const filename = `ai-erase-${Date.now()}.jpg`;
-  await writeFile(join(uploadsDir, filename), result);
-  console.log(`[erase] ✅ blur-fill done: /uploads/${filename}`);
-  return `/uploads/${filename}`;
+  const url = await saveBuffer(result, "jpg", "ai-erase-");
+  console.log(`[erase] ✅ blur-fill done: ${url}`);
+  return url;
 }
 
 // ── 精確局部擦除（Nano Banana Pro / Gemini，語意理解移除文字）──────────────
@@ -353,9 +333,7 @@ async function eraseRegionWithAI(
   imageUrl: string,
   bounds: { x: number; y: number; width: number; height: number }
 ): Promise<string> {
-  const imgBuf = imageUrl.startsWith("/")
-    ? await readFile(join(process.cwd(), "public", imageUrl))
-    : Buffer.from(await (await fetch(imageUrl)).arrayBuffer());
+  const imgBuf = await loadBuffer(imageUrl);
 
   const meta = await sharp(imgBuf).metadata();
 
@@ -419,9 +397,7 @@ async function editWithReferenceImage(opts: {
 }): Promise<string> {
   const { imageUrl, referenceImageDataUrl, prompt, selectionBounds } = opts;
 
-  const imgBuf = imageUrl.startsWith("/")
-    ? await readFile(join(process.cwd(), "public", imageUrl))
-    : Buffer.from(await (await fetch(imageUrl)).arrayBuffer());
+  const imgBuf = await loadBuffer(imageUrl);
 
   const ext  = imageUrl.split(".").pop()?.toLowerCase() ?? "jpg";
   const mime = ext === "png" ? "image/png" : "image/jpeg";
@@ -519,10 +495,7 @@ async function editWithReferenceImage(opts: {
   //    - 比例接近（誤差 <8%）→ fit:fill（微量拉伸，幾乎看不出來）
   //    - 比例差很多（Gemini 輸出正方形）→ fit:cover + 置中裁切（裁邊比壓扁好看）
   try {
-    const uploadsDir = join(process.cwd(), "public/uploads");
-    await mkdir(uploadsDir, { recursive: true });
-
-    const localResultBuf = await readFile(join(process.cwd(), "public", resultUrl));
+    const localResultBuf = await loadBuffer(resultUrl);
     const resultMeta = await sharp(localResultBuf).metadata();
     const resultRatio = (resultMeta.width ?? origW) / (resultMeta.height ?? origH);
     const ratioDiff = Math.abs(resultRatio - origRatio) / origRatio;
@@ -538,10 +511,9 @@ async function editWithReferenceImage(opts: {
       .jpeg({ quality: 95 })
       .toBuffer();
 
-    const resizedFilename = `ai-resized-${Date.now()}.jpg`;
-    await writeFile(join(uploadsDir, resizedFilename), resizedBuf);
-    console.log(`[editWithRef] ✅ Resized to ${origW}×${origH}: /uploads/${resizedFilename}`);
-    return `/uploads/${resizedFilename}`;
+    const resizedUrl = await saveBuffer(resizedBuf, "jpg", "ai-resized-");
+    console.log(`[editWithRef] ✅ Resized to ${origW}×${origH}: ${resizedUrl}`);
+    return resizedUrl;
   } catch (e) {
     console.warn("[editWithRef] Resize failed, returning original result:", e);
     return resultUrl;

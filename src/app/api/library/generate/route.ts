@@ -1,26 +1,16 @@
 import { NextResponse } from "next/server";
-import { writeFile, mkdir, readFile } from "fs/promises";
-import path from "path";
-import { randomUUID } from "crypto";
 import sharp from "sharp";
 import { db } from "@/lib/db";
 import { generateImage, generateCopy, compileChineseBrief, translateBriefToEnglishPrompt, falFlux2Edit, falSeedreamEdit, falQwenEdit, falImageEdit, falRemoveBg, falUpscale, describeReferenceStyle, falSceneFromRef, falNanoTextToImage, type GeneratedImage } from "@/lib/generate";
+import { loadBuffer, saveBuffer } from "@/lib/storage";
 
 const W = 1024;
 const H = 1024;
 
-async function saveBuffer(buffer: Buffer, ext: string): Promise<string> {
-  const filename = `${randomUUID()}.${ext}`;
-  const uploadDir = path.join(process.cwd(), "public", "uploads");
-  await mkdir(uploadDir, { recursive: true });
-  await writeFile(path.join(uploadDir, filename), buffer);
-  return `/uploads/${filename}`;
-}
-
 /** Load an image buffer from a local /uploads path (disk) or a remote URL. */
 async function loadImageBuffer(url: string, host: string): Promise<Buffer> {
   if (url.startsWith("/uploads/")) {
-    return readFile(path.join(process.cwd(), "public", url));
+    return loadBuffer(url);
   }
   const abs = url.startsWith("http") ? url : `${host}${url}`;
   const res = await fetch(abs, { signal: AbortSignal.timeout(30_000) });

@@ -6,6 +6,9 @@ const { version } = JSON.parse(readFileSync("./package.json", "utf8")) as { vers
 
 const nextConfig: NextConfig = {
   env: { NEXT_PUBLIC_APP_VERSION: version },
+  images: {
+    remotePatterns: [{ protocol: "https", hostname: "*.public.blob.vercel-storage.com" }],
+  },
 };
 
 export default nextConfig;

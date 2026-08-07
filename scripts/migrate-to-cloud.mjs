@@ -53,6 +53,7 @@ async function migrateUrl(url) {
     const blob = await put(filename, buf, {
       access: "public",
       addRandomSuffix: false,
+      allowOverwrite: true, // script 可以安全重跑：同一檔名唔會因為「已存在」而報錯
       contentType: contentTypeForExt(ext),
     });
     blobCache.set(url, blob.url);
@@ -107,7 +108,16 @@ async function main() {
   const components = await source.styleComponent.findMany();
   for (const sc of components) {
     const previewUrl = sc.previewUrl ? await migrateUrl(sc.previewUrl) : sc.previewUrl;
-    const data = { ...sc, previewUrl };
+    // BACKGROUND 類型嘅 data 係 {"imageUrl":"/uploads/..."}——收埋喺 JSON 入面嘅圖，唔係扁平欄位，要另外揸出嚟搬。
+    let componentData = sc.data;
+    try {
+      const parsed = JSON.parse(sc.data || "{}");
+      if (parsed.imageUrl) {
+        parsed.imageUrl = await migrateUrl(parsed.imageUrl);
+        componentData = JSON.stringify(parsed);
+      }
+    } catch { /* 唔係 JSON 或者冇 imageUrl → 原樣保留 */ }
+    const data = { ...sc, previewUrl, data: componentData };
     await dest.styleComponent.upsert({ where: { id: sc.id }, create: data, update: data });
   }
   console.log(`  ${components.length} 個風格組件已搬\n`);

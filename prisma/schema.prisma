@@ -1,0 +1,92 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Client {
+  id             String     @id @default(cuid())
+  name           String
+  primaryColor   String
+  secondaryColor String?
+  logoUrl        String?
+  toneLabels         String     @default("[]")
+  taboos             String     @default("[]")  // [WIP/素材庫] 保留
+  commonText         String     @default("")    // [COLLEAGUE] 合併新增
+  pastPostImageUrls  String     @default("[]")
+  paletteColors      String     @default("[]")  // [WIP/素材庫] 保留
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  activities     Activity[]
+}
+
+model Activity {
+  id                   String            @id @default(cuid())
+  clientId             String
+  client               Client            @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  theme                String
+  focusPoint           String
+  titleText            String?           // [COLLEAGUE] 畫面上必放的主標題文字
+  subtitleText         String?           // [COLLEAGUE] 畫面上必放的副標題文字
+  imagePrompt          String?           // [COLLEAGUE] 使用者描述的腦中畫面 prompt
+  productImageUrl      String            @default("")   // [COLLEAGUE] backward compat (first image)
+  productImageUrls     String            @default("[]") // [COLLEAGUE] 最多 5 張（JSON array）
+  referenceImageUrls   String            @default("[]")
+  selectedComponentIds String            @default("[]") // [COLLEAGUE] 選取的風格組件 IDs
+  imageRatio           String            @default("1:1") // [COLLEAGUE] 圖片比例
+  customW              Int               @default(0)     // 輸出寬（px）；0=用比例預設。同產品圖一致嘅尺寸設定
+  customH              Int               @default(0)     // 輸出高（px）；0=用比例預設
+  imageModel           String            @default("google/gemini-3-pro-image-preview") // [COLLEAGUE] 生圖模型
+  baseImageUrl         String?           // [2b] 底圖模式：成張相 100% 做背景，唔重新生圖；null=行現有生圖流程
+  typographyMood       String?           // [2b] 特效字風格 override（auto/luxury/cozy/noble/fresh）；null/auto=Gemini 綜合底圖+品牌+主題自選
+  layoutId             String            @default("single")  // [MULTI] 多圖版型 id（single = 單圖）
+  genMode              String            @default("unified") // [MULTI] 生成模式：unified（統一主題）| perCell（各圖獨立）
+  cells                String            @default("[]")      // [MULTI] 各格資料 JSON: [{description, mustText, assetUrls[]}]
+  logoMode             String            @default("first")   // [MULTI] LOGO 位置：first | all | none
+  variantCount         Int               @default(1)         // [MULTI] 統一主題生成幾組（1 或 2＝A導購+B敘事）
+  errorMessage         String?           // [MULTI] 生成失敗時的真正錯誤原因（顯示在 UI，免翻 log）
+  status               String            @default("PENDING")
+  createdAt            DateTime          @default(now())
+  generatedLayouts     GeneratedLayout[]
+}
+
+model GeneratedLayout {
+  id              String   @id @default(cuid())
+  activityId      String
+  activity        Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  layoutType      String
+  imageUrl        String
+  copyText        String
+  styleComponents String   @default("{}")
+  isSelected      Boolean  @default(false)
+  textBurnedIn    Boolean  @default(false)  // [COLLEAGUE] 文字是否已由 AI 燒入圖片
+  savedToLibrary  Boolean  @default(false)  // [COLLEAGUE] 是否已加入素材庫（策展）
+  textLayerJson   String   @default("{}")   // [2b] 底圖模式：交俾後續文字排版階段嘅文字層 JSON
+  cellImageUrls   String   @default("[]")   // [MULTI] 多圖拼版：各格子圖 URL（供日後個別編輯）
+  createdAt       DateTime @default(now())
+}
+
+model StyleComponent {
+  id             String   @id @default(cuid())
+  name           String
+  type           String
+  data           String   @default("{}")
+  sourceLayoutId String
+  clientId       String?
+  aiPromptText   String   @default("")
+  previewUrl     String?
+  createdAt      DateTime @default(now())
+}
+
+model LibraryImage {
+  id         String   @id @default(cuid())
+  clientId   String?
+  imageUrl   String
+  prompt     String
+  copyText   String?
+  subject    String?
+  paramsJson String   @default("{}")
+  createdAt  DateTime @default(now())
+}

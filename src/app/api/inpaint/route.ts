@@ -705,12 +705,19 @@ export async function POST(request: Request) {
       }
     }
 
-    // ── Case 3: 一般編輯 → Kontext ──────────────────────────────────────────
+    // ── Case 3: 一般編輯（場景/背景/顏色等非文字編輯）→ Kontext ──────────────
+    //    呢個分支唔應該處理文字內容（文字類指令已被上面幾個 Case 攔咗）。
+    //    但翻譯咗嘅英文指令送去 Kontext 時，AI 有機會將翻譯後嗰句英文直接畫落圖，
+    //    等於中文文案被英文取代 → 明確叫佢唔好動任何文字，防呆。
     const areaHint = boundsToAreaHint(selectionBounds);
-    const finalPrompt = /[一-鿿]/.test(trim)
+    const translatedPrompt = /[一-鿿]/.test(trim)
       ? (await translateToEnglish(trim) ?? trim)
       : trim;
-    console.log(`[inpaint] EDIT mode | area=${areaHint} | prompt="${finalPrompt.slice(0, 80)}"`);
+    const finalPrompt =
+      `${translatedPrompt}\n\n` +
+      `IMPORTANT: Do not add, translate, remove, or alter any text/typography in the image. ` +
+      `Preserve all existing text exactly as-is, in its original language and characters. This edit is about the scene/visual only.`;
+    console.log(`[inpaint] EDIT mode | area=${areaHint} | prompt="${translatedPrompt.slice(0, 80)}"`);
 
     const resultUrl = await editImageFal({ imageUrl, prompt: finalPrompt, areaHint });
     return NextResponse.json({ imageUrl: resultUrl });

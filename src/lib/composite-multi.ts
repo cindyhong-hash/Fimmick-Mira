@@ -7,6 +7,7 @@
  * - 顏色根據背景感自適應（深色字 + 白色陰影，或反之）
  */
 
+import "@/lib/fonts"; // 必須喺 sharp 之前 import，令 fontconfig 揾到打包咗嘅中文字型
 import sharp from "sharp";
 import { removeBackground } from "@/lib/fal";
 import { loadBuffer, saveBuffer } from "@/lib/storage";

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import "@/lib/fonts"; // 必須喺 sharp 之前 import，令 fontconfig 揾到打包咗嘅中文字型
 import { editImageFal, eraseImageFal } from "@/lib/fal";
 import { generateImageOpenRouter, chatTextOpenRouter, describeImageOpenRouter } from "@/lib/openrouter";
 import sharp from "sharp";

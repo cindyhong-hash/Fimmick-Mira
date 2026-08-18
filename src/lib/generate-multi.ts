@@ -7,6 +7,7 @@ import { compositeCollage, overlaySubImageCard, overlayProduct, extractDominantC
 import { overlayLogo } from "@/lib/composite";
 import { buildImagePrompt } from "@/lib/prompts";
 import { getMultiLayout, getCellRects } from "@/types/multiLayout";
+import { getLayoutById } from "@/lib/multi/layout-library";
 import { generateGlobalDesignSpec, designSpecPromptBlock, type GlobalDesignSpec } from "@/lib/multi/design-spec";
 import { generateFramePlans, type FramePlan } from "@/lib/multi/frame-planner";
 import { buildMultiImagePrompt, type LockBlocks } from "@/lib/multi/prompt-builder";
@@ -217,6 +218,9 @@ export async function generateMulti(activityId: string): Promise<NextResponse> {
     // ══ 多圖分支：layoutId !== "single" → 逐格生成 + 拼版 ══
     const multiLayoutId = activity.layoutId || "single";
     const ml = getMultiLayout(multiLayoutId);
+    // [PHASE2] 新版型庫 fallback：舊 13 版型找不到時，改用 layout-library（座標同為 normalized 0..1）。
+    // 舊 id → ml 有值、libLayout=undefined（行為完全不變）；新 id → 走 libLayout。
+    const libLayout = ml ? undefined : getLayoutById(multiLayoutId);
     const ratio = activity.imageRatio ?? "1:1";
     const imageModel = activity.imageModel || "google/gemini-3-pro-image-preview";
     const isFal = imageModel.startsWith("fal-ai/");
@@ -274,7 +278,7 @@ export async function generateMulti(activityId: string): Promise<NextResponse> {
     type GenSet = { cellData: CellIn[]; label: string; stylePromptSuffix?: string; globalSpec?: GlobalDesignSpec; framePlans?: FramePlan[] };
     const stored: CellIn[] = activity.cells ? JSON.parse(activity.cells) : [];
     const userMustText = (activity.titleText || activity.focusPoint || "").trim();
-    const count = ml?.count ?? 1;
+    const count = ml?.count ?? libLayout?.frameCount ?? 1;
 
     type ParsedCell = { description?: string; mustText?: string; subtitle?: string; container_style?: string; composition_hint?: string; tag?: string };
     const buildCells = (parsed: ParsedCell[]): CellIn[] => Array.from({ length: count }, (_, i) => ({
@@ -424,7 +428,9 @@ Think of yourself as a commercial photographer: you choose the angle and light, 
         : "";
 
       // 先算好每格在拼版中的實際像素尺寸，讓副圖卡片以「格子比例」排版（避免拼版 cover 裁掉文字）
-      const cellRects = getCellRects(multiLayoutId, n);
+      const cellRects = libLayout
+        ? libLayout.frames.slice(0, n).map((fr) => ({ x: fr.x, y: fr.y, w: fr.w, h: fr.h }))
+        : getCellRects(multiLayoutId, n);
       const COLLAGE_PX = 1200;
 
       for (let i = 0; i < n; i++) {

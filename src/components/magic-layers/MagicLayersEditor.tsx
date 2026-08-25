@@ -32,21 +32,39 @@ type StyleAnalysis = {
   italic?: boolean; underline?: boolean;
 };
 // 系統可用字體（傳給 AI 限制 suggestedFamily；家族名 → 編輯器 CSS font-family）
-const AVAILABLE_FONTS = ["Noto Sans TC", "Noto Serif TC", "Manrope"];
+const AVAILABLE_FONTS = ["Noto Sans TC", "Noto Serif TC", "LXGW WenKai TC", "Zen Maru Gothic", "Manrope"];
+const FONT_OPTIONS: { label: string; css: string }[] = [
+  { label: "思源黑體（Noto Sans TC）", css: "'Noto Sans TC',system-ui,sans-serif" },
+  { label: "思源宋體（Noto Serif TC）", css: "'Noto Serif TC',serif" },
+  { label: "霞鶩文楷（手寫楷體）", css: "'LXGW WenKai TC','Noto Serif TC',serif" },
+  { label: "圓體（Zen Maru Gothic）", css: "'Zen Maru Gothic','Noto Sans TC',sans-serif" },
+  { label: "Manrope（英數）", css: "'Manrope','Noto Sans TC',sans-serif" },
+];
 const SUMMARY_CHIP: CSSProperties = { display: "inline-block", padding: "2px 8px", borderRadius: 20, background: "#f3f4f6", color: "#4b5563", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" };
 const CAT_LABEL: Record<string, string> = { "sans-serif": "黑體/無襯線", serif: "襯線", ming: "明體/宋體", gothic: "黑體", rounded: "圓體", handwritten: "手寫", calligraphy: "書法", display: "標題體", condensed: "窄體", geometric: "幾何無襯線" };
 const WEIGHT_LABEL: Record<number, string> = { 100: "Thin", 300: "Light", 400: "Regular", 500: "Medium", 600: "SemiBold", 700: "Bold", 800: "ExtraBold", 900: "Black" };
+// AI 建議字體名 → 編輯器 CSS font-family
 const FONT_CSS: Record<string, string> = {
   "Noto Sans TC": "'Noto Sans TC',system-ui,sans-serif",
   "Noto Serif TC": "'Noto Serif TC',serif",
+  "LXGW WenKai TC": "'LXGW WenKai TC','Noto Serif TC',serif",
+  "Zen Maru Gothic": "'Zen Maru Gothic','Noto Sans TC',sans-serif",
   "Manrope": "'Manrope','Noto Sans TC',sans-serif",
 };
+// 字體類型 → 最接近的可用字體 CSS（分析沒給 suggestedFamily 時的後備）
+function categoryToCss(cat: string): string {
+  const c = cat.toLowerCase();
+  if (/round|圓/.test(c)) return FONT_CSS["Zen Maru Gothic"];
+  if (/hand|calligraph|brush|楷|手寫|書法/.test(c)) return FONT_CSS["LXGW WenKai TC"];
+  if (/serif|ming|song|明|宋/.test(c)) return FONT_CSS["Noto Serif TC"];
+  return FONT_CSS["Noto Sans TC"];
+}
 /** 把分析 JSON 映射成編輯器可套用的文字樣式（只帶「參考圖真的有」的效果）。 */
 function analysisToTextPatch(a: StyleAnalysis, fontSize: number): { fontFamily: string; fontWeight: number; color: string; align: "left" | "center" | "right"; fx: TextFx | null } {
-  const cat = String(a.font?.category ?? "").toLowerCase();
+  const cat = String(a.font?.category ?? "");
   const fam = a.font?.suggestedFamily && FONT_CSS[a.font.suggestedFamily]
     ? FONT_CSS[a.font.suggestedFamily]
-    : (/serif|ming|song|明|宋/.test(cat) ? FONT_CSS["Noto Serif TC"] : FONT_CSS["Noto Sans TC"]);
+    : categoryToCss(cat);
   const w = Number(a.font?.weight ?? 700);
   const fontWeight = w <= 450 ? 400 : w <= 650 ? 600 : w <= 750 ? 700 : 800;   // 對齊字重下拉可選值
   const color = /^#|rgb/i.test(String(a.typography?.color ?? "")) ? String(a.typography!.color) : "#303030";
@@ -372,6 +390,11 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   }, [render]);
 
   useEffect(() => { render(); }, [render]);
+  // 中文 webfont 載入完成後重繪一次，避免 canvas 用 fallback 字量測/繪製
+  useEffect(() => {
+    if (typeof document === "undefined" || !document.fonts?.ready) return;
+    document.fonts.ready.then(() => { render(); refresh(); }).catch(() => {});
+  }, [render, refresh]);
 
   /* ---------- layer ops ---------- */
   const idx = (id: string) => layersRef.current.findIndex((l) => l.id === id);
@@ -569,8 +592,16 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
 
   /* ---------- text editing (content / colour / size / font) ---------- */
   const selEl = layersRef.current.find((l) => l.id === selectedId) ?? null;
+  // webfont 是 on-demand 子集載入，套用新字體後可能還沒下載該字 → 載好再重繪一次
+  const ensureTextFont = (el: EL | null) => {
+    if (!el?.isText || typeof document === "undefined" || !document.fonts?.load) return;
+    const fam = el.fontFamily.split(",")[0].replace(/['"]/g, "").trim();
+    if (!fam) return;
+    document.fonts.load(`${el.fontWeight || 400} 48px "${fam}"`, el.text || "字").then(() => { el.thumb = makeThumb(el); render(); refresh(); }).catch(() => {});
+  };
   const updateText = (patch: Partial<EL>) => {
     if (!selEl) return; Object.assign(selEl, patch); selEl.thumb = makeThumb(selEl); markDirty(); render(); refresh();
+    if ("fontFamily" in patch || "fontWeight" in patch || "text" in patch) ensureTextFont(selEl);
   };
   const updateShape = (patch: Partial<ShapeSpec>) => {
     if (!selEl || !selEl.shape) return; Object.assign(selEl.shape, patch); selEl.thumb = makeThumb(selEl); markDirty(); render(); refresh();
@@ -762,9 +793,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                     <input value={selEl.text} onChange={(e) => updateText({ text: e.target.value })} style={S.rinput} />
                     <label style={S.rlabel}>字體</label>
                     <select value={selEl.fontFamily} onChange={(e) => updateText({ fontFamily: e.target.value })} style={S.rinput}>
-                      <option value="'Noto Sans TC',system-ui,sans-serif">Noto Sans TC</option>
-                      <option value="'Noto Serif TC',serif">Noto Serif TC</option>
-                      <option value="'Manrope','Noto Sans TC',sans-serif">Manrope</option>
+                      {FONT_OPTIONS.map((o) => <option key={o.css} value={o.css}>{o.label}</option>)}
                     </select>
                     <div style={{ display: "flex", gap: 10 }}>
                       <div style={{ flex: 1 }}><label style={S.rlabel}>字型大小</label>
@@ -810,7 +839,10 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                                 {analysis.styleName ? <strong>「{analysis.styleName}」 </strong> : null}{analysis.visualDescription}
                               </p>
                             ) : null}
-                            <button onClick={applyStyleAnalysis} style={{ width: "100%", marginTop: 10, height: 36, borderRadius: 10, border: "none", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", background: "linear-gradient(135deg,#8b5cf6,#7c3aed)" }}>套用參考風格</button>
+                            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                              <button onClick={applyStyleAnalysis} style={{ flex: 1, height: 36, borderRadius: 10, border: "none", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", background: "linear-gradient(135deg,#8b5cf6,#7c3aed)" }}>套用參考風格</button>
+                              <button title="AI 重新分析一次（結果會有些微變化）" onClick={() => refImg && analyzeRef(refImg)} style={{ ...S.rbtn, width: 96 }}>重新分析</button>
+                            </div>
                           </div>
                         ) : null}
                       </>

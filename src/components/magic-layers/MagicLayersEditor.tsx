@@ -6,7 +6,7 @@
    pipeline; extracts each layer along its contour (no rectangle crops).
    Ported from the verified vanilla engine.
    ============================================================ */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ChevronUp, ChevronDown, Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowLeft, Plus, Save, Download, Check, Image as ImageIcon, Upload, Type, BadgeCheck, Square, Star, Minus, Pencil, Undo2, Redo2 } from "lucide-react";
 import type { LayerData, FragmentationReport } from "@/lib/magic-layers/types.ts";
 import { extractLayer } from "@/lib/magic-layers/extract-browser.ts";
@@ -19,6 +19,49 @@ type ShapeSpec = { kind: "rect" | "ellipse" | "line" | "icon"; fill: string; str
 /** 文字特效（設計感）— 全部在 canvas 即時渲染，文字保持可編輯／可拖曳／可存。
  *  strokeW = 佔字級的比例（隨字放大縮小），letterSpacing = px。 */
 type TextFx = { gradient?: [string, string] | null; strokeColor?: string; strokeW?: number; shadow?: boolean; italic?: boolean; letterSpacing?: number };
+
+/** /api/magic-layers/analyze-style 回傳的字體分析結果（部分欄位可能缺，取用時給預設）。 */
+type StyleAnalysis = {
+  styleName?: string; confidence?: number; visualDescription?: string;
+  font?: { category?: string; suggestedFamily?: string; fallbackFamilies?: string[]; weight?: number; width?: string };
+  typography?: { fontSizeScale?: number; letterSpacing?: string; lineHeight?: number; color?: string; textAlign?: "left" | "center" | "right" };
+  stroke?: { enabled?: boolean; color?: string; width?: number };
+  shadow?: { enabled?: boolean; color?: string; offsetX?: number; offsetY?: number; blur?: number };
+  gradient?: { enabled?: boolean; type?: string; angle?: number; colors?: string[] };
+  glow?: { enabled?: boolean; color?: string; blur?: number };
+  italic?: boolean; underline?: boolean;
+};
+// 系統可用字體（傳給 AI 限制 suggestedFamily；家族名 → 編輯器 CSS font-family）
+const AVAILABLE_FONTS = ["Noto Sans TC", "Noto Serif TC", "Manrope"];
+const SUMMARY_CHIP: CSSProperties = { display: "inline-block", padding: "2px 8px", borderRadius: 20, background: "#f3f4f6", color: "#4b5563", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" };
+const CAT_LABEL: Record<string, string> = { "sans-serif": "黑體/無襯線", serif: "襯線", ming: "明體/宋體", gothic: "黑體", rounded: "圓體", handwritten: "手寫", calligraphy: "書法", display: "標題體", condensed: "窄體", geometric: "幾何無襯線" };
+const WEIGHT_LABEL: Record<number, string> = { 100: "Thin", 300: "Light", 400: "Regular", 500: "Medium", 600: "SemiBold", 700: "Bold", 800: "ExtraBold", 900: "Black" };
+const FONT_CSS: Record<string, string> = {
+  "Noto Sans TC": "'Noto Sans TC',system-ui,sans-serif",
+  "Noto Serif TC": "'Noto Serif TC',serif",
+  "Manrope": "'Manrope','Noto Sans TC',sans-serif",
+};
+/** 把分析 JSON 映射成編輯器可套用的文字樣式（只帶「參考圖真的有」的效果）。 */
+function analysisToTextPatch(a: StyleAnalysis, fontSize: number): { fontFamily: string; fontWeight: number; color: string; align: "left" | "center" | "right"; fx: TextFx | null } {
+  const cat = String(a.font?.category ?? "").toLowerCase();
+  const fam = a.font?.suggestedFamily && FONT_CSS[a.font.suggestedFamily]
+    ? FONT_CSS[a.font.suggestedFamily]
+    : (/serif|ming|song|明|宋/.test(cat) ? FONT_CSS["Noto Serif TC"] : FONT_CSS["Noto Sans TC"]);
+  const w = Number(a.font?.weight ?? 700);
+  const fontWeight = w <= 450 ? 400 : w <= 650 ? 600 : w <= 750 ? 700 : 800;   // 對齊字重下拉可選值
+  const color = /^#|rgb/i.test(String(a.typography?.color ?? "")) ? String(a.typography!.color) : "#303030";
+  const align = (a.typography?.textAlign === "left" || a.typography?.textAlign === "right") ? a.typography.textAlign : "center";
+  // letter-spacing：em → px（以目前字級換算），夾在 -0.1em~0.2em
+  const emRaw = parseFloat(String(a.typography?.letterSpacing ?? "0")) || 0;
+  const em = Math.max(-0.1, Math.min(0.2, emRaw));
+  const fx: TextFx = {};
+  if (Math.abs(em) > 0.001) fx.letterSpacing = Math.round(em * fontSize);
+  if (a.stroke?.enabled) { fx.strokeColor = a.stroke.color || "#000000"; const rw = Number(a.stroke.width) || 0; fx.strokeW = Math.max(0.03, Math.min(0.14, rw > 0 ? rw / 40 : 0.06)); }
+  if (a.gradient?.enabled && Array.isArray(a.gradient.colors) && a.gradient.colors.length >= 2) fx.gradient = [a.gradient.colors[0], a.gradient.colors[a.gradient.colors.length - 1]];
+  if (a.shadow?.enabled || a.glow?.enabled) fx.shadow = true;   // 編輯器陰影為布林；glow 以柔陰影近似
+  if (a.italic) fx.italic = true;
+  return { fontFamily: fam, fontWeight, color, align, fx: Object.keys(fx).length ? fx : null };
+}
 
 type EL = {
   id: string; name: string; type: LayerData["type"]; semanticId: string; instanceId: string | null;
@@ -64,6 +107,11 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const [artBusy, setArtBusy] = useState(false);   // AI 特效字生成中
   const [artRef, setArtRef] = useState<string | null>(null);   // AI 特效字：風格參考圖（data URL，選用）
   const [artEdit, setArtEdit] = useState("");      // AI 微調：使用者的修改指令
+  const [advOpen, setAdvOpen] = useState(false);   // 「進階文字效果」預設收合
+  // AI 風格參考：上傳文字參考圖 → 分析 Typography → 套用成可編輯文字（非藝術字圖）
+  const [refImg, setRefImg] = useState<string | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysis, setAnalysis] = useState<StyleAnalysis | null>(null);
   // 復原/重做歷史 refs（實作在 render 定義之後，避免 TDZ）
   const history = useRef<EL[][]>([]);
   const histIdx = useRef(0);
@@ -532,6 +580,22 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     if (!selEl) return; selEl.fx = patch === null ? null : { ...(selEl.fx ?? {}), ...patch }; selEl.thumb = makeThumb(selEl); markDirty(); render(); refresh();
   };
   const applyFxPreset = (fx: TextFx | null, color?: string) => { if (!selEl) return; if (color) selEl.color = color; selEl.fx = fx; selEl.thumb = makeThumb(selEl); markDirty(); render(); refresh(); };
+  // AI 風格參考：分析文字參考圖的 Typography（不生圖、不新增效果）
+  const analyzeRef = async (dataUrl: string) => {
+    setRefImg(dataUrl); setAnalysis(null); setAnalyzing(true);
+    try {
+      const r = await fetch("/api/magic-layers/analyze-style", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ refImageUrl: dataUrl, availableFonts: AVAILABLE_FONTS }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? r.statusText);
+      setAnalysis(d as StyleAnalysis);
+    } catch (err) { alert("分析參考圖失敗：" + (err instanceof Error ? err.message : String(err))); setRefImg(null); }
+    finally { setAnalyzing(false); }
+  };
+  // 套用分析結果到目前選中的文字圖層（維持可編輯文字）
+  const applyStyleAnalysis = () => {
+    if (!selEl || !selEl.isText || !analysis) return;
+    updateText(analysisToTextPatch(analysis, selEl.fontSize));
+  };
   // AI 特效字：把選中的文字生成藝術字圖 → 就地變成圖片圖層（可拖曳，但不再是可編輯文字）
   const applyArtText = async () => {
     if (!selEl || !selEl.isText || artBusy) return;
@@ -715,46 +779,82 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                       <input type="color" value={toHex(selEl.color)} onChange={(e) => updateText({ color: e.target.value })} style={{ width: 40, height: 34, border: "1px solid #e5e7eb", borderRadius: 8, padding: 0, cursor: "pointer" }} />
                       <input value={selEl.color} onChange={(e) => updateText({ color: e.target.value })} style={{ ...S.rinput, flex: 1 }} />
                     </div>
-                    <label style={S.rlabel}>文字特效（設計感）</label>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                      <button style={{ ...S.fxChip, ...(!selEl.fx ? S.fxChipOn : {}) }} onClick={() => applyFxPreset(null)}>無</button>
-                      <button style={S.fxChip} onClick={() => applyFxPreset({ gradient: ["#fce38a", "#c8811f"] })}>漸層金</button>
-                      <button style={S.fxChip} onClick={() => applyFxPreset({ gradient: ["#c4b5fd", "#6d28d9"] })}>漸層紫</button>
-                      <button style={S.fxChip} onClick={() => applyFxPreset({ strokeColor: "#111827", strokeW: 0.08 }, "#ffffff")}>白字黑框</button>
-                      <button style={S.fxChip} onClick={() => applyFxPreset({ shadow: true })}>陰影</button>
-                      <button style={S.fxChip} onClick={() => applyFxPreset({ gradient: ["#a78bfa", "#7c3aed"], shadow: true })}>霓虹</button>
-                    </div>
-                    <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                      <button style={{ ...S.rbtn, flex: 1, ...(selEl.fx?.strokeW ? { border: "1px solid #7c3aed", color: "#7c3aed" } : {}) }} onClick={() => updateFx({ strokeW: selEl.fx?.strokeW ? 0 : 0.08, strokeColor: selEl.fx?.strokeColor || "#ffffff" })}>外框</button>
-                      <button style={{ ...S.rbtn, flex: 1, ...(selEl.fx?.shadow ? { border: "1px solid #7c3aed", color: "#7c3aed" } : {}) }} onClick={() => updateFx({ shadow: !selEl.fx?.shadow })}>陰影</button>
-                      <button style={{ ...S.rbtn, flex: 1, ...(selEl.fx?.italic ? { border: "1px solid #7c3aed", color: "#7c3aed" } : {}) }} onClick={() => updateFx({ italic: !selEl.fx?.italic })}>斜體</button>
-                    </div>
-                    {selEl.fx?.strokeW ? (
+                    {/* 風格參考：上傳文字參考圖 → 分析 Typography → 套用成可編輯文字（不自行加特效） */}
+                    <div style={{ ...S.rhead, marginTop: 18 }}>風格參考</div>
+                    {refImg ? (
                       <>
-                        <label style={S.rlabel}>外框顏色</label>
-                        <input type="color" value={toHex(selEl.fx.strokeColor || "#ffffff")} onChange={(e) => updateFx({ strokeColor: e.target.value })} style={{ width: 40, height: 34, border: "1px solid #e5e7eb", borderRadius: 8, padding: 0, cursor: "pointer" }} />
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={refImg} alt="參考圖" style={{ width: 52, height: 52, objectFit: "cover", borderRadius: 8, border: "1px solid #e5e7eb" }} />
+                          <button disabled={analyzing} onClick={() => { setRefImg(null); setAnalysis(null); }} style={{ ...S.rbtn, flex: 1, color: "#dc2626" }}>移除</button>
+                        </div>
+                        {analyzing ? (
+                          <p style={{ margin: "10px 0 0", fontSize: 12, color: "#7c3aed", fontWeight: 600 }}>AI 分析文字風格中…</p>
+                        ) : analysis ? (
+                          <div style={{ marginTop: 10, padding: 12, background: "#faf5ff", border: "1px solid #ede9fe", borderRadius: 10 }}>
+                            <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>AI 已分析文字風格</div>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                              <span style={SUMMARY_CHIP}>{CAT_LABEL[String(analysis.font?.category)] ?? (analysis.font?.category || "字體")}</span>
+                              <span style={SUMMARY_CHIP}>{WEIGHT_LABEL[Number(analysis.font?.weight)] ?? `字重 ${analysis.font?.weight ?? "-"}`}</span>
+                              {analysis.typography?.letterSpacing ? <span style={SUMMARY_CHIP}>字距 {analysis.typography.letterSpacing}</span> : null}
+                              <span style={{ ...SUMMARY_CHIP, display: "inline-flex", alignItems: "center", gap: 5 }}>
+                                <span style={{ width: 11, height: 11, borderRadius: 3, background: analysis.typography?.color || "#303030", border: "1px solid #d1d5db" }} />
+                                {analysis.typography?.color || "#303030"}
+                              </span>
+                              <span style={SUMMARY_CHIP}>{analysis.stroke?.enabled ? "有描邊" : "無描邊"}</span>
+                              <span style={SUMMARY_CHIP}>{analysis.shadow?.enabled ? "有陰影" : "無陰影"}</span>
+                              <span style={SUMMARY_CHIP}>{analysis.gradient?.enabled ? "漸層" : "無漸層"}</span>
+                            </div>
+                            {analysis.styleName || analysis.visualDescription ? (
+                              <p style={{ margin: "10px 0 0", fontSize: 12, color: "#4b5563", lineHeight: 1.5 }}>
+                                {analysis.styleName ? <strong>「{analysis.styleName}」 </strong> : null}{analysis.visualDescription}
+                              </p>
+                            ) : null}
+                            <button onClick={applyStyleAnalysis} style={{ width: "100%", marginTop: 10, height: 36, borderRadius: 10, border: "none", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", background: "linear-gradient(135deg,#8b5cf6,#7c3aed)" }}>套用參考風格</button>
+                          </div>
+                        ) : null}
                       </>
-                    ) : null}
-                    <label style={{ ...S.rlabel, marginTop: 14 }}>風格參考圖（選用）</label>
-                    {artRef ? (
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={artRef} alt="參考圖" style={{ width: 52, height: 52, objectFit: "cover", borderRadius: 8, border: "1px solid #e5e7eb" }} />
-                        <button disabled={artBusy} onClick={() => setArtRef(null)}
-                          style={{ ...S.rbtn, flex: 1, color: "#dc2626" }}>移除參考圖</button>
-                      </div>
                     ) : (
-                      <label style={{ display: "block", textAlign: "center", padding: "10px 8px", border: "1px dashed #c4b5fd", borderRadius: 10, color: "#7c3aed", fontSize: 12, fontWeight: 600, cursor: artBusy ? "default" : "pointer", background: "#faf5ff" }}>
-                        ＋ 上傳參考圖
-                        <input type="file" accept="image/*" disabled={artBusy} style={{ display: "none" }}
-                          onChange={(e) => { const f = e.target.files?.[0]; if (!f) return; const fr = new FileReader(); fr.onload = () => setArtRef(String(fr.result)); fr.readAsDataURL(f); e.target.value = ""; }} />
+                      <label style={{ display: "block", textAlign: "center", padding: "12px 8px", border: "1px dashed #c4b5fd", borderRadius: 10, color: "#7c3aed", fontSize: 12, fontWeight: 600, cursor: analyzing ? "default" : "pointer", background: "#faf5ff" }}>
+                        ＋ 上傳文字參考圖
+                        <input type="file" accept="image/*" disabled={analyzing} style={{ display: "none" }}
+                          onChange={(e) => { const f = e.target.files?.[0]; if (!f) return; const fr = new FileReader(); fr.onload = () => analyzeRef(String(fr.result)); fr.readAsDataURL(f); e.target.value = ""; }} />
                       </label>
                     )}
-                    <button onClick={applyArtText} disabled={artBusy}
-                      style={{ width: "100%", marginTop: 10, height: 38, borderRadius: 10, border: "none", color: "#fff", fontSize: 13, fontWeight: 700, cursor: artBusy ? "default" : "pointer", background: artBusy ? "#a78bfa" : "linear-gradient(135deg,#8b5cf6,#7c3aed)" }}>
-                      {artBusy ? "生成藝術字中…（約 15–30 秒）" : artRef ? "✨ 依參考圖生成藝術字" : "✨ AI 特效字（生成藝術字）"}
+                    <p style={{ margin: "6px 0 0", fontSize: 11, color: "#9ca3af", lineHeight: 1.5 }}>AI 會分析參考圖的字體、字重、字距、顏色，盡量還原到這段文字上（參考圖沒有的效果不會自行加上）。</p>
+
+                    {/* 進階文字效果：預設收合，屬後續微調 */}
+                    <button onClick={() => setAdvOpen((v) => !v)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", marginTop: 18, padding: 0, border: "none", background: "none", cursor: "pointer", ...S.rhead }}>
+                      <span>進階文字效果</span>{advOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
                     </button>
-                    <p style={{ margin: "6px 0 0", fontSize: 11, color: "#9ca3af", lineHeight: 1.5 }}>把這段文字生成成藝術字圖，變成可拖曳圖層（之後不能再改字；可用復原還原）。{artRef ? "會模仿參考圖的字體風格。" : "上傳參考圖可模仿它的字體風格。"}</p>
+                    {advOpen && (
+                      <>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                          <button style={{ ...S.fxChip, ...(!selEl.fx ? S.fxChipOn : {}) }} onClick={() => applyFxPreset(null)}>無</button>
+                          <button style={S.fxChip} onClick={() => applyFxPreset({ gradient: ["#fce38a", "#c8811f"] })}>漸層金</button>
+                          <button style={S.fxChip} onClick={() => applyFxPreset({ gradient: ["#c4b5fd", "#6d28d9"] })}>漸層紫</button>
+                          <button style={S.fxChip} onClick={() => applyFxPreset({ strokeColor: "#111827", strokeW: 0.08 }, "#ffffff")}>白字黑框</button>
+                          <button style={S.fxChip} onClick={() => applyFxPreset({ shadow: true })}>陰影</button>
+                          <button style={S.fxChip} onClick={() => applyFxPreset({ gradient: ["#a78bfa", "#7c3aed"], shadow: true })}>霓虹</button>
+                        </div>
+                        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                          <button style={{ ...S.rbtn, flex: 1, ...(selEl.fx?.strokeW ? { border: "1px solid #7c3aed", color: "#7c3aed" } : {}) }} onClick={() => updateFx({ strokeW: selEl.fx?.strokeW ? 0 : 0.08, strokeColor: selEl.fx?.strokeColor || "#ffffff" })}>外框</button>
+                          <button style={{ ...S.rbtn, flex: 1, ...(selEl.fx?.shadow ? { border: "1px solid #7c3aed", color: "#7c3aed" } : {}) }} onClick={() => updateFx({ shadow: !selEl.fx?.shadow })}>陰影</button>
+                          <button style={{ ...S.rbtn, flex: 1, ...(selEl.fx?.italic ? { border: "1px solid #7c3aed", color: "#7c3aed" } : {}) }} onClick={() => updateFx({ italic: !selEl.fx?.italic })}>斜體</button>
+                        </div>
+                        {selEl.fx?.strokeW ? (
+                          <>
+                            <label style={S.rlabel}>外框顏色</label>
+                            <input type="color" value={toHex(selEl.fx.strokeColor || "#ffffff")} onChange={(e) => updateFx({ strokeColor: e.target.value })} style={{ width: 40, height: 34, border: "1px solid #e5e7eb", borderRadius: 8, padding: 0, cursor: "pointer" }} />
+                          </>
+                        ) : null}
+                        <button onClick={applyArtText} disabled={artBusy}
+                          style={{ width: "100%", marginTop: 12, height: 38, borderRadius: 10, border: "none", color: "#fff", fontSize: 13, fontWeight: 700, cursor: artBusy ? "default" : "pointer", background: artBusy ? "#a78bfa" : "linear-gradient(135deg,#8b5cf6,#7c3aed)" }}>
+                          {artBusy ? "生成藝術字中…（約 15–30 秒）" : "✨ 生成藝術字（整段變圖）"}
+                        </button>
+                        <p style={{ margin: "6px 0 0", fontSize: 11, color: "#9ca3af", lineHeight: 1.5 }}>把這段文字生成成藝術字圖，變成可拖曳圖層（之後不能再改字；可用復原還原）。</p>
+                      </>
+                    )}
                     <div style={{ height: 1, background: "#e5e7eb", margin: "18px 0" }} />
                   </>
                 )}

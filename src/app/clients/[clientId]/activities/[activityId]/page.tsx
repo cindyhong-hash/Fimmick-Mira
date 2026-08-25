@@ -1,11 +1,11 @@
 "use client";
 import { useEffect, useState, useRef } from "react";
 import { LayoutPicker } from "@/components/activities/LayoutPicker";
-import { Loader2, Pencil, SlidersHorizontal } from "lucide-react";
+import { Loader2, Pencil, SlidersHorizontal, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
-type GeneratedLayout = { id: string; layoutType: string; imageUrl: string; copyText: string; textBurnedIn?: boolean; savedToLibrary?: boolean };
+type GeneratedLayout = { id: string; layoutType: string; imageUrl: string; copyText: string; textBurnedIn?: boolean; savedToLibrary?: boolean; effectLevel?: string | null };
 type Activity = { id: string; theme: string; focusPoint: string; titleText?: string | null; status: string; layoutId?: string; variantCount?: number; generatedLayouts: GeneratedLayout[] };
 
 export default function ActivityPage({ params }: { params: Promise<{ clientId: string; activityId: string }> }) {
@@ -149,6 +149,12 @@ export default function ActivityPage({ params }: { params: Promise<{ clientId: s
 
   return (
     <div>
+      <Link
+        href={`/clients/${clientId}`}
+        className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 transition-colors mb-3"
+      >
+        <ArrowLeft className="h-4 w-4" />返回活動列表
+      </Link>
       <div className="flex items-center justify-between mb-1">
         {editingTitle ? (
           <input
@@ -172,8 +178,8 @@ export default function ActivityPage({ params }: { params: Promise<{ clientId: s
           {/* 選中一款先出現：頂部主 CTA，永遠喺視線頂、唔使 scroll（取代浮動 FAB）*/}
           {selectedId && (
             <Link href={`/clients/${clientId}/activities/${activityId}/editor`}>
-              <Button size="sm" className="gap-1">
-                <SlidersHorizontal className="h-4 w-4" />進入微調畫布 →
+              <Button size="sm" className="gap-1 bg-violet-600 hover:bg-violet-700 text-white">
+                <SlidersHorizontal className="h-4 w-4" />進入微調畫布
               </Button>
             </Link>
           )}
@@ -191,7 +197,6 @@ export default function ActivityPage({ params }: { params: Promise<{ clientId: s
         selectedId={selectedId}
         activityId={activityId}
         clientId={clientId}
-        hasLockedText={!!activity.titleText?.trim()}
         onSelect={handleSelect}
       />
     </div>

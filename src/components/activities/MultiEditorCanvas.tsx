@@ -1,8 +1,9 @@
 "use client";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Loader2, Sparkles, CheckCircle2, Wand2, ImagePlus, X, LayoutGrid, Undo2 } from "lucide-react";
+import { Loader2, Sparkles, CheckCircle2, Wand2, ImagePlus, X, LayoutGrid, Undo2, Stamp } from "lucide-react";
 import { MaskCanvas, type SelectionBounds } from "@/components/activities/MaskCanvas";
+import LogoPlacerModal, { type LogoVersion } from "@/components/activities/LogoPlacerModal";
 
 type Props = {
   layoutRecordId: string;          // GeneratedLayout id
@@ -13,6 +14,7 @@ type Props = {
   ratio: string;                   // 圖片比例
   brandLogoUrl?: string;
   logoMode?: string;
+  logoVersions?: LogoVersion[];    // 多版本品牌 logo（放置標誌可選）
 };
 
 // view：要在中央大圖顯示的對象 — "composite"（整體拼版，唯讀）或某一格 index（可編輯）
@@ -26,8 +28,9 @@ const COPY_TRANSFORMS = [
 ];
 
 export function MultiEditorCanvas({
-  layoutRecordId, layoutType, initialComposite, initialCells, initialCopy, ratio, brandLogoUrl, logoMode,
+  layoutRecordId, layoutType, initialComposite, initialCells, initialCopy, ratio, brandLogoUrl, logoMode, logoVersions = [],
 }: Props) {
+  const [showLogo, setShowLogo] = useState(false);
   const [cells, setCells] = useState<string[]>(initialCells);
   const [composite, setComposite] = useState<string>(initialComposite);
   const [view, setView] = useState<View>(0);   // 一進來顯示第 1 格（單張）
@@ -90,7 +93,8 @@ export function MultiEditorCanvas({
       const res = await fetch("/api/composite", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cellUrls: nextCells, layoutId: layoutType, ratio, logoUrl: brandLogoUrl, logoMode }),
+        // [logo] 重新拼版不再自動疊 logo；logo 改由「放置標誌」手動放置在拼版大圖上。
+        body: JSON.stringify({ cellUrls: nextCells, layoutId: layoutType, ratio, logoMode: "none" }),
       });
       const data = await res.json();
       if (data.imageUrl) setComposite(data.imageUrl);
@@ -172,11 +176,22 @@ export function MultiEditorCanvas({
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="font-medium text-gray-700">圖片預覽</h2>
-          {recompositing && (
-            <span className="flex items-center gap-1 text-xs text-violet-500">
-              <Loader2 className="h-3 w-3 animate-spin" />拼版更新中…
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {recompositing && (
+              <span className="flex items-center gap-1 text-xs text-violet-500">
+                <Loader2 className="h-3 w-3 animate-spin" />拼版更新中…
+              </span>
+            )}
+            {!busy && (
+              <button
+                onClick={() => setShowLogo(true)}
+                className="flex items-center gap-1 text-xs text-gray-600 hover:text-violet-600 border border-gray-200 hover:border-violet-300 hover:bg-violet-50 rounded-lg px-2 py-1 transition-all"
+              >
+                <Stamp className="h-3.5 w-3.5" />
+                放置標誌
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="flex gap-3">
@@ -211,8 +226,11 @@ export function MultiEditorCanvas({
             ))}
           </div>
 
-          {/* 中央大圖（填滿欄位，比例同單圖）*/}
-          <div className="relative flex-1 rounded-xl overflow-hidden border">
+          {/* 中央大圖——唔再用 flex-1 逼滿欄位闊度：flex-1 會令個框跟返欄位闊度
+              （即使圖片本身好窄，例如 9:16），圖片喺框入面用 object-contain 置中，
+              兩側就會多咗睇落好似「白邊」嘅留白。改做跟返圖片自身闊度（max-w 只係
+              防止太闊嘅圖撐爆版面），同單圖版 EditorCanvas.tsx 嘅做法一致。*/}
+          <div className="relative max-w-[560px] rounded-xl overflow-hidden border">
             {isCell ? (
               <MaskCanvas
                 key={`${activeCell}-${cells[activeCell]}`}
@@ -238,13 +256,14 @@ export function MultiEditorCanvas({
             onClick={undo}
             disabled={history.length === 0 || busy}
             variant="outline"
-            className="gap-1.5"
+            className="gap-1.5 border-gray-200 text-gray-600 hover:border-violet-300 hover:text-violet-600 hover:bg-violet-50"
             title={history.length === 0 ? "沒有可復原的修改" : `回上一步（還可復原 ${history.length} 步）`}
           >
             <Undo2 className="h-4 w-4" />
             <span>回上一步{history.length > 0 ? `（${history.length}）` : ""}</span>
           </Button>
-          <Button onClick={handleSave} disabled={saving} variant={saved ? "outline" : "default"} className="gap-1.5">
+          <Button onClick={handleSave} disabled={saving} variant="outline"
+            className="gap-1.5 border-gray-200 text-gray-600 hover:border-violet-300 hover:text-violet-600 hover:bg-violet-50">
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : saved ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : null}
             <span>{saving ? "儲存中…" : saved ? "已儲存最新拼版" : "完成此版本"}</span>
           </Button>
@@ -279,9 +298,12 @@ export function MultiEditorCanvas({
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               rows={4}
-              placeholder="例：把背景改成日落沙灘 / 移除右下角的水印"
+              placeholder="例：把背景改成日落沙灘 / 移除右下角的水印 / 文字改成：限時優惠中"
               className="w-full rounded-lg border border-violet-200 bg-white p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-violet-400"
             />
+            <p className="text-[11px] text-gray-400 -mt-1.5">
+              想改文字內容：用「文字改成：新內容」呢個句式最準（例：文字改成：限時優惠中），或者圈選好文字範圍後直接打新內容都得。
+            </p>
 
             {/* 參考圖（選填）*/}
             <div className="space-y-2">
@@ -333,6 +355,28 @@ export function MultiEditorCanvas({
         </div>
         <p className="text-xs text-gray-400">文案會在「完成此版本」時一併存回。</p>
       </div>
+
+      {/* 放置標誌 modal —— 針對「目前顯示的那張圖」：
+          某一格 → 合成到該格後自動重新拼版；拼版總覽 → 直接疊在整張大圖上。 */}
+      {showLogo && (
+        <LogoPlacerModal
+          imageUrl={isCell ? cells[activeCell] : composite}
+          logoVersions={logoVersions.length ? logoVersions : (brandLogoUrl ? [{ url: brandLogoUrl, label: "品牌 Logo" }] : [])}
+          onConfirm={(url) => {
+            setShowLogo(false);
+            setSaved(false);
+            pushHistory();
+            if (isCell) {
+              const nextCells = cells.map((c, i) => (i === activeCell ? url : c));
+              setCells(nextCells);
+              void recomposite(nextCells);
+            } else {
+              setComposite(url);
+            }
+          }}
+          onClose={() => setShowLogo(false)}
+        />
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Plus, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { BrandWorkspaceHeader } from "@/components/layout/BrandWorkspaceHeader";
 import { LibraryWorkspace, type LibraryWorkspaceHandle } from "@/components/library/LibraryWorkspace";
 
@@ -20,20 +20,13 @@ export default function BrandComponentsPage({ params }: { params: Promise<{ clie
         clientId={clientId}
         activeTab="components"
         actions={
-          <>
-            <button
-              onClick={() => libRef.current?.openQuickAdd()}
-              className="flex items-center gap-1.5 text-xs font-medium bg-gray-900 text-white px-3 py-2 rounded-lg hover:bg-gray-700 transition-colors"
-            >
-              <Plus className="h-3.5 w-3.5" />上傳參考圖
-            </button>
-            <button
-              onClick={() => libRef.current?.openAddPicker()}
-              className="flex items-center gap-1.5 text-xs font-medium bg-violet-600 text-white px-3 py-2 rounded-lg hover:bg-violet-700 transition-colors"
-            >
-              <Sparkles className="h-3.5 w-3.5" />新增產品／素材圖片
-            </button>
-          </>
+          // 「上傳參考圖」已搬去 ComponentGrid 嘅 filter pills 尾（釘死顯示，方案 D），呢邊淨返真正全域動作。
+          <button
+            onClick={() => libRef.current?.openAddPicker()}
+            className="flex items-center gap-1.5 text-xs font-medium bg-violet-600 text-white px-3 py-2 rounded-lg hover:bg-violet-700 transition-colors"
+          >
+            <Sparkles className="h-3.5 w-3.5" />新增產品／素材圖片
+          </button>
         }
       />
       <LibraryWorkspace ref={libRef} clientId={clientId} />

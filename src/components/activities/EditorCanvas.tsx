@@ -1,12 +1,14 @@
 "use client";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Download, Loader2, Sparkles, Wand2, RotateCcw, CheckCircle2, ImagePlus, X } from "lucide-react";
+import { Download, Loader2, Sparkles, Wand2, RotateCcw, CheckCircle2, ImagePlus, X, Stamp } from "lucide-react";
 import { MaskCanvas, type SelectionBounds } from "@/components/activities/MaskCanvas";
+import LogoPlacerModal, { type LogoVersion } from "@/components/activities/LogoPlacerModal";
 
 type Props = {
   layout: { id: string; imageUrl: string; copyText: string; layoutType: string };
   brandLogoUrl?: string;
+  logoVersions?: LogoVersion[];
 };
 
 const COPY_TRANSFORMS = [
@@ -16,7 +18,8 @@ const COPY_TRANSFORMS = [
   { label: "換諧音梗",   instruction: "請在這段文案中加入一個有趣的諧音梗或雙關語" },
 ];
 
-export function EditorCanvas({ layout, brandLogoUrl }: Props) {
+export function EditorCanvas({ layout, brandLogoUrl, logoVersions = [] }: Props) {
+  const [showLogo,    setShowLogo]    = useState(false);
   const [copyText,    setCopyText]    = useState(layout.copyText);
   const [transforming, setTransforming] = useState(false);
   const [exporting,   setExporting]   = useState(false);
@@ -158,15 +161,19 @@ export function EditorCanvas({ layout, brandLogoUrl }: Props) {
         <div className="flex items-center justify-between">
           <h2 className="font-medium">圖片預覽</h2>
           <div className="flex items-center gap-2">
-            {maskDataUrl && !inpainting && (
-              <span className="text-xs text-blue-500 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full">
-                遮罩已就緒
-              </span>
+            {!inpainting && (
+              <button
+                onClick={() => setShowLogo(true)}
+                className="flex items-center gap-1 text-xs text-gray-600 hover:text-violet-600 border border-gray-200 hover:border-violet-300 hover:bg-violet-50 rounded-lg px-2 py-1 transition-all"
+              >
+                <Stamp className="h-3.5 w-3.5" />
+                放置標誌
+              </button>
             )}
             {canUndo && !inpainting && (
               <button
                 onClick={undo}
-                className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-800 border border-gray-200 hover:border-gray-400 rounded-lg px-2 py-1 transition-all"
+                className="flex items-center gap-1 text-xs text-gray-600 hover:text-violet-600 border border-gray-200 hover:border-violet-300 hover:bg-violet-50 rounded-lg px-2 py-1 transition-all"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
                 上一步
@@ -225,7 +232,8 @@ export function EditorCanvas({ layout, brandLogoUrl }: Props) {
                 onClick={handleSave}
                 disabled={saving}
                 size="sm"
-                className="shrink-0 gap-1.5 bg-amber-600 hover:bg-amber-700 text-white"
+                variant="outline"
+                className="shrink-0 gap-1.5 border-gray-200 text-gray-600 hover:border-violet-300 hover:text-violet-600 hover:bg-violet-50"
               >
                 {saving
                   ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -275,9 +283,12 @@ export function EditorCanvas({ layout, brandLogoUrl }: Props) {
             value={imagePrompt}
             onChange={(e) => setImagePrompt(e.target.value)}
             rows={5}
-            placeholder="請輸入修改指令，例如：&#10;・把腳踏車換成奔跑的黑熊&#10;・將背景改為日落沙灘&#10;・移除右下角的水印"
+            placeholder="請輸入修改指令，例如：&#10;・把腳踏車換成奔跑的黑熊&#10;・將背景改為日落沙灘&#10;・移除右下角的水印&#10;・文字改成：限時優惠中"
             className="w-full rounded-lg border border-violet-200 bg-white p-3 text-sm resize-none placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-400 transition"
           />
+          <p className="text-[11px] text-gray-400 -mt-1.5">
+            想改文字內容：用「文字改成：新內容」呢個句式最準，或者圈選好文字範圍後直接打新內容都得。
+          </p>
 
           <div className="space-y-2">
             <p className="text-xs text-gray-500 font-medium">參考圖（選填）</p>
@@ -335,6 +346,20 @@ export function EditorCanvas({ layout, brandLogoUrl }: Props) {
           </div>
         </div>
       </div>
+
+      {/* 放置標誌 modal —— 合成後推入歷史堆疊，走既有「完成此版本」儲存流程 */}
+      {showLogo && (
+        <LogoPlacerModal
+          imageUrl={currentImage}
+          logoVersions={logoVersions.length ? logoVersions : (brandLogoUrl ? [{ url: brandLogoUrl, label: "品牌 Logo" }] : [])}
+          onConfirm={(url) => {
+            setImageHistory((h) => [...h, url]);
+            setSaved(false);
+            setShowLogo(false);
+          }}
+          onClose={() => setShowLogo(false)}
+        />
+      )}
 
     </div>
   );

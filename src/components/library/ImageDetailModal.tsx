@@ -8,10 +8,11 @@
  * the generated copy and offers 「分析此圖加入素材」.
  */
 import { useEffect, useState } from "react";
-import { X, ArrowRightCircle, Sparkles, ScanSearch, Pencil, RefreshCw, Trash2, Download, Check, Loader2, Image as ImageIcon, Target } from "lucide-react";
+import { X, ArrowRightCircle, Sparkles, Paperclip, Mountain, UserRound, Palette, Package, Pencil, RefreshCw, Trash2, Download, Check, Loader2, Image as ImageIcon, Target } from "lucide-react";
 import type { StyleComponent, ComponentCategory } from "@/types/library";
 import { CATEGORY_META, getColors } from "@/types/library";
 import { ColorCards } from "./ColorCards";
+import { buildDownloadFilename } from "@/lib/download-filename";
 
 type Props = {
   imageUrl: string | null;
@@ -29,7 +30,7 @@ type Props = {
   refImageUrl?: string;
   /** 合成時用咗嘅產品來源圖（喺 popup 顯示返）。 */
   sourceImages?: string[];
-  /** 從 popup 觸發「重新生成/調整」，傳回預填資料讓父層打開 GenerateAssetModal。 */
+  /** 從 popup 觸發「重新生成/調整」，傳回預填資料讓父層帶去「新增產品／素材圖片」全頁。 */
   onOpenGenerateAsset?: (init: { description: string; refImageUrl: string; type: "background" | "person" | "illustration"; engine: "flux" | "nano" }) => void;
   injectedIds?: Set<string>;
   onInject: (comp: StyleComponent) => void;
@@ -47,6 +48,8 @@ type Props = {
   onRefresh?: () => void;
   /** 帶入此圖去「新增活動」（經 sessionStorage 傳 URL + AI prompt，唔會喺網址外露）。 */
   onUseAsActivityRef?: (imageUrl: string, prompt?: string) => void;
+  /** 品牌名（下載檔名用；冇就淨用類型/標題/尺寸）。 */
+  clientName?: string | null;
   onClose: () => void;
 };
 
@@ -66,14 +69,14 @@ function sizeLabel(w: number, h: number): string {
   return diff / bestVal < 0.03 ? `${bestLabel} · ${w}×${h}` : `${w}×${h}`;
 }
 
-// 主圖 + 右下角尺寸 pill（比例 · 原始尺寸）
-function ImageWithSize({ src, alt, className }: { src: string; alt?: string; className?: string }) {
+// 主圖 + 右下角尺寸 pill（比例 · 原始尺寸）；onDims 將原始 px 交返上層做下載檔名用。
+function ImageWithSize({ src, alt, className, onDims }: { src: string; alt?: string; className?: string; onDims?: (w: number, h: number) => void }) {
   const [dims, setDims] = useState("");
   return (
     <div className="relative">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={src} alt={alt ?? "preview"} className={className}
-        onLoad={(e) => { const t = e.currentTarget; setDims(sizeLabel(t.naturalWidth, t.naturalHeight)); }} />
+        onLoad={(e) => { const t = e.currentTarget; setDims(sizeLabel(t.naturalWidth, t.naturalHeight)); onDims?.(t.naturalWidth, t.naturalHeight); }} />
       {dims && (
         <span className="absolute bottom-2 right-2 text-[10px] font-medium bg-black/55 text-white px-1.5 py-0.5 rounded shadow pointer-events-none">{dims}</span>
       )}
@@ -102,6 +105,7 @@ export function ImageDetailModal({
   onRefresh,
   onOpenGenerateAsset,
   onUseAsActivityRef,
+  clientName,
   onClose,
 }: Props) {
   const [confirmDel, setConfirmDel] = useState(false);
@@ -113,6 +117,8 @@ export function ImageDetailModal({
   const [savedTitle, setSavedTitle] = useState<string | null>(null);
   const [savingTitle, setSavingTitle] = useState(false);
   const displaySubject = savedTitle ?? subject;
+  // 下載檔名用嘅原始 px 尺寸（由 ImageWithSize 個 onLoad 交返嚟，冇得就淨係唔加呢段）。
+  const [imgDims, setImgDims] = useState<{ w: number; h: number } | null>(null);
 
   async function saveTitle() {
     if (!libraryImageId) return;
@@ -128,14 +134,37 @@ export function ImageDetailModal({
   }
 
   // Download the displayed image (same-origin /uploads → the `download` attribute is honored).
-  function handleDownload() {
+  // fetch → blob 先再落地：本機圖片存喺同源 /uploads，download attribute 直接生效；
+  // 但 Vercel 上圖片存喺 *.public.blob.vercel-storage.com（跨域），瀏覽器會無視
+  // download attribute 直接開新分頁顯示，唔會落地。同 LayoutPicker.tsx 用返一致做法。
+  async function handleDownload() {
     if (!imageUrl) return;
-    const a = document.createElement("a");
-    a.href = imageUrl;
-    a.download = imageUrl.split("/").pop() || "image";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    // 同 LayoutPicker.tsx 用返同一套命名格式（見 src/lib/download-filename.ts）：
+    // {品牌名}-{類型}-{寬x高}-{可讀標題}.ext，缺邊截就跳過，唔再係亂碼檔名。
+    const isMaterial = genType === "material" || (!loading && bgComp && sorted.length === 0);
+    const typeLabel = isMaterial ? "背景素材"
+      : genType === "person" ? "人像"
+      : genType === "illustration" ? "插畫"
+      : (genType === "reference" || !libraryImageId) ? "參考圖"
+      : "產品成圖";
+    const filename = buildDownloadFilename({
+      url: imageUrl, label: typeLabel, readableText: displaySubject, brand: clientName,
+      size: imgDims ? `${imgDims.w}x${imgDims.h}` : null,
+    });
+    try {
+      const res = await fetch(imageUrl);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      window.open(imageUrl, "_blank");
+    }
   }
 
   // 「移到 / 換專案」已從 popup 移除（重複功能）——改用「調整→編輯素材」入面個專案下拉，或 gallery 長按多選移到。
@@ -183,7 +212,7 @@ export function ImageDetailModal({
         <div className="relative w-full max-w-2xl max-h-[92vh] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-5 py-3.5 border-b shrink-0 gap-3 min-w-0">
             <h2 className="text-sm font-semibold flex items-center gap-1.5 min-w-0 truncate">
-              <ScanSearch className="h-4 w-4 text-teal-500 shrink-0" />
+              <Mountain className="h-4 w-4 text-teal-500 shrink-0" />
               <span className="truncate">背景</span>
             </h2>
             {!loading && (
@@ -192,13 +221,21 @@ export function ImageDetailModal({
                 {onOpenGenerateAsset && (
                   <button onClick={() => onOpenGenerateAsset({ description: prompt ?? "", refImageUrl: effectiveRefImageUrl ?? "", type: "background", engine: derivedEngine })}
                     title="重新生成 / 調整（帶入素材生成）"
-                    className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap bg-violet-600 text-white hover:bg-violet-700 transition-colors">
+                    className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border whitespace-nowrap bg-white border-gray-200 text-gray-600 hover:border-violet-300 hover:text-violet-600 transition-colors">
                     <RefreshCw className="h-3.5 w-3.5" />重新生成背景
+                  </button>
+                )}
+                {bgComp && (
+                  <button onClick={() => onInject(bgComp)} disabled={injectedIds?.has(bgComp.id)}
+                    title="帶入產品圖生成"
+                    className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border whitespace-nowrap transition-colors
+                      ${injectedIds?.has(bgComp.id) ? "bg-gray-100 border-gray-200 text-gray-400 cursor-default" : "bg-white border-gray-200 text-gray-600 hover:border-violet-300 hover:text-violet-600"}`}>
+                    <ArrowRightCircle className="h-3.5 w-3.5" />{injectedIds?.has(bgComp.id) ? "已帶入" : "帶入產品圖生成"}
                   </button>
                 )}
                 {imageUrl && (
                   <button onClick={handleDownload} title="下載圖片"
-                    className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border whitespace-nowrap bg-white border-gray-200 text-gray-600 hover:border-teal-300 hover:text-teal-600 transition-colors">
+                    className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border whitespace-nowrap bg-white border-gray-200 text-gray-600 hover:border-violet-300 hover:text-violet-600 transition-colors">
                     <Download className="h-3.5 w-3.5" />下載
                   </button>
                 )}
@@ -229,7 +266,7 @@ export function ImageDetailModal({
             {loading ? (
               <div className="text-sm text-gray-400 py-10 text-center">載入中…</div>
             ) : imageUrl ? (
-              <ImageWithSize src={imageUrl} alt={bgComp?.name} className="w-full max-h-[60vh] object-contain rounded-xl border bg-gray-50" />
+              <ImageWithSize src={imageUrl} alt={bgComp?.name} className="w-full max-h-[60vh] object-contain rounded-xl border bg-gray-50" onDims={(w, h) => setImgDims({ w, h })} />
             ) : null}
             {!loading && prompt && (
               <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 p-3">
@@ -257,22 +294,13 @@ export function ImageDetailModal({
               </div>
             )}
           </div>
-          {/* 固定 footer：帶入掣永遠可見（唔會被高圖 push 走）；兩條統一 outline 風格 */}
-          {!loading && imageUrl && (onUseAsActivityRef || bgComp) && (
-            <div className="px-5 py-3 border-t shrink-0 space-y-2">
-              {bgComp && (
-                <button onClick={() => onInject(bgComp)} disabled={injectedIds?.has(bgComp.id)}
-                  className={`w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl border transition-colors
-                    ${injectedIds?.has(bgComp.id) ? "bg-gray-100 border-gray-200 text-gray-400 cursor-default" : "bg-teal-600 border-teal-600 text-white hover:bg-teal-700"}`}>
-                  <ArrowRightCircle className="h-3.5 w-3.5" />{injectedIds?.has(bgComp.id) ? "已帶入產品圖生成" : "帶入產品圖生成"}
-                </button>
-              )}
-              {onUseAsActivityRef && (
-                <button onClick={() => onUseAsActivityRef(imageUrl, prompt ?? undefined)}
-                  className="w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors">
-                  <Target className="h-3.5 w-3.5" />帶入活動圖生成
-                </button>
-              )}
+          {/* 固定 footer：帶入掣永遠可見（唔會被高圖 push 走）；統一 primary 紫色風格 */}
+          {!loading && imageUrl && onUseAsActivityRef && (
+            <div className="px-5 py-3 border-t shrink-0">
+              <button onClick={() => onUseAsActivityRef(imageUrl, prompt ?? undefined)}
+                className="w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl bg-violet-600 text-white hover:bg-violet-700 transition-colors">
+                <Target className="h-3.5 w-3.5" />帶入活動圖生成
+              </button>
             </div>
           )}
         </div>
@@ -289,7 +317,11 @@ export function ImageDetailModal({
         <div className="relative w-full max-w-2xl max-h-[92vh] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-5 py-3.5 border-b shrink-0 gap-3 min-w-0">
             <h2 className="text-sm font-semibold flex items-center gap-1.5 min-w-0 truncate">
-              <ScanSearch className={`h-4 w-4 shrink-0 ${genType === "person" ? "text-rose-500" : "text-amber-500"}`} />
+              {genType === "person" ? (
+                <UserRound className="h-4 w-4 shrink-0 text-rose-500" />
+              ) : (
+                <Palette className="h-4 w-4 shrink-0 text-amber-500" />
+              )}
               <span className="truncate">{genType === "person" ? "人像" : "插畫"}</span>
             </h2>
             <div className="flex items-center gap-1.5 shrink-0">
@@ -297,7 +329,7 @@ export function ImageDetailModal({
               {onOpenGenerateAsset && (
                 <button onClick={() => onOpenGenerateAsset({ description: prompt ?? "", refImageUrl: effectiveRefImageUrl ?? "", type: genType as "person" | "illustration", engine: derivedEngine })}
                   title="重新生成 / 調整（帶入素材生成）"
-                  className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap bg-violet-600 text-white hover:bg-violet-700 transition-colors">
+                  className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border whitespace-nowrap bg-white border-gray-200 text-gray-600 hover:border-violet-300 hover:text-violet-600 transition-colors">
                   <RefreshCw className="h-3.5 w-3.5" />重新生成{genType === "person" ? "人像" : "插畫"}
                 </button>
               )}
@@ -323,7 +355,7 @@ export function ImageDetailModal({
           </div>
           <div className="p-5 overflow-y-auto flex-1 min-h-0">
             {imageUrl && (
-              <ImageWithSize src={imageUrl} alt="preview" className="w-full max-h-[60vh] object-contain rounded-xl border bg-gray-50" />
+              <ImageWithSize src={imageUrl} alt="preview" className="w-full max-h-[60vh] object-contain rounded-xl border bg-gray-50" onDims={(w, h) => setImgDims({ w, h })} />
             )}
             {prompt && (
               <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 p-3">
@@ -352,7 +384,7 @@ export function ImageDetailModal({
           {onUseAsActivityRef && imageUrl && (
             <div className="px-5 py-3 border-t shrink-0">
               <button onClick={() => onUseAsActivityRef(imageUrl, prompt ?? undefined)}
-                className="w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors">
+                className="w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl bg-violet-600 text-white hover:bg-violet-700 transition-colors">
                 <Target className="h-3.5 w-3.5" />帶入活動圖生成
               </button>
             </div>
@@ -371,7 +403,11 @@ export function ImageDetailModal({
         <div className="flex items-center justify-between px-5 py-3.5 border-b shrink-0 gap-3 min-w-0">
           {/* 標題只 show 類別（唔再用生成文字 / 唔可改名）*/}
           <h2 className="text-sm font-semibold flex items-center gap-1.5 min-w-0">
-            <ScanSearch className={`h-4 w-4 shrink-0 ${genType === "reference" || !libraryImageId ? "text-blue-500" : "text-violet-500"}`} />
+            {genType === "reference" || !libraryImageId ? (
+              <Paperclip className="h-4 w-4 shrink-0 text-blue-500" />
+            ) : (
+              <Package className="h-4 w-4 shrink-0 text-[#C9A227]" />
+            )}
             <span>{genType === "reference" || !libraryImageId ? "參考圖" : "產品成圖"}</span>
           </h2>
           <div className="flex items-center gap-1.5 shrink-0">
@@ -380,8 +416,8 @@ export function ImageDetailModal({
             {(onRegenerate || (onInjectAll && (sorted.length > 0 || bgComp))) && (
               <button
                 onClick={onRegenerate ?? (() => onInjectAll?.([...sorted, ...(bgComp ? [bgComp] : [])]))}
-                title="重新生成（用呢張圖嘅原參數 / 積木帶去生成台）"
-                className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap bg-violet-600 text-white hover:bg-violet-700 transition-colors">
+                title="重新生成（用這張圖的原參數 / 積木帶到生成台）"
+                className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border whitespace-nowrap bg-white border-gray-200 text-gray-600 hover:border-violet-300 hover:text-violet-600 transition-colors">
                 <RefreshCw className="h-3.5 w-3.5" />重新生成{genType === "reference" || !libraryImageId ? "參考圖" : "產品圖"}
               </button>
             )}
@@ -423,7 +459,7 @@ export function ImageDetailModal({
           {/* Image */}
           <div>
             {imageUrl && (
-              <ImageWithSize src={imageUrl} alt="preview" className="w-full max-h-[70vh] rounded-xl border object-contain bg-gray-50" />
+              <ImageWithSize src={imageUrl} alt="preview" className="w-full max-h-[70vh] rounded-xl border object-contain bg-gray-50" onDims={(w, h) => setImgDims({ w, h })} />
             )}
             {/* 參考文案 intentionally hidden (not needed). AI Prompt is shown below. */}
             {prompt && (
@@ -453,7 +489,7 @@ export function ImageDetailModal({
           </div>
 
           {/* Linked components — 構圖/配色/語氣 + 背景（合成會直接用到，所以顯示出嚟）。 */}
-          <div className="space-y-3">
+          <div className="flex flex-col gap-3">
             {/* 「全部帶入生成圖片」已併入 header 嘅「重新生成」（同一動作：積木 → 生成台），避免兩粒紫掣重複。 */}
             {/* 來源產品圖：合成時用咗邊張（如有）。 */}
             {sourceImages && sourceImages.length > 0 && (
@@ -473,13 +509,16 @@ export function ImageDetailModal({
             {loading ? (
               <div className="text-sm text-gray-400 py-6 text-center">載入中…</div>
             ) : sorted.length === 0 && !bgComp ? (
-              <div className="text-center py-8 px-3 rounded-xl border border-dashed border-gray-200 bg-gray-50">
-                <div className="text-sm text-gray-500 mb-1">此圖尚未分析風格</div>
-                <p className="text-xs text-gray-400 mb-4">分析後可取得構圖・配色・語氣，並加入素材庫</p>
+              <div className="flex-1 min-h-[260px] flex flex-col items-center justify-center text-center py-8 px-4 rounded-xl border border-dashed border-gray-200 bg-gray-50">
+                <span className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-violet-100 text-violet-500">
+                  <Sparkles className="h-5 w-5" />
+                </span>
+                <div className="text-sm font-medium text-gray-600 mb-1">此圖尚未分析風格</div>
+                <p className="text-xs text-gray-400 mb-4 max-w-[220px] leading-relaxed">分析後可取得構圖・配色・語氣，加入素材庫，之後生成時就能直接套用。</p>
                 {imageUrl && onAnalyze && (
                   <button
                     onClick={() => onAnalyze(imageUrl, libraryImageId)}
-                    className="inline-flex items-center gap-1.5 text-xs font-medium bg-violet-600 text-white px-3 py-1.5 rounded-lg hover:bg-violet-700 transition-colors"
+                    className="inline-flex items-center gap-1.5 text-xs font-medium bg-white border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:border-violet-300 hover:text-violet-600 transition-colors"
                   >
                     <Sparkles className="h-3.5 w-3.5" />
                     分析此圖加入素材
@@ -514,7 +553,7 @@ export function ImageDetailModal({
         {onUseAsActivityRef && imageUrl && (
           <div className="px-5 py-3 border-t shrink-0">
             <button onClick={() => onUseAsActivityRef(imageUrl, prompt ?? undefined)}
-              className="w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors">
+              className="w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl bg-violet-600 text-white hover:bg-violet-700 transition-colors">
               <Target className="h-3.5 w-3.5" />帶入活動圖生成
             </button>
           </div>

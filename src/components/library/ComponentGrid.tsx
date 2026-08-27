@@ -12,9 +12,9 @@
 import { useEffect, useState, useCallback, useImperativeHandle, forwardRef, useRef } from "react";
 import {
   ArrowRightCircle, LayoutTemplate, Palette, MessageSquare,
-  Image as ImageIcon, LayoutGrid, Plus, Trash2,
+  LayoutGrid, Plus, Trash2, Mountain,
   Paperclip, UserRound, Package, Sparkles, Search, ArrowUpDown,
-  CheckCircle2, Circle, X,
+  CheckCircle2, Circle, X, ImagePlus,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { StyleComponent, ComponentCategory, PromptSlots, GalleryItem, ImageDetail } from "@/types/library";
@@ -29,7 +29,7 @@ const FILTER_TABS: { key: FilterTab; label: string; icon?: React.ReactNode }[] =
   { key: "COMPOSITION", label: "構圖", icon: <LayoutTemplate className="h-3.5 w-3.5" /> },
   { key: "COLOR_SCHEME", label: "配色", icon: <Palette className="h-3.5 w-3.5" /> },
   { key: "COPY_TONE", label: "語氣", icon: <MessageSquare className="h-3.5 w-3.5" /> },
-  { key: "BACKGROUND", label: "背景", icon: <ImageIcon className="h-3.5 w-3.5" /> },
+  { key: "BACKGROUND", label: "背景", icon: <Mountain className="h-3.5 w-3.5" /> },
 ];
 
 // ─── Gallery search / engine helpers (wireframe ⑥⑦) ─────────────────────────
@@ -156,6 +156,7 @@ function GalleryTile({ item, onOpen, onDelete, selectMode, selected, onToggleSel
   const [confirmDel, setConfirmDel] = useState(false);
   const [dims, setDims] = useState("");
   const [retrying, setRetrying] = useState(false);
+  const [imgLoaded, setImgLoaded] = useState(false);
   // 長按（~0.5s）入多選：手機相簿式操作。pointer 事件兼容滑鼠 + 觸控。
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longFired = useRef(false);
@@ -228,11 +229,13 @@ function GalleryTile({ item, onOpen, onDelete, selectMode, selected, onToggleSel
         }}
         className="w-full text-left"
         style={{ touchAction: "manipulation" }}>
-        {/* Show the FULL image (no crop) — object-contain, letterboxed in a square box. */}
+        {/* Show the FULL image (no crop) — object-contain, letterboxed in a square box.
+            淡入而唔係一出現就即刻硬切（尤其生成中 → 完成嗰刻剛好由佔位卡換成呢個 tile）。 */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={item.imageUrl} alt="brand" loading="lazy" decoding="async"
-          onLoad={(e) => { const t = e.currentTarget; setDims((d) => d || sizeTag(t.naturalWidth, t.naturalHeight)); }}
-          className="w-full aspect-square object-contain" />
+          ref={(el) => { if (el?.complete) setImgLoaded(true); }}
+          onLoad={(e) => { const t = e.currentTarget; setDims((d) => d || sizeTag(t.naturalWidth, t.naturalHeight)); setImgLoaded(true); }}
+          className={`w-full aspect-square object-contain transition-opacity duration-500 ${imgLoaded ? "opacity-100" : "opacity-0"}`} />
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors pointer-events-none" />
       </button>
       {dims && (
@@ -296,10 +299,10 @@ type GalleryFilter = "ALL" | "uploaded" | "material" | "person" | "illustration"
 const FILTER_META: Record<GalleryFilter, { label: string; Icon: LucideIcon; cls: string; activeCls: string }> = {
   ALL:          { label: "全部",     Icon: LayoutGrid, cls: "bg-gray-700",   activeCls: "bg-violet-600 text-white border-violet-600" },
   uploaded:     { label: "參考圖",   Icon: Paperclip,  cls: "bg-blue-500",   activeCls: "bg-blue-500 text-white border-blue-500" },
-  material:     { label: "背景",     Icon: ImageIcon,  cls: "bg-teal-600",   activeCls: "bg-teal-600 text-white border-teal-600" },
+  material:     { label: "背景",     Icon: Mountain,   cls: "bg-teal-600",   activeCls: "bg-teal-600 text-white border-teal-600" },
   person:       { label: "人像",     Icon: UserRound,  cls: "bg-rose-500",   activeCls: "bg-rose-500 text-white border-rose-500" },
   illustration: { label: "插畫",     Icon: Palette,    cls: "bg-amber-500",  activeCls: "bg-amber-500 text-white border-amber-500" },
-  product:      { label: "產品成圖", Icon: Package,    cls: "bg-violet-600", activeCls: "bg-violet-600 text-white border-violet-600" },
+  product:      { label: "產品成圖", Icon: Package,    cls: "bg-[#C9A227]", activeCls: "bg-[#C9A227] text-white border-[#C9A227]" },
 };
 
 /** #4 系列圖成圖（mode=paste-template）—— 報告期間隱藏。 */
@@ -345,10 +348,13 @@ type Props = {
   onOpenImage: (detail: ImageDetail) => void;
   reloadKey?: number;
   clients?: { id: string; name: string }[];  // 批次「移到客戶 / 設公用」用
+  /** 生成 popup 開住嗰陣（AddAssetModal 等）：暫停背景刷新，
+   * 唔好喺用戶專注揀選項嗰陣悄悄重排/插入新 tile 令背景「跳動」。Popup 關咗即刻補刷新一次。 */
+  paused?: boolean;
 };
 
 export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function ComponentGrid(
-  { clientId, unassigned = false, injectedSlots, onInject, onOpenQuickAdd, onOpenGenerateAsset, onOpenImage, reloadKey = 0, clients = [] }, ref,
+  { clientId, unassigned = false, injectedSlots, onInject, onOpenQuickAdd, onOpenGenerateAsset, onOpenImage, reloadKey = 0, clients = [], paused = false }, ref,
 ) {
   const [components, setComponents] = useState<StyleComponent[]>([]);
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
@@ -372,22 +378,42 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
     ]);
   }, [clientId, unassigned]);
 
-  // Primary data effect — runs whenever clientId, reloadKey (from parent), or localTick changes
+  const applyFetched = useCallback(([comps, gal]: [unknown, unknown]) => {
+    setComponents(Array.isArray(comps) ? comps : []);
+    // 報告期間隱藏 #4 系列圖成圖（SHOW_SERIES_TEMPLATE=false）。
+    const galArr: GalleryItem[] = Array.isArray(gal) ? gal : [];
+    setGallery(SHOW_SERIES_TEMPLATE ? galArr : galArr.filter((g) => !isSeriesTemplate(g)));
+  }, []);
+
+  // 首次載入／換品牌（clientId、reloadKey 變）：可以顯示「載入中」全版佔位——呢個係真係新畫面。
   useEffect(() => {
     let active = true;
     setLoading(true);
     doFetch()
-      .then(([comps, gal]) => {
-        if (!active) return;
-        setComponents(Array.isArray(comps) ? comps : []);
-        // 報告期間隱藏 #4 系列圖成圖（SHOW_SERIES_TEMPLATE=false）。
-        const galArr: GalleryItem[] = Array.isArray(gal) ? gal : [];
-        setGallery(SHOW_SERIES_TEMPLATE ? galArr : galArr.filter((g) => !isSeriesTemplate(g)));
-      })
+      .then((res) => { if (active) applyFetched(res); })
       .catch(() => {})
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [clientId, reloadKey, localTick, doFetch]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, reloadKey]);
+
+  // 靜默背景刷新（生成中 poll / popup onStarted / onGenerated 觸發嘅 localTick）：
+  // 唔可以再 setLoading(true) —— 之前呢度同上面共用一個 effect，令每次刷新（包括生成中
+  // 期間每 3 秒一次嘅 poll）都會將成個畫廊 swap 去「載入中…」文字再切返嚟，睇落成個背景
+  // 不斷閃/跳（用戶回報：popup 開住生成、或者關 popup 嗰刻，背景會閃爍/彈返成頁載入中）。
+  // 淨係靜默更新 data，個別 tile（生成中 spinner → 真圖）先變，其他已載入嘅圖唔會重新渲染。
+  //
+  // paused（生成 popup 開住）嗰陣連呢個靜默更新都要停：用戶開住 popup 專注揀選項嗰陣，
+  // 背景插入新 tile／重排都算係一種「跳動」（唔止之前嗰種 loading 閃爍）。等 popup 關咗
+  // （paused 由 true 變 false）先一次過追返最新 —— 依賴 [paused] 令呢個時機自動觸發。
+  useEffect(() => {
+    if (localTick === 0) return; // 首次（同上面 effect 撞）唔重複 fetch
+    if (paused) return;
+    let active = true;
+    doFetch().then((res) => { if (active) applyFetched(res); }).catch(() => {});
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [localTick, paused]);
 
   // Expose imperative refresh for cases where parent needs it
   useImperativeHandle(ref, () => ({ refresh: () => setLocalTick((t) => t + 1) }), []);
@@ -425,7 +451,12 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
   const [busy, setBusy] = useState(false);
   const [confirmBatchDelete, setConfirmBatchDelete] = useState(false);
 
-  const itemKey = (item: GalleryItem) => `${item.kind}-${item.imageUrl}`;
+  // 「生成中」嗰陣 imageUrl 一律係 ""（未有真圖），如果同一批生成多於一張
+  // （例如人像預設一次生成 2 張），淨用 kind-imageUrl 做 key 會撞晒（兩個都係
+  // "generated-"），令 React reconcile 錯 tile——其中一張生成完，另一張留喺
+  // 舊嘅「生成中」畫面唔會自己變返，要 reload 成頁先見到（用戶實測撞過）。
+  // generated kind 有獨立、由生成嗰刻已經確定嘅 libraryImageId，用嚟做 key 先穩陣。
+  const itemKey = (item: GalleryItem) => item.kind === "generated" ? `generated-${item.libraryImageId}` : `${item.kind}-${item.imageUrl}`;
   const toggleSelect = useCallback((key: string) => {
     setSelectedKeys((prev) => {
       const next = new Set(prev);
@@ -559,7 +590,7 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
               {clients.length > 0 && (
                 <select disabled={busy || selectedItems.length === 0} defaultValue=""
                   onChange={(e) => { const v = e.target.value; if (!v) return; runBatch({ clientId: v === "__unassigned__" ? null : v }); e.currentTarget.value = ""; }}
-                  title="把選取嘅素材移到客戶 / 移入未分類素材（從畫面隱藏）"
+                  title="把選取的素材移到客戶 / 移入未分類素材（從畫面隱藏）"
                   className="flex items-center gap-1 text-xs bg-white border border-violet-300 text-violet-700 rounded-full px-3 py-1.5 outline-none cursor-pointer disabled:opacity-50">
                   <option value="">移到…</option>
                   <option value="__unassigned__">未分類素材（從畫面隱藏）</option>
@@ -579,20 +610,34 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
             </div>
           )}
 
-          {/* Gallery filter pills */}
-          <div className="flex gap-1.5 flex-wrap">
+          {/* Gallery filter pills + 上傳參考圖（釘死尾巴，方案 D：唔理揀邊個 filter 都顯示，單擊直接開，唔動 gallery 陣列） */}
+          <div className="flex items-center gap-1.5 flex-wrap">
             {(["ALL", "uploaded", "material", "person", "illustration", "product"] as GalleryFilter[]).map((f) => {
               const meta = FILTER_META[f];
               const Icon = meta.Icon;
               const cnt = gallery.filter((g) => matchesGalleryFilter(g, f)).length;
               const active = galleryFilter === f;
+              const empty = cnt === 0 && f !== "ALL";  // [UX] 空類別淡化＋停用，減少雜訊
               return (
-                <button key={f} onClick={() => setGalleryFilter(f)}
-                  className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border transition-colors ${active ? meta.activeCls : "bg-white text-gray-500 border-gray-200 hover:border-gray-400"}`}>
+                <button key={f} onClick={() => { if (!empty) setGalleryFilter(f); }} disabled={empty}
+                  className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                    empty ? "bg-white text-gray-300 border-gray-100 cursor-default" : active ? meta.activeCls : "bg-white text-gray-500 border-gray-200 hover:border-gray-400"}`}>
                   <Icon className="h-3 w-3" />{meta.label} <span className="opacity-60">{cnt}</span>
                 </button>
               );
             })}
+            {onOpenQuickAdd && (
+              <button
+                onClick={onOpenQuickAdd}
+                aria-label="上傳參考圖"
+                className="group relative flex items-center justify-center h-[26px] w-[26px] rounded-full border border-dashed border-violet-400 bg-violet-50 text-violet-600 hover:bg-violet-100 transition-colors shrink-0"
+              >
+                <ImagePlus className="h-3.5 w-3.5" />
+                <span className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-[11px] text-white opacity-0 transition-opacity group-hover:opacity-100">
+                  上傳參考圖
+                </span>
+              </button>
+            )}
           </div>
           {!selectMode && gallery.length > 0 && (
             <p className="text-[11px] text-gray-400">提示：長按任何圖片即可進入多選，批次移到客戶 / 移入未分類 / 刪除。</p>
@@ -601,11 +646,11 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
             <EmptyState onOpenQuickAdd={onOpenQuickAdd}
               text={clientId ? "此客戶還沒有圖片" : "還沒有任何圖片"} hint="上傳圖片分析，或在「生成圖片」分頁產生新圖" />
           ) : visibleGallery.length === 0 ? (
-            <div className="text-center py-16 text-gray-400 text-sm">搵唔到符合條件嘅圖片</div>
+            <div className="text-center py-16 text-gray-400 text-sm">找不到符合條件的圖片</div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
               {visibleGallery.map((item) => (
-                <GalleryTile key={`${item.kind}-${item.imageUrl}`} item={item}
+                <GalleryTile key={itemKey(item)} item={item}
                   onOpen={openFromGallery} onDelete={handleDeleteGalleryItem}
                   selectMode={selectMode} selected={selectedKeys.has(itemKey(item))}
                   onToggleSelect={() => toggleSelect(itemKey(item))}

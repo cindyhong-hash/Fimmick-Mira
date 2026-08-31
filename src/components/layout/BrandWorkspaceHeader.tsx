@@ -6,10 +6,10 @@
  */
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Target, Layers, Settings, Plus, FolderOpen } from "lucide-react";
+import { Target, Layers, Settings, Plus, FolderOpen, CalendarRange } from "lucide-react";
 import { NewActivityModal } from "@/components/activities/NewActivityModal";
 
-type Tab = "activities" | "components";
+type Tab = "activities" | "planner" | "components";
 
 export function BrandWorkspaceHeader({
   clientId,
@@ -38,6 +38,7 @@ export function BrandWorkspaceHeader({
 
   const tabs: { key: Tab; label: string; href: string; icon: React.ReactNode }[] = [
     { key: "activities", label: "廣告活動圖", href: `/clients/${clientId}`, icon: <Target className="h-4 w-4" /> },
+    { key: "planner", label: "月度企劃", href: `/clients/${clientId}/marketing-plans`, icon: <CalendarRange className="h-4 w-4" /> },
     { key: "components", label: "素材庫", href: `/clients/${clientId}/components`, icon: <Layers className="h-4 w-4" /> },
   ];
 

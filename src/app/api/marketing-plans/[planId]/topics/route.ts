@@ -6,6 +6,9 @@ import { collectTrendSignals, filterCitedSignals, type TrendSignal } from "@/lib
 import { analyzePlannerProducts } from "@/lib/planner/analyze-products";
 import { buildPlannerContext, hasUngroundedProductClaim, hasUsableCampaignProducts, NO_PRODUCT_TOPIC_TEMPLATES } from "@/lib/planner/planner-context";
 
+// 產主題會多打 Threads(RapidAPI)+ 多次 LLM，拉高函式時間上限避免 Vercel 逾時。
+export const maxDuration = 60;
+
 type TopicDraft = { campaignId?: string; contentType?: string; topic?: string; contentDirection?: string; format?: string; platforms?: string[]; recommendationReason?: string; sourceSignals?: unknown };
 function extractArray(text: string | null): TopicDraft[] { if (!text) return []; try { const parsed = JSON.parse(text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")); return Array.isArray(parsed) ? parsed : []; } catch { return []; } }
 

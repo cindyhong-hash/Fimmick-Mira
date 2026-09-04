@@ -131,15 +131,15 @@ const threadsProvider: TrendSignalProvider = {
     const keywords = await deriveTrendKeywords(ctx);
     if (!keywords.length) return [];
     const texts: string[] = [];
-    for (const kw of keywords.slice(0, 3)) {
+    for (const kw of keywords.slice(0, 2)) {
       try {
         const res = await fetch(`https://threads-scraper-api2.p.rapidapi.com/api/v1/search/top?query=${encodeURIComponent(kw)}`, {
           headers: { "x-rapidapi-host": "threads-scraper-api2.p.rapidapi.com", "x-rapidapi-key": key },
-          signal: AbortSignal.timeout(15000),
+          signal: AbortSignal.timeout(8000),
         });
         if (res.ok) collectThreadTexts(await res.json().catch(() => null), texts);
       } catch { /* 跳過這個關鍵字 */ }
-      if (texts.length >= 20) break;
+      if (texts.length >= 12) break;
     }
     const uniq = [...new Set(texts)].slice(0, 25);
     if (!uniq.length) return [];
@@ -170,9 +170,17 @@ export function getTrendProviders(): TrendSignalProvider[] {
 const normLabel = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
 
 /** 合併所有 provider、去重（先 id 後正規化 label）、依 score 由高到低排序。單一 provider 失敗 → 略過不炸。 */
+// 單一 provider 最多等這麼久（毫秒），逾時就當作回空 —— 避免 Threads 抓取拖垮整個主題生成（Vercel 函式逾時）。
+const PROVIDER_TIMEOUT_MS = 22000;
+function withTimeout<T>(pr: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([pr, new Promise<T>((res) => setTimeout(() => res(fallback), ms))]);
+}
+
 export async function collectTrendSignals(ctx: TrendSignalContext): Promise<TrendSignal[]> {
   const providers = getTrendProviders();
-  const results = await Promise.all(providers.map((p) => p.fetch(ctx).catch(() => [] as TrendSignal[])));
+  const results = await Promise.all(
+    providers.map((p) => withTimeout(p.fetch(ctx), PROVIDER_TIMEOUT_MS, [] as TrendSignal[]).catch(() => [] as TrendSignal[]))
+  );
   const seenId = new Set<string>();
   const seenLabel = new Set<string>();
   const merged: TrendSignal[] = [];

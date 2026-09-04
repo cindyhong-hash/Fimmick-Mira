@@ -5,6 +5,8 @@ import { normalizeStrategy, parseJsonArray, parseJsonObject } from "@/lib/market
 import { analyzePlannerProducts } from "@/lib/planner/analyze-products";
 import { buildPlannerContext, groundStrategyWithoutProducts, hasUsableCampaignProducts } from "@/lib/planner/planner-context";
 
+export const maxDuration = 60;
+
 function extractJson(text: string | null) {
   if (!text) return null;
   try { return JSON.parse(text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")); } catch { return null; }

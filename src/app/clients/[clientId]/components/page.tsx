@@ -28,7 +28,7 @@ export default function BrandComponentsPage({ params }: { params: Promise<{ clie
       {/* 素材庫頁首：標題 + 副標 + 新增（依分頁切換動作） */}
       <div className="flex items-start justify-between mb-5">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">素材庫</h1>
+          <h1 className="text-2xl font-bold text-gray-900">素材庫｜產品庫</h1>
           <p className="mt-1 text-sm text-gray-400">
             {tab === "assets" ? "集中管理品牌參考、背景、人像與插畫素材" : "為每支產品建立可複用的商品套圖，做內容時直接帶入"}
           </p>

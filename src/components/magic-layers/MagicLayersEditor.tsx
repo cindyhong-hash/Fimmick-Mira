@@ -1208,7 +1208,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,.45)" }} onClick={() => !outpaintBusy && setShowOutpaint(false)} />
           <div style={{ position: "relative", width: "min(680px,92%)", maxHeight: "86vh", overflowY: "auto", background: "#fff", borderRadius: 16, padding: 22 }}>
             <div style={{ fontSize: 17, fontWeight: 800 }}>擴圖／改尺寸</div><p style={{ fontSize: 12, color: "#6b7280" }}>原有圖層會保留，AI 擴展結果加入最底層，可隨時隱藏或刪除。</p>
-            <label style={S.rlabel}>目標比例</label><div style={{ display: "flex", gap: 8 }}>{["1:1","4:5","9:16","16:9"].map((r) => <button key={r} onClick={() => setOutpaintRatio(r)} style={{ ...S.rbtn, ...(outpaintRatio === r ? { borderColor: "#7c3aed", color: "#7c3aed" } : {}) }}>{r}</button>)}</div>
+            <label style={S.rlabel}>目標比例</label><div style={{ display: "flex", gap: 8 }}>{["1:1","4:5","9:16","16:9"].map((r) => <button key={r} onClick={() => setOutpaintRatio(r)} style={{ ...S.rbtn, ...(outpaintRatio === r ? { border: "1px solid #7c3aed", color: "#7c3aed" } : {}) }}>{r}</button>)}</div>
             <label style={S.rlabel}>擴展方向</label><select value={outpaintDirection} onChange={(e) => setOutpaintDirection(e.target.value)} style={S.rinput}><option value="auto">自動／置中</option><option value="left">往左</option><option value="right">往右</option><option value="top">往上</option><option value="bottom">往下</option></select>
             <label style={S.rlabel}>構圖方式</label><select value={outpaintMode} onChange={(e) => setOutpaintMode(e.target.value as "keep" | "recompose")} style={S.rinput}><option value="keep">保留主體位置</option><option value="recompose">自動重新構圖</option></select>
             <label style={S.rlabel}>產生版本</label><input type="range" min={2} max={4} value={outpaintCount} onChange={(e) => setOutpaintCount(Number(e.target.value))} style={{ width: "100%", accentColor: "#7c3aed" }} /><div style={{ fontSize: 12, color: "#6b7280" }}>{outpaintCount} 個版本（會使用 AI 額度）</div>
@@ -1513,5 +1513,5 @@ const S: Record<string, React.CSSProperties> = {
   rinput: { width: "100%", height: 34, background: "#fff", border: "1px solid #e5e7eb", color: "#1f2937", borderRadius: 8, padding: "0 10px", fontSize: 13, boxSizing: "border-box", fontFamily: "inherit" },
   rbtn: { height: 34, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4, border: "1px solid #e5e7eb", background: "#fff", color: "#374151", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" },
   fxChip: { height: 30, padding: "0 12px", border: "1px solid #e5e7eb", background: "#fff", color: "#374151", borderRadius: 999, fontSize: 12, fontWeight: 600, cursor: "pointer" },
-  fxChipOn: { borderColor: "#7c3aed", color: "#7c3aed", background: "#f5f3ff" },
+  fxChipOn: { border: "1px solid #7c3aed", color: "#7c3aed", background: "#f5f3ff" },
 };

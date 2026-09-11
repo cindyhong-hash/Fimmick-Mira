@@ -38,6 +38,18 @@ type EL = {
   groupId?: string | null;
 };
 
+/** hitHandle() 命中的控制點。 */
+type DragHandle = { type: "scale" } | { type: "rotate" } | { type: "resize"; axis: "x" | "y" };
+
+/** 拖曳中狀態（drag ref）。pan 冇 l / moving，但明寫成 undefined，
+ *  等 pointerup 嗰個 `drag.current.l` 唔使先收窄 mode 就讀得到。 */
+type DragState =
+  | { mode: "erase"; l: EL; lx: number; ly: number; moving?: undefined }
+  | { mode: "move"; l: EL; moving: { l: EL; ocx: number; ocy: number }[]; sx: number; sy: number }
+  | { mode: "scale"; l: EL; ow: number; oh: number; handle: DragHandle; moving?: undefined }
+  | { mode: "rotate"; l: EL; orot: number; grab: number; moving?: undefined }
+  | { mode: "pan"; sx: number; sy: number; opx: number; opy: number; l?: undefined; moving?: undefined };
+
 const TYPE_LABEL: Record<string, string> = { background: "背景", product: "產品", person: "人物", object: "物件", decoration: "裝飾", independent_text: "文字" };
 
 /** One serialized layer in a saved 排版 (stored in LibraryImage.paramsJson). */
@@ -96,7 +108,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
 
   const layersRef = useRef<EL[]>([]);
   const view = useRef({ zoom: 1, panX: 0, panY: 0 });
-  const drag = useRef<any>(null);
+  const drag = useRef<DragState | null>(null);
   const space = useRef(false);
   const dpr = useRef(1);
 
@@ -393,7 +405,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       else if (g.mode === "rotate") { const now = Math.atan2(d.y - g.l.cy, d.x - g.l.cx); let r = g.orot + (now - g.grab); if (e.shiftKey) r = Math.round(r / (Math.PI / 12)) * (Math.PI / 12); g.l.rotation = r; render(); }
       else if (g.mode === "pan") { view.current.panX = g.opx + (s.x - g.sx); view.current.panY = g.opy + (s.y - g.sy); render(); }
     };
-    const up = () => { if (drag.current && drag.current.l) { for (const item of drag.current.moving ?? [{ l: drag.current.l }]) item.l.thumb = makeThumb(item.l); if (drag.current.mode !== "pan") markDirty(); } drag.current = null; refresh(); render(); };
+    // 有 l = 真係郁過圖層，先重做縮圖 + 標記 dirty；pan 冇 l，已經俾個 guard 隔走。
+    const up = () => { const g = drag.current; if (g && g.l) { for (const item of g.moving ?? [{ l: g.l }]) item.l.thumb = makeThumb(item.l); markDirty(); } drag.current = null; refresh(); render(); };
     const hover = (s: { x: number; y: number }) => {
       if (space.current) { cv.style.cursor = "grab"; return; }
       const h = hitHandle(s.x, s.y); if (h) { cv.style.cursor = h.type === "rotate" ? "crosshair" : h.type === "resize" ? (h.axis === "x" ? "ew-resize" : "ns-resize") : "nwse-resize"; return; }

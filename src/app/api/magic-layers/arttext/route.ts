@@ -106,7 +106,7 @@ export async function POST(request: Request) {
 
     let baseUrl: string;
     let prompt: string;
-    let refForModel: string | null = hasRef ? refImageUrl : null;
+    const refForModel: string | null = hasRef ? refImageUrl : null;
 
     // 參考圖 → 先用視覺模型只描述「字本身」的視覺風格（不讀內容文字），強化風格保真
     let styleHint = STYLE_HINTS[String(style)] || STYLE_HINTS.gradient;

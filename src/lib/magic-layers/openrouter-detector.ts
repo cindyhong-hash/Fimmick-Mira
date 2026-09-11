@@ -33,6 +33,11 @@ Return STRICT JSON only, no prose, no markdown fences:
  "texts":[{"text":"KÉRASTASE","bbox":[0.62,0.7,0.15,0.03],"role":"package_logo","confidence":0.9},
           {"text":"夏日保養新品","bbox":[0.05,0.02,0.4,0.05],"role":"headline","confidence":0.95}]}`;
 
+/* VLM 回來的原始 JSON：每個欄位都可能缺、可能係錯型別，所以一律 unknown，
+   落面逐個 String()/Number()/normType() 收窄。bbox 靠 filter 嘅 type guard 保證係陣列。 */
+type RawObjectEntry = { type?: unknown; label?: unknown; instanceId?: unknown; bbox?: unknown; confidence?: unknown };
+type RawTextEntry = { text?: unknown; bbox?: unknown; role?: unknown; confidence?: unknown };
+
 let seq = 0;
 
 export function OpenRouterDetector(): Detector {
@@ -45,8 +50,8 @@ export function OpenRouterDetector(): Detector {
       const parsed = parseJson(raw);
       seq = 0;
       const regions: Region[] = (parsed.objects ?? [])
-        .filter((o: any) => o && Array.isArray(o.bbox))
-        .map((o: any) => {
+        .filter((o): o is RawObjectEntry & { bbox: number[] } => !!o && Array.isArray(o.bbox))
+        .map((o) => {
           const b = scale(o.bbox, W, H);
           return {
             id: `r${++seq}`,
@@ -60,8 +65,8 @@ export function OpenRouterDetector(): Detector {
         .filter((r: Region) => r.bbox.w > 2 && r.bbox.h > 2);
 
       const textObjects: RawText[] = (parsed.texts ?? [])
-        .filter((t: any) => t && Array.isArray(t.bbox) && t.text)
-        .map((t: any) => ({ id: `t${++seq}`, text: String(t.text), bbox: scale(t.bbox, W, H), confidence: clamp01(Number(t.confidence ?? 0.8)), role: normRole(t.role) }));
+        .filter((t): t is RawTextEntry & { bbox: number[] } => !!t && Array.isArray(t.bbox) && !!t.text)
+        .map((t) => ({ id: `t${++seq}`, text: String(t.text), bbox: scale(t.bbox, W, H), confidence: clamp01(Number(t.confidence ?? 0.8)), role: normRole(t.role) }));
 
       return { width: W, height: H, regions, textObjects };
     },
@@ -75,7 +80,7 @@ function scale(b: number[], W: number, H: number) {
     ? { x: Math.round(b[0] * W), y: Math.round(b[1] * H), w: Math.round(b[2] * W), h: Math.round(b[3] * H) }
     : { x: Math.round(b[0]), y: Math.round(b[1]), w: Math.round(b[2]), h: Math.round(b[3]) };
 }
-function normType(t: string): LayerType {
+function normType(t: unknown): LayerType {
   const s = String(t || "").toLowerCase();
   if (s.includes("person") || s.includes("people") || s.includes("human") || s.includes("model")) return "person";
   if (s.includes("product") || s.includes("bottle") || s.includes("package")) return "product";
@@ -85,7 +90,7 @@ function normType(t: string): LayerType {
 }
 function clamp01(v: number) { return isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.8; }
 
-function parseJson(raw: string): { objects?: any[]; texts?: any[] } {
+function parseJson(raw: string): { objects?: RawObjectEntry[]; texts?: RawTextEntry[] } {
   let s = raw.trim();
   const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence) s = fence[1].trim();

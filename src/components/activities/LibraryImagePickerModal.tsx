@@ -45,6 +45,9 @@ function itemType(it: GalleryItem): TypeKey {
   return "product";
 }
 
+/** 未載入時共用同一個空陣列，唔好每次 render 都整個新 []（下面 useMemo 會無謂重算）。 */
+const NO_GALLERY_ITEMS: GalleryItem[] = [];
+
 export function LibraryImagePickerModal({
   clientId,
   onPick,
@@ -56,8 +59,9 @@ export function LibraryImagePickerModal({
   onClose: () => void;
   title?: string;
 }) {
-  const [items, setItems] = useState<GalleryItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  // loading 由「已載入嘅 key vs 而家要嘅 key」推導，唔開多個 state——就唔使喺 effect 頭
+  // 同步 setLoading(true)（react-hooks/set-state-in-effect），遲到嘅舊 response 亦唔會冒充新資料。
+  const [loaded, setLoaded] = useState<{ key: string; items: GalleryItem[] } | null>(null);
   const [q, setQ] = useState("");
   const [typeFilter, setTypeFilter] = useState<TypeKey | "ALL">("ALL");
   const [clients, setClients] = useState<Client[]>([]);
@@ -67,16 +71,20 @@ export function LibraryImagePickerModal({
     fetch("/api/clients").then((r) => r.json()).then((d: Client[]) => setClients(Array.isArray(d) ? d : [])).catch(() => {});
   }, []);
 
+  const key = filterClientId;
+  const items = loaded?.items ?? NO_GALLERY_ITEMS;
+  const loading = loaded?.key !== key;
+
   useEffect(() => {
-    setLoading(true);
     // [WIP / 待 auth] 「全部品牌」= 唔傳 clientId → gallery API 攞晒所有 client 素材。
     // 將來接 login 後，呢度應 scope 做「登入用戶自己 account 內品牌」，唔可見其他用戶 client 素材。
     const url = filterClientId ? `/api/library/gallery?clientId=${filterClientId}` : "/api/library/gallery";
     fetch(url)
       .then((r) => r.json())
-      .then((d: GalleryItem[]) => setItems(Array.isArray(d) ? d.filter((i) => i.imageUrl) : []))
-      .finally(() => setLoading(false));
-  }, [filterClientId]);
+      .then((d: GalleryItem[]) => setLoaded({ key, items: Array.isArray(d) ? d.filter((i) => i.imageUrl) : [] }))
+      // 原本用 .finally(() => setLoading(false))：出錯都要收起「載入中」、保留舊 items。
+      .catch(() => setLoaded((prev) => ({ key, items: prev?.items ?? [] })));
+  }, [filterClientId, key]);
 
   const withType = useMemo(() => items.map((it) => ({ it, t: itemType(it) })), [items]);
   const counts = useMemo(() => {

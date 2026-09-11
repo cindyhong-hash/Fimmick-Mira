@@ -11,22 +11,32 @@ import { engineLabel } from "@/types/library";
 
 type Props = { clientId: string | null; reloadKey?: number; onOpenImage?: (detail: ImageDetail) => void };
 
+type GeneratedItem = Extract<GalleryItem, { kind: "generated" }>;
+/** 未載入時共用同一個空陣列，唔好每次 render 都整個新 []（下游 memo 會無謂重算）。 */
+const NO_ITEMS: GeneratedItem[] = [];
+
 export function AssetGrid({ clientId, reloadKey = 0, onOpenImage }: Props) {
-  const [items, setItems] = useState<Extract<GalleryItem, { kind: "generated" }>[]>([]);
-  const [loading, setLoading] = useState(true);
+  // loading 唔再自己開一個 state：改為記住「今次載入嘅係邊個 key」，再同而家想要嘅 key 比較
+  // 推導出嚟。咁就唔使喺 effect 頭同步 setLoading(true)（react-hooks/set-state-in-effect），
+  // 順帶令 items 同 loading 冇可能對唔上，遲到嘅舊 response 亦唔會冒充新資料。
+  const [loaded, setLoaded] = useState<{ key: string; items: GeneratedItem[] } | null>(null);
   // Natural pixel size per image (read on load), shown as a badge on each tile.
   const [dims, setDims] = useState<Record<string, string>>({});
 
+  const key = `${clientId ?? ""}|${reloadKey}`;
+  const items = loaded?.items ?? NO_ITEMS;
+  const loading = loaded?.key !== key;
+
   useEffect(() => {
-    setLoading(true);
     const url = clientId ? `/api/library/gallery?clientId=${clientId}` : "/api/library/gallery";
     fetch(url)
       .then((r) => r.json())
       .then((gal: GalleryItem[]) =>
-        setItems(Array.isArray(gal) ? gal.filter((g): g is Extract<GalleryItem, { kind: "generated" }> => g.kind === "generated") : []),
+        setLoaded({ key, items: Array.isArray(gal) ? gal.filter((g): g is GeneratedItem => g.kind === "generated") : [] }),
       )
-      .finally(() => setLoading(false));
-  }, [clientId, reloadKey]);
+      // 原本用 .finally(() => setLoading(false))：出錯都要收起「載入中」、保留舊 items。
+      .catch(() => setLoaded((prev) => ({ key, items: prev?.items ?? [] })));
+  }, [clientId, key]);
 
   if (loading) return <div className="text-gray-400 text-sm py-8 text-center">載入中…</div>;
   if (items.length === 0) {

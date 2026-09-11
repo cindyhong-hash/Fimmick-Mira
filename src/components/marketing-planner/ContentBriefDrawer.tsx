@@ -26,29 +26,35 @@ export function ContentBriefDrawer({ item, campaigns, clientId, onClose, onSaved
   const [works, setWorks] = useState<Work[]>([]);
   const [worksLoading, setWorksLoading] = useState(false);
   const [attaching, setAttaching] = useState(false);
-  const [preview, setPreview] = useState<{ imageUrl: string; copyText: string } | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
+  // 成品預覽連住「係邊個 activityId 拉返嚟」一齊存：preview / previewLoading 兩個都由佢推導，
+  // 就唔使喺 effect 頭同步 setPreview(null) + setPreviewLoading(true)（set-state-in-effect），
+  // 而且換主題時唔會一閃前一篇嘅圖文。
+  const [loadedPreview, setLoadedPreview] = useState<{ key: string; data: { imageUrl: string; copyText: string } | null } | null>(null);
   const [copied, setCopied] = useState(false);
   const campaign = campaigns.find((candidate) => candidate.id === draft.campaignId);
   const isProduced = !!draft.generatedActivityId;
 
+  const activityId = draft.generatedActivityId;
+  const preview = activityId && loadedPreview?.key === activityId ? loadedPreview.data : null;
+  const previewLoading = !!activityId && loadedPreview?.key !== activityId;
+
   // 已製作的主題：抓出成品圖 + 文案（選定那張，退回第一張），讓抽屜直接看到完整貼文
   useEffect(() => {
-    if (!draft.generatedActivityId) { setPreview(null); return; }
+    if (!activityId) return;
     let alive = true;
-    setPreviewLoading(true);
-    fetch(`/api/activities/${draft.generatedActivityId}`)
+    fetch(`/api/activities/${activityId}`)
       .then((r) => r.json())
       .then((activity: { generatedLayouts?: { imageUrl: string; copyText: string; isSelected?: boolean }[] }) => {
         if (!alive) return;
         const layouts = activity.generatedLayouts ?? [];
         const chosen = layouts.find((l) => l.isSelected) ?? layouts[0];
-        setPreview(chosen ? { imageUrl: chosen.imageUrl, copyText: chosen.copyText ?? "" } : null);
+        setLoadedPreview({ key: activityId, data: chosen ? { imageUrl: chosen.imageUrl, copyText: chosen.copyText ?? "" } : null });
       })
-      .catch(() => { if (alive) setPreview(null); })
-      .finally(() => { if (alive) setPreviewLoading(false); });
+      // 原本 .catch → setPreview(null) + .finally → setPreviewLoading(false)：
+      // 出錯都要收起「載入中」並顯示「冇成品」。
+      .catch(() => { if (alive) setLoadedPreview({ key: activityId, data: null }); });
     return () => { alive = false; };
-  }, [draft.generatedActivityId]);
+  }, [activityId]);
 
   const copyCaption = async () => {
     if (!preview?.copyText) return;

@@ -85,18 +85,24 @@ function timeAgo(iso?: string): string {
   return d === 1 ? "昨天" : `${d} 天前`;
 }
 
+/** 未載入／冇 clientId 時共用同一個空陣列，唔好每次 render 都整個新 []。 */
+const NO_NOTIS: NotiItem[] = [];
+
 export function TopHeader() {
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState<"help" | "noti" | null>(null);
-  const [notis, setNotis] = useState<NotiItem[]>([]);
+  // 通知清單連住「係邊個 clientId 拉返嚟」一齊存，notis 由佢推導——冇 clientId 或者
+  // 正在換品牌時自然係空，唔使喺 effect 頭同步 setNotis([])。
+  const [loadedNotis, setLoadedNotis] = useState<{ key: string; items: NotiItem[] } | null>(null);
   const [tour, setTour] = useState(false);
 
   // clientId 來自路由 /clients/[clientId]/…；用來拉「已完成作品」當通知來源。
   const clientId = pathname.match(/\/clients\/([^/]+)/)?.[1];
+  const notis = clientId && loadedNotis?.key === clientId ? loadedNotis.items : NO_NOTIS;
 
   useEffect(() => {
-    if (!clientId) { setNotis([]); return; }
+    if (!clientId) return;
     let ok = true;
     fetch(`/api/clients/${clientId}`)
       .then((r) => r.json())
@@ -107,9 +113,9 @@ export function TopHeader() {
           .filter((a) => a.status === "DONE")
           .slice(0, 6)
           .map((a) => ({ id: a.id, title: `您的作品「${a.theme}」已生成完成`, time: timeAgo(a.createdAt), href: `/clients/${clientId}/activities/${a.id}` }));
-        setNotis(items);
+        setLoadedNotis({ key: clientId, items });
       })
-      .catch(() => { if (ok) setNotis([]); });
+      .catch(() => { if (ok) setLoadedNotis({ key: clientId, items: [] }); });
     return () => { ok = false; };
   }, [clientId]);
 

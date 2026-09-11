@@ -110,7 +110,11 @@ export function ImageDetailModal({
 }: Props) {
   const [confirmDel, setConfirmDel] = useState(false);
   const [components, setComponents] = useState<StyleComponent[]>(presetComponents ?? []);
-  const [loading, setLoading] = useState(!presetComponents && !!imageUrl);
+  // loading 唔自己開 state：記低「已經載入完邊張圖」，再同而家要顯示嗰張比較推導出嚟，
+  // 就唔使喺 effect 頭同步 setLoading(true)（react-hooks/set-state-in-effect）。
+  // 初始值同原本 useState(!presetComponents && !!imageUrl) 一致（loadedUrl 仲係 null）。
+  const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
+  const loading = !presetComponents && !!imageUrl && loadedUrl !== imageUrl;
   // Editable photo title (generated images only — persisted to LibraryImage.subject).
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
@@ -178,21 +182,26 @@ export function ImageDetailModal({
     onClose();
   }
 
-  useEffect(() => {
+  // 換咗另一張圖（imageUrl / presetComponents 變）→ 收起標題編輯、清走上一張嘅已存標題，
+  // 有 preset 就即刻套用。用 React 官方「render 期間比較 prev 調整 state」寫法而唔用 effect：
+  // 舊寫法會先畫一幀帶住上一張圖嘅標題狀態，再被 effect 清走。
+  const [prevSource, setPrevSource] = useState({ imageUrl, presetComponents });
+  if (prevSource.imageUrl !== imageUrl || prevSource.presetComponents !== presetComponents) {
+    setPrevSource({ imageUrl, presetComponents });
     setEditingTitle(false);
     setSavedTitle(null);
-    if (presetComponents) {
-      setComponents(presetComponents);
-      return;
-    }
-    if (!imageUrl) return;
-    setLoading(true);
+    if (presetComponents) setComponents(presetComponents);
+  }
+
+  useEffect(() => {
+    if (presetComponents || !imageUrl) return;
     // cache-bust + no-store: when re-opening the SAME image after an edit, the browser must
     // not serve a stale cached component list (this caused "編輯後內容唔 update").
     fetch(`/api/components?previewUrl=${encodeURIComponent(imageUrl)}&_t=${Date.now()}`, { cache: "no-store" })
       .then((r) => r.json())
       .then((comps: StyleComponent[]) => setComponents(Array.isArray(comps) ? comps : []))
-      .finally(() => setLoading(false));
+      // 原本係 .finally(() => setLoading(false))：成功定失敗都要收起「載入中」。
+      .finally(() => setLoadedUrl(imageUrl));
   }, [imageUrl, presetComponents]);
 
   // Ref image: prop takes priority; fallback to bgComp.data for background assets.

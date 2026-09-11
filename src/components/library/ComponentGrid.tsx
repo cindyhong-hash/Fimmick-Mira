@@ -451,7 +451,10 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
 ) {
   const [components, setComponents] = useState<StyleComponent[]>([]);
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  // loading 唔自己開 state：記低「全版載入已經完成到邊個 key」，再同而家要嘅 key 比較推導。
+  // 咁就唔使喺 effect 頭同步 setLoading(true)（react-hooks/set-state-in-effect），
+  // 而下面嗰個靜默刷新唔會掂呢個 key，所以永遠唔會意外彈返「載入中」。
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [galleryFilter, setGalleryFilter] = useState<GalleryFilter>("ALL");
   // wireframe ⑥⑦：圖庫搜尋 / 引擎 filter / 排序（日期 range 拎走，改輕量排序）
   const [gallerySearch, setGallerySearch] = useState("");
@@ -480,13 +483,17 @@ export const ComponentGrid = forwardRef<ComponentGridHandle, Props>(function Com
   }, []);
 
   // 首次載入／換品牌（clientId、reloadKey 變）：可以顯示「載入中」全版佔位——呢個係真係新畫面。
+  // loadKey 同下面 effect 嘅 deps 一一對應：key 一變 loading 即刻（喺 render 期間）變 true。
+  const loadKey = `${clientId ?? ""}|${reloadKey}`;
+  const loading = loadedKey !== loadKey;
+
   useEffect(() => {
     let active = true;
-    setLoading(true);
     doFetch()
       .then((res) => { if (active) applyFetched(res); })
       .catch(() => {})
-      .finally(() => { if (active) setLoading(false); });
+      // 原本係 .finally(() => setLoading(false))：成功定失敗都要收起「載入中」。
+      .finally(() => { if (active) setLoadedKey(loadKey); });
     return () => { active = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId, reloadKey]);

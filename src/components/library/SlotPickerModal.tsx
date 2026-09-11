@@ -18,9 +18,13 @@ type Props = {
   onClose: () => void;
 };
 
+/** 未載入時共用同一個空陣列，唔好每次 render 都整個新 []。 */
+const NO_COMPONENTS: StyleComponent[] = [];
+
 export function SlotPickerModal({ clientId, category, onPick, onClose }: Props) {
-  const [items, setItems] = useState<StyleComponent[]>([]);
-  const [loading, setLoading] = useState(true);
+  // loading 由「已載入嘅 key vs 而家要嘅 key」推導，唔開多個 state——就唔使喺 effect 頭
+  // 同步 setLoading(true)（react-hooks/set-state-in-effect），遲到嘅舊 response 亦唔會冒充新資料。
+  const [loaded, setLoaded] = useState<{ key: string; items: StyleComponent[] } | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [filterClientId, setFilterClientId] = useState<string>(clientId ?? "");
   const [search, setSearch] = useState("");
@@ -32,8 +36,11 @@ export function SlotPickerModal({ clientId, category, onPick, onClose }: Props) 
       .then((data: Client[]) => setClients(Array.isArray(data) ? data : []));
   }, []);
 
+  const key = `${filterClientId}|${category}`;
+  const items = loaded?.items ?? NO_COMPONENTS;
+  const loading = loaded?.key !== key;
+
   useEffect(() => {
-    setLoading(true);
     // [WIP / 待 auth] 而家「全部品牌」會攞晒所有 client 嘅 component。
     // 將來接咗 user login，呢度應該 scope 做「登入用戶自己 account 內建立嘅品牌」，
     // 唔可以見到 / 取用其他用戶 client 嘅 blocks（server route 亦要按 user 過濾）。
@@ -41,10 +48,11 @@ export function SlotPickerModal({ clientId, category, onPick, onClose }: Props) 
     fetch(url)
       .then((r) => r.json())
       .then((comps: StyleComponent[]) =>
-        setItems(Array.isArray(comps) ? comps.filter((c) => c.type === category) : []),
+        setLoaded({ key, items: Array.isArray(comps) ? comps.filter((c) => c.type === category) : [] }),
       )
-      .finally(() => setLoading(false));
-  }, [filterClientId, category]);
+      // 原本用 .finally(() => setLoading(false))：出錯都要收起「載入中」、保留舊 items。
+      .catch(() => setLoaded((prev) => ({ key, items: prev?.items ?? [] })));
+  }, [filterClientId, category, key]);
 
   // 產品圖 picker 只顯示「有圖」（產品/參考圖）嘅 block。隱藏活動圖生成自動整嘅通用 preset
   // （previewUrl 為空 + sourceLayoutId 綁住某個生成 layout，唔係 "manual"）——佢哋唔屬於任何一張圖，

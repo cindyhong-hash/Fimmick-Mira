@@ -79,20 +79,20 @@ export function SlotPickerModal({ clientId, category, onPick, onClose }: Props) 
           <button type="button" onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100"><X className="h-4 w-4" /></button>
         </div>
 
-        {/* Brand pills filter */}
+        {/* Brand pills filter —— 選中＝紫色外框（跟 Figma），同 LibraryImagePickerModal 一致 */}
         <div className="px-4 pt-3 pb-2 shrink-0 border-b bg-gray-50/60 space-y-2">
           <div className="flex flex-wrap gap-1.5">
             <button type="button"
               onClick={() => setFilterClientId("")}
               className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                filterClientId === "" ? "bg-gray-900 text-white border-gray-900" : "bg-white border-gray-200 text-gray-600 hover:border-gray-400"}`}>
+                filterClientId === "" ? "bg-white border-violet-400 text-violet-600 font-medium" : "bg-white border-gray-200 text-gray-700 hover:border-gray-300"}`}>
               全部品牌
             </button>
             {clients.map((c) => (
               <button type="button" key={c.id}
                 onClick={() => setFilterClientId(c.id)}
                 className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                  filterClientId === c.id ? "bg-gray-900 text-white border-gray-900" : "bg-white border-gray-200 text-gray-600 hover:border-gray-400"}`}>
+                  filterClientId === c.id ? "bg-white border-violet-400 text-violet-600 font-medium" : "bg-white border-gray-200 text-gray-700 hover:border-gray-300"}`}>
                 {c.name}
               </button>
             ))}

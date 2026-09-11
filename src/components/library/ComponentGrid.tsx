@@ -794,7 +794,7 @@ function EmptyState({ onOpenQuickAdd, text, hint }: {
       <div className="text-xs mt-1 mb-5">{hint}</div>
       {onOpenQuickAdd && (
         <button onClick={onOpenQuickAdd}
-          className="inline-flex items-center gap-1.5 text-sm font-medium bg-gray-900 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors">
+          className="inline-flex items-center gap-1.5 text-sm font-medium bg-violet-600 text-white px-4 py-2 rounded-xl hover:bg-violet-700 transition-colors">
           <Plus className="h-4 w-4" />手動加入素材
         </button>
       )}

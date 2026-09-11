@@ -43,46 +43,99 @@ const DEFAULT_PALETTE: PaletteEntry[] = PALETTE_ROLES.map((r, idx) => ({
   enabled: idx < 2, // primary + secondary on by default
 }));
 
+type IncludeFlags = { COMPOSITION: boolean; COLOR_SCHEME: boolean; COPY_TONE: boolean; BACKGROUND: boolean };
+
+/**
+ * 由 props 砌返表單初始值：單一積木（editComponent）或者一張圖嘅多個積木（prefillComponents）。
+ * 原本係兩個 `}, [])` 嘅 useEffect——會先畫一幀空表單，再由 effect 填上（會閃），
+ * 而且觸發 react-hooks/set-state-in-effect。呢個係純函數、冇副作用，
+ * 所以擺得入 useState 嘅 lazy initializer（Strict Mode 行兩次都無所謂）。
+ */
+function computeInitialPrefill(editComponent?: StyleComponent | null, prefillComponents?: StyleComponent[] | null) {
+  const init = {
+    editType: (editComponent?.type as ComponentCategory) ?? ("COMPOSITION" as ComponentCategory),
+    // COPY_TONE 預設唔包含（語氣積木已移除，section 亦已隱藏）。
+    include: { COMPOSITION: true, COLOR_SCHEME: true, COPY_TONE: false, BACKGROUND: false } as IncludeFlags,
+    compName: "", description: "", compPrompt: "",
+    colorName: "", colorPrompt: "", palette: DEFAULT_PALETTE,
+    toneName: "", toneLabels: [] as string[], tonePrompt: "",
+    bgName: "", bgImageUrl: null as string | null,
+  };
+  const paletteFrom = (d: Parameters<typeof getColors>[0]): PaletteEntry[] => {
+    const cols = getColors(d);
+    return PALETTE_ROLES.map((r, idx) => {
+      const c = cols.find((c) => c.role === r.role);
+      return { role: r.role, label: r.label, hex: c?.hex ?? (idx === 0 ? "#3b82f6" : idx === 1 ? "#1f2937" : "#e5e7eb"), enabled: !!c };
+    });
+  };
+
+  // ── Edit-mode init: 淨係填返被編輯嗰一個 section ──
+  if (editComponent) {
+    const t = editComponent.type as ComponentCategory;
+    const d = editComponent.data ?? {};
+    init.editType = t;
+    init.include = { COMPOSITION: t === "COMPOSITION", COLOR_SCHEME: t === "COLOR_SCHEME", COPY_TONE: t === "COPY_TONE", BACKGROUND: t === "BACKGROUND" };
+    if (t === "COMPOSITION") { init.compName = editComponent.name; init.description = (d.description as string) ?? ""; init.compPrompt = editComponent.aiPromptText; }
+    if (t === "COLOR_SCHEME") { init.colorName = editComponent.name; init.colorPrompt = editComponent.aiPromptText; init.palette = paletteFrom(d); }
+    if (t === "COPY_TONE") { init.toneName = editComponent.name; init.toneLabels = (d.toneLabels as string[]) ?? []; init.tonePrompt = editComponent.aiPromptText; }
+    if (t === "BACKGROUND") { init.bgName = editComponent.name; init.bgImageUrl = (d.imageUrl as string) ?? editComponent.previewUrl ?? null; }
+  }
+
+  // ── Image-based edit init: 一次過填返張圖嘅全部積木（構圖/配色/語氣）──
+  if (prefillComponents && prefillComponents.length > 0) {
+    const present = { COMPOSITION: false, COLOR_SCHEME: false, COPY_TONE: false, BACKGROUND: false };
+    for (const comp of prefillComponents) {
+      const t = comp.type as ComponentCategory;
+      const d = comp.data ?? {};
+      present[t] = true;
+      if (t === "COMPOSITION") { init.compName = comp.name; init.description = (d.description as string) ?? ""; init.compPrompt = comp.aiPromptText; }
+      if (t === "COLOR_SCHEME") { init.colorName = comp.name; init.colorPrompt = comp.aiPromptText; init.palette = paletteFrom(d); }
+      if (t === "COPY_TONE") { init.toneName = comp.name; init.toneLabels = (d.toneLabels as string[]) ?? []; init.tonePrompt = comp.aiPromptText; }
+    }
+    init.include = { COMPOSITION: present.COMPOSITION, COLOR_SCHEME: present.COLOR_SCHEME, COPY_TONE: present.COPY_TONE, BACKGROUND: false };
+  }
+
+  return init;
+}
+
 export function QuickAddForm({ initialImageUrl, editComponent, prefillComponents, libraryImageId, editClientId, onCancel, onSaved }: Props) {
   const isEdit = !!editComponent || (!!prefillComponents && prefillComponents.length > 0);
+  // 只喺 mount 算一次（lazy initializer）；之後 props 再變都唔會覆寫用戶改咗嘅嘢，
+  // 同原本兩個 `}, [])` effect 嘅語意一致。
+  const [init] = useState(() => computeInitialPrefill(editComponent, prefillComponents));
   // ── Reference image (for AI analyze) ──
   const [imageUrl, setImageUrl] = useState<string | null>(initialImageUrl ?? null);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // ── Edit-mode: type change (clientId 而家由 page header 控制，經 props 傳入) ──
-  const [editType, setEditType] = useState<ComponentCategory>(editComponent?.type ?? "COMPOSITION");
+  const [editType, setEditType] = useState<ComponentCategory>(init.editType);
 
   // ── Section toggles ──
-  const [include, setInclude] = useState({
-    COMPOSITION: true,
-    COLOR_SCHEME: true,
-    COPY_TONE: false,  // 語氣積木已移除（wireframe ⑧）—— 預設唔包含、section 已隱藏
-    BACKGROUND: false,
-  });
+  const [include, setInclude] = useState<IncludeFlags>(init.include);
 
   // ── COMPOSITION ──
-  const [compName, setCompName] = useState("");
-  const [description, setDescription] = useState("");
-  const [compPrompt, setCompPrompt] = useState("");
+  const [compName, setCompName] = useState(init.compName);
+  const [description, setDescription] = useState(init.description);
+  const [compPrompt, setCompPrompt] = useState(init.compPrompt);
 
   // ── COLOR_SCHEME (5-color palette) ──
-  const [colorName, setColorName] = useState("");
-  const [palette, setPalette] = useState<PaletteEntry[]>(DEFAULT_PALETTE);
+  const [colorName, setColorName] = useState(init.colorName);
+  const [palette, setPalette] = useState<PaletteEntry[]>(init.palette);
   // 色盤編輯（5 色）預設收埋，淨顯示色票摘要——用戶要改先自己打開。
   // 編輯現有素材／AI 分析出真實色盤 → 自動展開，唔會靜雞藏走用戶資料。
   const [showPaletteEditor, setShowPaletteEditor] = useState(isEdit);
-  const [colorPrompt, setColorPrompt] = useState("");
+  const [colorPrompt, setColorPrompt] = useState(init.colorPrompt);
 
   // ── COPY_TONE ──
-  const [toneName, setToneName] = useState("");
-  const [toneLabels, setToneLabels] = useState<string[]>([]);
+  const [toneName, setToneName] = useState(init.toneName);
+  const [toneLabels, setToneLabels] = useState<string[]>(init.toneLabels);
   const [toneInput, setToneInput] = useState("");
-  const [tonePrompt, setTonePrompt] = useState("");
+  const [tonePrompt, setTonePrompt] = useState(init.tonePrompt);
 
   // ── BACKGROUND (upload-only) ──
-  const [bgName, setBgName] = useState("");
-  const [bgImageUrl, setBgImageUrl] = useState<string | null>(null);
+  const [bgName, setBgName] = useState(init.bgName);
+  const [bgImageUrl, setBgImageUrl] = useState<string | null>(init.bgImageUrl);
   // (背景 is image-only now — no description / aiPrompt fields)
 
   // ── AI ──
@@ -95,50 +148,6 @@ export function QuickAddForm({ initialImageUrl, editComponent, prefillComponents
   // ── Save ──
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-
-  // ── Edit-mode init: prefill the one section being edited ──
-  useEffect(() => {
-    if (!editComponent) return;
-    const t = editComponent.type as ComponentCategory;
-    setEditType(t);
-    setInclude({ COMPOSITION: t === "COMPOSITION", COLOR_SCHEME: t === "COLOR_SCHEME", COPY_TONE: t === "COPY_TONE", BACKGROUND: t === "BACKGROUND" });
-    const d = editComponent.data ?? {};
-    if (t === "COMPOSITION") { setCompName(editComponent.name); setDescription((d.description as string) ?? ""); setCompPrompt(editComponent.aiPromptText); }
-    if (t === "COLOR_SCHEME") {
-      setColorName(editComponent.name); setColorPrompt(editComponent.aiPromptText);
-      const cols = getColors(d);
-      setPalette(PALETTE_ROLES.map((r, idx) => {
-        const c = cols.find((c) => c.role === r.role);
-        return { role: r.role, label: r.label, hex: c?.hex ?? (idx === 0 ? "#3b82f6" : idx === 1 ? "#1f2937" : "#e5e7eb"), enabled: !!c };
-      }));
-    }
-    if (t === "COPY_TONE") { setToneName(editComponent.name); setToneLabels((d.toneLabels as string[]) ?? []); setTonePrompt(editComponent.aiPromptText); }
-    if (t === "BACKGROUND") { setBgName(editComponent.name); setBgImageUrl((d.imageUrl as string) ?? editComponent.previewUrl ?? null); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ── Image-based edit init: prefill ALL of the image's components (構圖/配色/語氣) ──
-  useEffect(() => {
-    if (!prefillComponents || prefillComponents.length === 0) return;
-    const present = { COMPOSITION: false, COLOR_SCHEME: false, COPY_TONE: false, BACKGROUND: false };
-    for (const comp of prefillComponents) {
-      const t = comp.type as ComponentCategory;
-      const d = comp.data ?? {};
-      present[t] = true;
-      if (t === "COMPOSITION") { setCompName(comp.name); setDescription((d.description as string) ?? ""); setCompPrompt(comp.aiPromptText); }
-      if (t === "COLOR_SCHEME") {
-        setColorName(comp.name); setColorPrompt(comp.aiPromptText);
-        const cols = getColors(d);
-        setPalette(PALETTE_ROLES.map((r, idx) => {
-          const c = cols.find((c) => c.role === r.role);
-          return { role: r.role, label: r.label, hex: c?.hex ?? (idx === 0 ? "#3b82f6" : idx === 1 ? "#1f2937" : "#e5e7eb"), enabled: !!c };
-        }));
-      }
-      if (t === "COPY_TONE") { setToneName(comp.name); setToneLabels((d.toneLabels as string[]) ?? []); setTonePrompt(comp.aiPromptText); }
-    }
-    setInclude({ COMPOSITION: present.COMPOSITION, COLOR_SCHEME: present.COLOR_SCHEME, COPY_TONE: present.COPY_TONE, BACKGROUND: false });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
 
   const checkedCount = Object.values(include).filter(Boolean).length;

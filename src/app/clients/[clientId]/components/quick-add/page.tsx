@@ -35,9 +35,14 @@ export default function QuickAddPage({ params }: { params: Promise<{ clientId: s
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params]);
 
-  useEffect(() => {
+  // clientId 由 params 非同步到位；第一次攞到就種落 editClientId 做預設（用戶之後自己
+  // 揀過就唔再覆寫）。用 React 官方「render 期間比較 prev state 調整 state」寫法，
+  // 唔用 useEffect——省一次 render，亦唔會觸發 set-state-in-effect。
+  const [prevClientId, setPrevClientId] = useState(clientId);
+  if (prevClientId !== clientId) {
+    setPrevClientId(clientId);
     if (clientId) setEditClientId((prev) => (prev === null ? clientId : prev));
-  }, [clientId]);
+  }
 
   const isEdit = !!handoff?.prefillComponents && handoff.prefillComponents.length > 0;
 

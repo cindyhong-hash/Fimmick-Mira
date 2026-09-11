@@ -234,8 +234,12 @@ export const PromptComposer = forwardRef<PromptComposerHandle, Props>(function P
   // 背景：」呢幾行標籤入 designText——slots 本身冇死（block card 揀好緊嗰個仍然會顯示），
   // 但設計描述文字入面冇咗嗰幾行，令呢次重新生成實際上冇跟到原本嘅風格積木。而家補返：
   // 同 SlotPickerModal 嘅 onPick 用返一致嘅 tag body 邏輯，喺 prefill 嗰刻由 slots 直接砌返標籤。
-  useEffect(() => {
-    if (prefillNonce === undefined) return;
+  // 用 React 官方「render 期間比較 prev 調整 state」寫法（同上面 prevColorId 一致）而唔用
+  // useEffect：舊寫法會先畫一幀空白設計描述、再被 effect 填上（會閃）。appliedPrefillNonce
+  // 初始係 undefined，所以 mount 嗰陣已經有 nonce 一樣會跑一次，同原本 effect 行為一致。
+  const [appliedPrefillNonce, setAppliedPrefillNonce] = useState<number | undefined>(undefined);
+  if (prefillNonce !== undefined && appliedPrefillNonce !== prefillNonce) {
+    setAppliedPrefillNonce(prefillNonce);
     const lines: string[] = [];
     if (prefill?.subject?.trim()) lines.push(`主體：${prefill.subject.trim()}`);
     if (slots.layout) {
@@ -252,8 +256,7 @@ export const PromptComposer = forwardRef<PromptComposerHandle, Props>(function P
     if (slots.background) setBgAsImage(true);
     if (prefill?.notes?.trim()) lines.push(prefill.notes.trim());
     if (lines.length) setDesignText(lines.join("\n"));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefillNonce]);
+  }
 
   // 背景用法：預設「作為文字參考」（把背景 AI Prompt 拉入設計描述、不合成圖）；可切換「直接合成」。
   const bgText = ((slots.background?.data?.description as string) || slots.background?.aiPromptText || slots.background?.name || "").trim();

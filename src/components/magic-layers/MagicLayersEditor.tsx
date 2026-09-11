@@ -464,8 +464,14 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   }, [render]);
 
   useEffect(() => { render(); }, [render, tool]);
-  // 換選取的圖層時，收起 AI 藝術字子畫面 / 清空微調輸入
-  useEffect(() => { setArtView("none"); setArtRef(null); setArtEdit(""); }, [selectedId]);
+  // 換選取的圖層時，收起 AI 藝術字子畫面 / 清空微調輸入。
+  // 用 React 官方「render 期間比較 prev 調整 state」寫法而唔用 useEffect：舊寫法會先畫一幀
+  // 帶住上一層圖層嘅子畫面／輸入內容，再被 effect 清走（會閃）。
+  const [prevSelectedId, setPrevSelectedId] = useState(selectedId);
+  if (prevSelectedId !== selectedId) {
+    setPrevSelectedId(selectedId);
+    setArtView("none"); setArtRef(null); setArtEdit("");
+  }
 
   /* ---------- layer ops ---------- */
   const idx = (id: string) => layersRef.current.findIndex((l) => l.id === id);

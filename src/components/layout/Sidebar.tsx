@@ -23,7 +23,7 @@ export function Sidebar() {
 
   if (collapsed) {
     return (
-      <aside className="flex w-16 shrink-0 flex-col items-center border-r border-gray-200 bg-white p-4">
+      <aside className="sticky top-0 flex h-screen w-16 shrink-0 flex-col items-center self-start overflow-y-auto border-r border-gray-200 bg-white p-4">
         <button
           type="button"
           onClick={toggleCollapsed}
@@ -39,7 +39,7 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex w-[220px] shrink-0 flex-col border-r border-gray-200 bg-white p-4">
+    <aside className="sticky top-0 flex h-screen w-[220px] shrink-0 flex-col self-start overflow-y-auto border-r border-gray-200 bg-white p-4">
       <div className="mb-6 flex items-center justify-between px-1">
         <span className="text-lg font-bold text-gray-900">Content</span>
         <button

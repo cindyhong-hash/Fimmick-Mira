@@ -129,7 +129,7 @@ export function TopHeader() {
   if (HIDE_ON.some((re) => re.test(pathname))) return null;
 
   return (
-    <header className="relative flex h-16 items-center justify-end gap-3 border-b border-gray-200 bg-gray-50 px-8">
+    <header className="sticky top-0 z-30 flex h-16 items-center justify-end gap-3 border-b border-gray-200 bg-gray-50 px-8">
       {/* 說明 */}
       <div className="relative">
         <button type="button" data-tour="help" onClick={() => setOpen((o) => (o === "help" ? null : "help"))}

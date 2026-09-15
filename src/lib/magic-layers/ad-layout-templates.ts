@@ -42,7 +42,7 @@ export const AD_LAYOUT_TEMPLATES: readonly AdLayoutTemplate[] = [
   {
     id: "editorial-product-bottom", direction: "editorial", textSafeArea: "left-top",
     zones: {
-      text: { x: 0.09, y: 0.08, w: 0.64, h: 0.20 }, hero: { x: 0.24, y: 0.30, w: 0.52, h: 0.46 },
+      text: { x: 0.09, y: 0.08, w: 0.64, h: 0.20 }, hero: { x: 0.24, y: 0.30, w: 0.52, h: 0.55 },
       support: { x: 0.78, y: 0.58, w: 0.16, h: 0.12 }, decoration: { x: 0.82, y: 0.13, w: 0.10, h: 0.09 },
       logo: { x: 0.09, y: 0.91, w: 0.17, h: 0.05 }, safePanel: { x: 0.06, y: 0.05, w: 0.70, h: 0.32 },
     },

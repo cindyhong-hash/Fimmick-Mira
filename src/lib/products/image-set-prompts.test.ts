@@ -86,7 +86,7 @@ test("background forbids the product and reserves layout space", () => {
   assert.match(prompt, /不出現任何產品/);
   assert.match(prompt, /留白/);
   assert.match(prompt, /product-free/i);
-  assert.match(prompt, /no product depiction/i);
+  assert.match(prompt, /do not depict any product/i);
   assert.doesNotMatch(prompt, /Product name: 女性電動除毛刀/);
   assert.doesNotMatch(prompt, /一致產品攝影/);
 });

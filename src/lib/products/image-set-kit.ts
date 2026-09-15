@@ -14,6 +14,16 @@ export type ImageSetPlanItem = {
 
 export const IMAGE_SET_MAX_ASSETS = 20;
 
+export function deriveImageSetKitStatus(
+  statuses: Array<"PENDING" | "GENERATING" | "DONE" | "FAILED">,
+): Exclude<ImageSetKitStatus, "DRAFT" | "CONFIRMED"> {
+  if (statuses.some((status) => status === "PENDING" || status === "GENERATING")) return "GENERATING";
+  const done = statuses.filter((status) => status === "DONE").length;
+  if (done === statuses.length && statuses.length > 0) return "COMPLETE";
+  if (done > 0) return "PARTIAL";
+  return "FAILED";
+}
+
 const IMAGE_SET_CATEGORIES = new Set<ImageSetCategory>([
   "product",
   "texture",

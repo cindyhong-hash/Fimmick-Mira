@@ -13,6 +13,7 @@ import {
   analyzeProductVisualProfile,
   buildImageSetArtDirection,
   countProductVisualReferenceImages,
+  parseImageSetArtDirection,
   type ImageSetArtDirection,
   type ProductBrandFacts,
 } from "./product-visual-analysis.ts";
@@ -30,7 +31,13 @@ import {
   type ImageSetRoleSpec,
   type ImageSetTheme,
 } from "./image-set-roles.ts";
-import { IMAGE_SET_MAX_ASSETS, type ImageSetPlanItem } from "./image-set-kit.ts";
+import {
+  deriveImageSetKitStatus,
+  IMAGE_SET_MAX_ASSETS,
+  parseImageSetPlanJson,
+  type ImageSetPlanItem,
+  type ImageSetKitStatus,
+} from "./image-set-kit.ts";
 import {
   claimImageAssetCleanupJobLease,
   completeGeneratedImageSetRowWithLease,
@@ -121,6 +128,7 @@ type ImageSetRowMutation = {
   errorMessage?: string | null;
   generationLeaseId?: string | null;
   generationLeaseExpiresAt?: Date | null;
+  hasTransparentBackground?: boolean;
 };
 
 export type ImageSetRowParams = {
@@ -144,7 +152,7 @@ export type ImageSetBatchInput = {
 export type ImageSetBatchDependencies = {
   updateRow?: (id: string, data: ImageSetRowMutation) => Promise<unknown>;
   transitionRow?: (id: string, from: ImageSetRowStatus[], data: ImageSetRowMutation, execution: ImageSetExecution) => Promise<boolean>;
-  completeRow?: (id: string, data: Required<Pick<ImageSetRowMutation, "imageUrl" | "prompt" | "paramsJson">>, execution: ImageSetExecution) => Promise<boolean>;
+  completeRow?: (id: string, data: Required<Pick<ImageSetRowMutation, "imageUrl" | "prompt" | "paramsJson" | "hasTransparentBackground">>, execution: ImageSetExecution) => Promise<boolean>;
   failUnfinishedRows?: (rows: Array<{ id: string; errorMessage: string }>, execution: ImageSetExecution) => Promise<unknown>;
   generateRole: (input: ImageSetRoleGenerationInput) => Promise<ImageSetRoleGenerationOutput>;
   saveBuffer: (buffer: Buffer, extension: string, prefix: string, signal?: AbortSignal) => Promise<string>;
@@ -156,12 +164,20 @@ export type ImageSetBatchDependencies = {
   waitForCleanupRetry?: (delayMs: number) => Promise<void>;
   now?: () => number;
   logError?: (...values: unknown[]) => void;
+  inspectTransparency?: (buffer: Buffer) => Promise<boolean>;
 };
 
 export type ImageSetBatchResult = {
   statuses: Partial<Record<ImageSetRole, "DONE" | "FAILED">>;
   params: Partial<Record<ImageSetRole, ImageSetRowParams>>;
 };
+
+async function hasTransparentPixels(buffer: Buffer): Promise<boolean> {
+  const metadata = await sharp(buffer).metadata();
+  if (!metadata.hasAlpha) return false;
+  const stats = await sharp(buffer).stats();
+  return (stats.channels[3]?.min ?? 255) < 255;
+}
 
 export type ImageSetSuggestion = {
   role: ImageSetRole;
@@ -736,11 +752,13 @@ const defaultDependencies: ImageSetBatchDependencies = {
     imageUrl: data.imageUrl,
     prompt: data.prompt,
     paramsJson: data.paramsJson,
+    hasTransparentBackground: data.hasTransparentBackground,
   }),
   failUnfinishedRows: (rows, execution) => db.$transaction(rows.map(({ id, errorMessage }) => db.libraryImage.updateMany({
     where: { id, status: { in: ["PENDING", "GENERATING"] }, generationLeaseId: execution.leaseId },
     data: { status: "FAILED", errorMessage, generationLeaseId: null, generationLeaseExpiresAt: null },
   }))),
+  inspectTransparency: hasTransparentPixels,
   generateRole: generateImageSetRole,
   saveBuffer,
   cleanupOrphanAsset: cleanupImageSetOrphanAsset,
@@ -790,6 +808,7 @@ export async function runImageSetBatch(
   const cleanupOrphanAsset = dependencies.cleanupOrphanAsset ?? defaultDependencies.cleanupOrphanAsset!;
   const waitForCleanupRetry = dependencies.waitForCleanupRetry ?? defaultDependencies.waitForCleanupRetry!;
   const now = dependencies.now ?? Date.now;
+  const inspectTransparency = dependencies.inspectTransparency ?? defaultDependencies.inspectTransparency!;
   const abortController = (dependencies.createAbortController ?? defaultDependencies.createAbortController!)();
   const reachedDeadline = () => abortController.signal.aborted || now() >= execution.deadlineAt;
 
@@ -856,6 +875,7 @@ export async function runImageSetBatch(
       });
       if (!isConcreteProvider(generated.provider)) throw new Error("Image provider trace is missing or synthetic");
       if (reachedDeadline()) throw new Error("Image-set batch deadline reached");
+      const hasTransparentBackground = await inspectTransparency(generated.buffer);
       const imageUrl = await dependencies.saveBuffer(
         generated.buffer,
         extension(generated.contentType),
@@ -871,6 +891,7 @@ export async function runImageSetBatch(
         imageUrl,
         prompt,
         paramsJson: JSON.stringify(finalParams),
+        hasTransparentBackground,
       }, execution);
       if (!completed) {
         await deleteOrphan(row, imageUrl);
@@ -1059,9 +1080,11 @@ export type ImageSetPendingRowData = {
   clientId: string;
   productId: string;
   assetRole: ImageSetRole;
+  assetSubtype?: string;
   subject: string;
   status: "PENDING";
   batchId: string;
+  prompt?: string;
   paramsJson: string;
   generationLeaseId: string;
   generationLeaseExpiresAt: Date;
@@ -1167,6 +1190,185 @@ export async function createAndScheduleImageSetBatch(
       label: roles[index].label,
       status: "PENDING",
     })),
+  };
+}
+
+export type StoredProductImageSetDraft = {
+  id: string;
+  productId: string;
+  status: string;
+  themeKey: string | null;
+  themeLabel: string | null;
+  artDirectionJson: string;
+  planJson: string;
+};
+
+export type ConfirmedImageSetBatchData = {
+  batchId: string;
+  productId: string;
+  artDirectionJson: string;
+  planJson: string;
+  confirmedAt: Date;
+  rows: ImageSetPendingRowData[];
+};
+
+export type ConfirmProductImageSetDependencies = {
+  loadDraft: (productId: string, batchId: string) => Promise<StoredProductImageSetDraft | null>;
+  claimProductLease: (productId: string, execution: ImageSetExecution) => Promise<boolean>;
+  releaseProductLease: (productId: string, leaseId: string) => Promise<unknown>;
+  persistConfirmedBatch: (data: ConfirmedImageSetBatchData) => Promise<Array<{ id: string }> | null>;
+  failCreatedRows?: (rowIds: string[], execution: ImageSetExecution) => Promise<boolean>;
+  scheduleAfter: (callback: () => Promise<unknown>) => void;
+  runBatch: (input: ImageSetBatchInput, execution: ImageSetExecution) => Promise<ImageSetBatchResult>;
+  readBatchStatuses: (batchId: string, productId: string) => Promise<ImageSetRowStatus[]>;
+  updateKitStatus: (batchId: string, status: Exclude<ImageSetKitStatus, "DRAFT" | "CONFIRMED">) => Promise<unknown>;
+  now?: () => Date;
+};
+
+export type ConfirmProductImageSetResult =
+  | { ok: true; batchId: string; items: Array<{ id: string; role: ImageSetRole; label: string; status: "PENDING" }> }
+  | { ok: false; status: 400 | 404 | 409; error: string };
+
+/** Validates an immutable DRAFT snapshot before any lease or paid generation can begin. */
+export async function confirmAndScheduleProductImageSet(
+  request: {
+    product: StoredImageSetProduct;
+    client: ImageSetClient;
+    batchId: string;
+    selectedItemIds: string[];
+    artDirection: unknown;
+    execution: ImageSetExecution;
+  },
+  dependencies: ConfirmProductImageSetDependencies,
+): Promise<ConfirmProductImageSetResult> {
+  if (!request.batchId.trim()) return { ok: false, status: 400, error: "缺少套圖批次" };
+  if (!request.selectedItemIds.length) return { ok: false, status: 400, error: "至少要選擇一項素材" };
+  if (request.selectedItemIds.length > IMAGE_SET_MAX_ASSETS) {
+    return { ok: false, status: 400, error: `單批最多只能生成 ${IMAGE_SET_MAX_ASSETS} 項素材` };
+  }
+  if (new Set(request.selectedItemIds).size !== request.selectedItemIds.length) {
+    return { ok: false, status: 400, error: "選取清單含有重複項目" };
+  }
+  const requestedArtDirection = parseImageSetArtDirection(request.artDirection);
+  if (!requestedArtDirection) return { ok: false, status: 400, error: "套圖視覺方向格式不正確" };
+  const { profile, sourceHash } = cachedProfileFor(request.product);
+  if (!profile) return { ok: false, status: 409, error: "商品分析已過期，請重新規劃套圖。" };
+
+  const draft = await dependencies.loadDraft(request.product.id, request.batchId);
+  if (!draft || draft.productId !== request.product.id || draft.id !== request.batchId) {
+    return { ok: false, status: 404, error: "找不到這項產品的套圖規劃" };
+  }
+  if (draft.status !== "DRAFT") return { ok: false, status: 409, error: "這份套圖規劃已確認或正在生成" };
+  let storedArtDirection: ImageSetArtDirection | null = null;
+  try {
+    storedArtDirection = parseImageSetArtDirection(JSON.parse(draft.artDirectionJson));
+  } catch {
+    // Handled by the invalid persisted snapshot response below.
+  }
+  if (!storedArtDirection) return { ok: false, status: 409, error: "儲存的套圖視覺方向已失效，請重新規劃。" };
+  const artDirection: ImageSetArtDirection = {
+    ...requestedArtDirection,
+    consistencyRules: storedArtDirection.consistencyRules,
+  };
+
+  let storedPlan: ImageSetPlanItem[];
+  try {
+    storedPlan = parseImageSetPlanJson(draft.planJson);
+  } catch {
+    return { ok: false, status: 409, error: "儲存的套圖規劃已失效，請重新規劃。" };
+  }
+  const selectedIds = new Set(request.selectedItemIds);
+  const selectedPlan = storedPlan.filter(({ id }) => selectedIds.has(id));
+  if (selectedPlan.length !== selectedIds.size) return { ok: false, status: 400, error: "選取清單包含未知素材" };
+
+  const theme = draft.themeKey
+    ? imageSetThemeCatalog().find(({ key, label }) => key === draft.themeKey && label === draft.themeLabel) ?? null
+    : null;
+  if (draft.themeKey && !theme) return { ok: false, status: 409, error: "儲存的套圖主題已失效，請重新規劃。" };
+  const currentSpecs = planImageSetRoles({ profile, artDirection, theme: theme ?? undefined });
+  const specsById = new Map(currentSpecs.map((spec) => [spec.id, spec]));
+  const selectedSpecs = selectedPlan.map((item) => {
+    const spec = specsById.get(item.id);
+    if (!spec || spec.assetRole !== item.assetRole || spec.assetSubtype !== item.assetSubtype || spec.category !== item.category) return null;
+    return spec;
+  });
+  if (selectedSpecs.some((spec) => !spec)) {
+    return { ok: false, status: 409, error: "儲存的套圖角色或素材變化已失效，請重新規劃。" };
+  }
+  const roles = selectedSpecs.filter((spec): spec is NonNullable<typeof spec> => !!spec);
+  const imageProduct = asImageSetProduct(request.product);
+  if (roles.some(({ path }) => path === "cutout") && !imageProduct.rawImageUrls.some(Boolean)) {
+    return { ok: false, status: 400, error: "需要至少一張原始商品照，才能建立商品主體去背 PNG。" };
+  }
+  if (roles.some(({ path }) => path === "edit") && ![...imageProduct.rawImageUrls, imageProduct.heroImageUrl].some(Boolean)) {
+    return { ok: false, status: 400, error: "需要至少一張商品照，才能建立產品參考素材。" };
+  }
+
+  const claimed = await dependencies.claimProductLease(request.product.id, request.execution);
+  if (!claimed) return { ok: false, status: 409, error: "這項產品已有套圖正在生成，請等待完成後再試。" };
+  const confirmedAt = (dependencies.now ?? (() => new Date()))();
+  const pendingRows: ImageSetPendingRowData[] = roles.map((role) => ({
+    clientId: request.product.clientId,
+    productId: request.product.id,
+    assetRole: role.role,
+    assetSubtype: role.assetSubtype,
+    subject: role.label,
+    status: "PENDING",
+    batchId: request.batchId,
+    prompt: compileImageSetPrompt({ product: imageProduct, profile, artDirection, role }),
+    paramsJson: JSON.stringify(createImageSetRowParams({ sourceHash, profile, artDirection }, role)),
+    generationLeaseId: request.execution.leaseId,
+    generationLeaseExpiresAt: new Date(request.execution.deadlineAt),
+  }));
+  const created = await dependencies.persistConfirmedBatch({
+    batchId: request.batchId,
+    productId: request.product.id,
+    artDirectionJson: JSON.stringify(artDirection),
+    planJson: JSON.stringify(selectedPlan),
+    confirmedAt,
+    rows: pendingRows,
+  }).catch(async (error) => {
+    await dependencies.releaseProductLease(request.product.id, request.execution.leaseId).catch(() => {});
+    throw error;
+  });
+  if (!created || created.length !== roles.length) {
+    await dependencies.releaseProductLease(request.product.id, request.execution.leaseId).catch(() => {});
+    return { ok: false, status: 409, error: "這份套圖規劃已被其他請求確認" };
+  }
+  const batchInput: ImageSetBatchInput = {
+    batchId: request.batchId,
+    sourceHash,
+    profile,
+    artDirection,
+    product: imageProduct,
+    rows: created.map((row, index) => ({ id: row.id, role: roles[index] })),
+  };
+  try {
+    dependencies.scheduleAfter(async () => {
+      try {
+        await dependencies.runBatch(batchInput, request.execution);
+      } catch (error) {
+        await dependencies.failCreatedRows?.(created.map(({ id }) => id), request.execution).catch(() => false);
+        throw error;
+      } finally {
+        try {
+          const statuses = await dependencies.readBatchStatuses(request.batchId, request.product.id);
+          await dependencies.updateKitStatus(request.batchId, deriveImageSetKitStatus(statuses));
+        } finally {
+          await dependencies.releaseProductLease(request.product.id, request.execution.leaseId).catch(() => {});
+        }
+      }
+    });
+  } catch (error) {
+    await dependencies.failCreatedRows?.(created.map(({ id }) => id), request.execution).catch(() => false);
+    await dependencies.updateKitStatus(request.batchId, "FAILED").catch(() => {});
+    await dependencies.releaseProductLease(request.product.id, request.execution.leaseId).catch(() => {});
+    throw error;
+  }
+  return {
+    ok: true,
+    batchId: request.batchId,
+    items: created.map((row, index) => ({ id: row.id, role: roles[index].role, label: roles[index].label, status: "PENDING" })),
   };
 }
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   IMAGE_SET_MAX_ASSETS,
+  deriveImageSetKitStatus,
   parseImageSetPlanJson,
   toImageSetCategory,
   toStoredAssetRole,
@@ -57,4 +58,12 @@ test("rejects duplicate IDs, unknown roles, and blank subtype or purpose", () =>
 test("rejects plans above the server asset limit", () => {
   const oversized = Array.from({ length: IMAGE_SET_MAX_ASSETS + 1 }, (_, index) => item({ id: `asset-${index}` }));
   assert.throws(() => parseImageSetPlanJson(JSON.stringify(oversized)), new RegExp(String(IMAGE_SET_MAX_ASSETS)));
+});
+
+test("derives aggregate kit status from the persisted asset rows", () => {
+  assert.equal(deriveImageSetKitStatus(["PENDING", "DONE"]), "GENERATING");
+  assert.equal(deriveImageSetKitStatus(["GENERATING", "FAILED"]), "GENERATING");
+  assert.equal(deriveImageSetKitStatus(["DONE", "DONE"]), "COMPLETE");
+  assert.equal(deriveImageSetKitStatus(["DONE", "FAILED"]), "PARTIAL");
+  assert.equal(deriveImageSetKitStatus(["FAILED", "FAILED"]), "FAILED");
 });

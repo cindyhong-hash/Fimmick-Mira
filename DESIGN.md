@@ -62,6 +62,23 @@
 | 靈感（給我靈感） | 琥珀色（`InspireButton` 元件,已內建） |
 | 禁用態 | `cursor-not-allowed border-[#E5E7EB] text-[#868D99] bg-[#F8F9FB]`（灰色但不要太淡） |
 | 選擇 pill / 卡片（比例、模式、款式） | `border-[1.5px]`;選中 = `border-violet-600 bg-violet-50`（文字 violet-700/600）;未選 = `border-[#ebeff5] bg-white text-gray-500` + `hover:border-violet-300` |
+| 篩選 chip（分類、狀態、引擎、張數） | 實心紫：選中 = `bg-violet-600 text-white border-violet-600`;未選 = `bg-white border-gray-200 text-gray-600` + `hover:border-gray-300` |
+| 範圍選擇 pill（品牌切換） | 白底紫框：選中 = `bg-white border-violet-400 text-violet-600 font-medium`;未選 = `bg-white border-gray-200 text-gray-700` + `hover:border-gray-300` |
+| 頁面主要動作鈕（新增素材 / 手動加入素材） | 實心紫：`bg-violet-600 text-white px-4 py-2 rounded-xl hover:bg-violet-700 text-sm font-medium`,通常配一個 `Plus` icon。**不要用 `bg-gray-900`** —— gray-900 只用於標題文字、tooltip 與 toast |
+
+#### 三種「選中態」怎麼挑
+
+同一頁常會同時出現多種,靠**語意**分,不是靠好看分:
+
+| 問自己 | 用哪種 | 現成例子 |
+|---|---|---|
+| 這是在**選一個值**嗎（比例、模式、款式、要不要勾） | 選擇 pill = **淺紫底** | `components/page.tsx` 的「素材/產品」tab、多圖頁的 `genMode` |
+| 這是在**縮小一份清單**嗎（分類、狀態、引擎） | 篩選 chip = **實心紫** | `ComponentGrid` 分類 chip、`PromptComposer` 引擎選擇 |
+| 這是在**切換整個資料範圍**嗎（換品牌） | 範圍 pill = **白底紫框** | `SlotPickerModal`／`LibraryImagePickerModal` 的品牌 pill |
+
+`LibraryImagePickerModal` 一個 modal 內就同時有後兩種（品牌 pill 白底紫框、類型 chip 實心紫),
+是刻意的層級區分,不是漂移 —— 改之前先確認自己屬於哪一類。
+
 
 ### 主要 CTA（送出/生成）— 一律置中大圓角
 ```tsx

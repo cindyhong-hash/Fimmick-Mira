@@ -26,7 +26,7 @@ test("maps a trusted composition decision to a bounded template before resolving
     typography: { headline: "標題", dark: "#123456", light: "#fff", accent: "#68bbee" },
   }, "product-focus", {
     direction: "product-focus", composition: "stacked", typography: "balanced", density: "minimal",
-    support: "none", decoration: "none", accent: "primary", graphics: "none", backdrop: "none", confidence: 0.9,
+    support: "none", decoration: "none", accent: "primary", backdrop: "none", confidence: 0.9,
   });
 
   assert.equal(layout.templateId, "center-product-bottom-copy");

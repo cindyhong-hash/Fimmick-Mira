@@ -1,6 +1,6 @@
-export type DirectionDecision={direction:"product-focus"|"editorial"|"scene-led";composition:"copy-left"|"copy-right"|"stacked";typography:"bold"|"balanced"|"quiet";density:"minimal"|"balanced";support:"none"|"detail"|"benefit";decoration:"none"|"one";accent:"primary"|"secondary";graphics:"none"|"benefit-group";backdrop:"none"|"light-fade"|"dark-fade";confidence:number};
+export type DirectionDecision={direction:"product-focus"|"editorial"|"scene-led";composition:"copy-left"|"copy-right"|"stacked";typography:"bold"|"balanced"|"quiet";density:"minimal"|"balanced";support:"none"|"detail"|"benefit";decoration:"none"|"one";accent:"primary"|"secondary";backdrop:"none"|"light-fade"|"dark-fade";confidence:number};
 export type ArtDirectionDecision={version:1;directions:DirectionDecision[]};
-export const DECISION_OPTIONS={direction:["product-focus","editorial","scene-led"],composition:["copy-left","copy-right","stacked"],typography:["bold","balanced","quiet"],density:["minimal","balanced"],support:["none","detail","benefit"],decoration:["none","one"],accent:["primary","secondary"],graphics:["none","benefit-group"],backdrop:["none","light-fade","dark-fade"]} as const;
+export const DECISION_OPTIONS={direction:["product-focus","editorial","scene-led"],composition:["copy-left","copy-right","stacked"],typography:["bold","balanced","quiet"],density:["minimal","balanced"],support:["none","detail","benefit"],decoration:["none","one"],accent:["primary","secondary"],backdrop:["none","light-fade","dark-fade"]} as const;
 export function parseArtDirection(text:string):ArtDirectionDecision|null {
  if(text.length>16384)return null;
  try{

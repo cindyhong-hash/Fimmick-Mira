@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { PROMO_FIXED, TAIWAN_SEASONAL } from "../calendar/tw-calendar.ts";
+import { IMAGE_SET_MAX_ASSETS } from "./image-set-kit.ts";
 import { planImageSetRoles } from "./image-set-roles.ts";
+import { buildImageSetArtDirection } from "./product-visual-analysis.ts";
 import type { ProductVisualProfile } from "./product-visual-profile.ts";
 
 const beautyDeviceProfile: ProductVisualProfile = {
@@ -97,4 +100,53 @@ test("unknown products still receive five safe generic roles", () => {
   assert.deepEqual(roles.map((role) => role.role), ["hero", "detail", "background", "benefit", "decoration"]);
   assert.equal(roles[2].role, "background");
   assert.match(roles[2].sceneCn, /不出現任何產品/);
+});
+
+test("configurable plans select exactly one core asset in each category", () => {
+  const plan = planImageSetRoles({
+    profile: beautyDeviceProfile,
+    artDirection: buildImageSetArtDirection(beautyDeviceProfile, {}),
+  });
+  const core = plan.filter(({ core }) => core);
+
+  assert.equal(core.length, 5);
+  assert.deepEqual(core.map(({ category }) => category), ["product", "texture", "background", "benefit", "decoration"]);
+  assert.ok(core.every(({ defaultSelected }) => defaultSelected));
+  assert.ok(plan.filter(({ core }) => !core).every(({ defaultSelected }) => !defaultSelected));
+  assert.ok(plan.length <= IMAGE_SET_MAX_ASSETS);
+});
+
+test("theme-aware plans are deterministic and change a subtype or purpose", () => {
+  const artDirection = buildImageSetArtDirection(beautyDeviceProfile, {});
+  const promoLabel = PROMO_FIXED.find(([, , label]) => label.includes("雙 11"))?.[2] ?? PROMO_FIXED[0][2];
+  const seasonalLabel = TAIWAN_SEASONAL[9][0].label;
+  const promoInput = {
+    profile: beautyDeviceProfile,
+    artDirection,
+    theme: { key: "double-11", label: promoLabel, kind: "PROMO" as const },
+  };
+  const promo = planImageSetRoles(promoInput);
+  const seasonal = planImageSetRoles({
+    profile: beautyDeviceProfile,
+    artDirection,
+    theme: { key: "autumn-care", label: seasonalLabel, kind: "SEASONAL" },
+  });
+
+  assert.deepEqual(planImageSetRoles(promoInput), promo);
+  assert.deepEqual(planImageSetRoles(promoInput).map(({ id }) => id), promo.map(({ id }) => id));
+  assert.ok(promo.some((item, index) => item.assetSubtype !== seasonal[index]?.assetSubtype || item.purpose !== seasonal[index]?.purpose));
+});
+
+test("non-skincare plans avoid unsupported foam suggestions and label decorative frames as text-free", () => {
+  const plan = planImageSetRoles({
+    profile: { ...beautyDeviceProfile, productArchetype: "electronics", productType: "無線耳機" },
+    artDirection: buildImageSetArtDirection(beautyDeviceProfile, {}),
+    theme: { key: "double-11", label: PROMO_FIXED[10][2], kind: "PROMO" },
+  });
+  const copy = plan.map(({ assetSubtype, purpose }) => `${assetSubtype} ${purpose}`).join("\n");
+  const frame = plan.find(({ assetSubtype }) => assetSubtype === "layout-frame");
+
+  assert.doesNotMatch(copy, /foam|泡沫/i);
+  assert.match(frame?.purpose ?? "", /不含文字|無文字/);
+  assert.match(plan.find(({ assetSubtype }) => assetSubtype === "theme-ribbon")?.purpose ?? "", /不含文字|無文字/);
 });

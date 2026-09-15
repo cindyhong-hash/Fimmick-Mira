@@ -61,7 +61,7 @@ test("abstract benefit visuals receive supplied use-case context without product
   const prompt = compileImageSetPrompt({ product, profile: beautyDeviceProfile, artDirection, role });
 
   assert.match(prompt, /Supplied use cases: 腿部日常修整/);
-  assert.match(prompt, /liquid, particles, soft light/i);
+  assert.match(prompt, /conceptual abstract benefit visual/i);
   assert.match(prompt, /actual product|Logo/i);
   assert.doesNotMatch(prompt, /Product name: 女性電動除毛刀/);
   assert.doesNotMatch(prompt, /Visible text or logos: Schick/);
@@ -75,10 +75,11 @@ test("detail asks for a real photographic product texture while benefit stays co
   const benefitPrompt = compileImageSetPrompt({ product, profile: beautyDeviceProfile, artDirection, role: benefit });
 
   assert.match(detailPrompt, /photographic macro/i);
-  assert.match(detailPrompt, /dispensed|pump|nozzle|spread on skin|dense foam/i);
-  assert.match(detailPrompt, /抽象液體波浪|漂浮微粒|功效意象圖/);
+  assert.match(detailPrompt, /material|surface detail/i);
+  assert.doesNotMatch(detailPrompt, /dispensed|pump|nozzle|spread on skin|dense foam/i);
+  assert.match(detailPrompt, /抽象功效意象/);
   assert.match(benefitPrompt, /conceptual|abstract/i);
-  assert.match(benefitPrompt, /真實攝影微距質地|擠出的乳液、凝露或泡沫|按壓頭出料/);
+  assert.match(benefitPrompt, /真實攝影微距的商品材質或表面質地/);
 });
 
 test("background forbids the product and reserves layout space", () => {

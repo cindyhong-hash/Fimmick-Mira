@@ -1,0 +1,31 @@
+import { randomUUID } from "node:crypto";
+import { NextResponse } from "next/server";
+import { db } from "@/lib/db";
+import { planProductImageSet } from "@/lib/products/image-set-orchestrator";
+
+export const dynamic = "force-dynamic";
+
+export async function POST(request: Request, { params }: { params: Promise<{ productId: string }> }) {
+  const { productId } = await params;
+  const body = await request.json().catch(() => ({})) as { themeKey?: unknown; themeKind?: unknown };
+  if (body.themeKey !== undefined && typeof body.themeKey !== "string") {
+    return NextResponse.json({ error: "themeKey 格式不正確" }, { status: 400 });
+  }
+  if (body.themeKind !== undefined && body.themeKind !== "PROMO" && body.themeKind !== "SEASONAL") {
+    return NextResponse.json({ error: "themeKind 格式不正確" }, { status: 400 });
+  }
+
+  const product = await db.product.findUnique({ where: { id: productId }, include: { client: true } });
+  if (!product) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const result = await planProductImageSet({
+    product,
+    client: product.client,
+    themeKey: body.themeKey,
+    themeKind: body.themeKind,
+  }, {
+    createBatchId: () => `pset_${randomUUID()}`,
+    createDraft: (data) => db.productImageSet.create({ data }),
+  });
+  if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
+  return NextResponse.json(result.value, { status: 201 });
+}

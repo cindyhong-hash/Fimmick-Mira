@@ -9,6 +9,7 @@ import {
   createAndScheduleImageSetBatch,
   createImageSetExecution,
   prepareImageSetRegenerationFromRow,
+  planProductImageSet,
   reconcileImageSetCleanupJobs,
   reconcileStaleImageSetWork,
   requestImageSetAnalysis,
@@ -22,8 +23,10 @@ import {
 } from "./image-set-orchestrator.ts";
 import { ImageSetFallbackBudgetError } from "./image-set-model-router.ts";
 import type { ProductVisualProfile } from "./product-visual-profile.ts";
+import { computeProductVisualSourceHash } from "./product-visual-profile.ts";
 import type { ImageSetArtDirection } from "./product-visual-analysis.ts";
 import { planImageSetRoles, type ImageSetRoleSpec } from "./image-set-roles.ts";
+import { imageSetThemeCatalog } from "./image-set-roles.ts";
 
 const profile: ProductVisualProfile = {
   version: 1,
@@ -96,6 +99,79 @@ function fakeDeps(options: { events?: string[]; failRole?: string } = {}): Image
     logError: () => {},
   };
 }
+
+test("free kit planning uses the cached analysis, builds one direction, and persists a new DRAFT", async () => {
+  const imageProduct = input().product;
+  const storedProduct = {
+    ...imageProduct,
+    rawImageUrls: JSON.stringify(imageProduct.rawImageUrls),
+    visualProfileJson: JSON.stringify(profile),
+    visualProfileSourceHash: computeProductVisualSourceHash(imageProduct),
+  };
+  const theme = imageSetThemeCatalog().find(({ kind }) => kind === "PROMO")!;
+  const drafts: unknown[] = [];
+  let directionBuilds = 0;
+
+  const result = await planProductImageSet({
+    product: storedProduct,
+    client: { primaryColor: "#ffffff", toneLabels: "[]" },
+    themeKey: theme.key,
+    themeKind: theme.kind,
+  }, {
+    createBatchId: () => "kit-draft-1",
+    buildArtDirection: (cached, brand, selectedTheme) => {
+      directionBuilds += 1;
+      assert.deepEqual(cached, profile);
+      return { ...artDirection, concept: `${selectedTheme?.label}素材包` };
+    },
+    createDraft: async (data) => { drafts.push(data); },
+  });
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(directionBuilds, 1);
+  assert.equal(result.value.batchId, "kit-draft-1");
+  assert.equal(result.value.theme?.key, theme.key);
+  assert.equal(result.value.items.filter(({ defaultSelected }) => defaultSelected).length, 5);
+  assert.equal(drafts.length, 1);
+  assert.deepEqual(drafts[0], {
+    id: "kit-draft-1",
+    productId: "product-1",
+    themeKey: theme.key,
+    themeLabel: theme.label,
+    artDirectionJson: JSON.stringify(result.value.artDirection),
+    planJson: JSON.stringify(result.value.items),
+    status: "DRAFT",
+  });
+});
+
+test("free kit planning rejects stale analysis and unknown themes before creating a DRAFT", async () => {
+  const imageProduct = input().product;
+  const storedProduct = {
+    ...imageProduct,
+    rawImageUrls: JSON.stringify(imageProduct.rawImageUrls),
+    visualProfileJson: JSON.stringify(profile),
+    visualProfileSourceHash: "stale",
+  };
+  let drafts = 0;
+  const dependencies = {
+    createBatchId: () => "unused",
+    createDraft: async () => { drafts += 1; },
+  };
+
+  assert.deepEqual(await planProductImageSet({ product: storedProduct, client: null }, dependencies), {
+    ok: false,
+    status: 409,
+    error: "商品資料或圖片已更新，請先重新分析產品後再規劃套圖。",
+  });
+  assert.deepEqual(await planProductImageSet({
+    product: { ...storedProduct, visualProfileSourceHash: computeProductVisualSourceHash(imageProduct) },
+    client: null,
+    themeKey: "missing",
+    themeKind: "PROMO",
+  }, dependencies), { ok: false, status: 400, error: "找不到指定的套圖主題" });
+  assert.equal(drafts, 0);
+});
 
 test("starts hero before dependent roles and uses its saved URL as their style anchor", async () => {
   const events: string[] = [];

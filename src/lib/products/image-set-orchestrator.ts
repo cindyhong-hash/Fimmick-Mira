@@ -14,6 +14,7 @@ import {
   buildImageSetArtDirection,
   countProductVisualReferenceImages,
   type ImageSetArtDirection,
+  type ProductBrandFacts,
 } from "./product-visual-analysis.ts";
 import {
   computeProductVisualSourceHash,
@@ -21,7 +22,15 @@ import {
   parseProductVisualProfile,
   type ProductVisualProfile,
 } from "./product-visual-profile.ts";
-import { planImageSetRoles, type ImageSetRole, type ImageSetRoleSpec } from "./image-set-roles.ts";
+import {
+  imageSetThemeCatalog,
+  planImageSetRoles,
+  resolveImageSetTheme,
+  type ImageSetRole,
+  type ImageSetRoleSpec,
+  type ImageSetTheme,
+} from "./image-set-roles.ts";
+import { IMAGE_SET_MAX_ASSETS, type ImageSetPlanItem } from "./image-set-kit.ts";
 import {
   claimImageAssetCleanupJobLease,
   completeGeneratedImageSetRowWithLease,
@@ -434,6 +443,90 @@ function cachedProfileFor(product: StoredImageSetProduct): { profile: ProductVis
   } catch {
     return { profile: null, sourceHash };
   }
+}
+
+export type ProductImageSetDraftData = {
+  id: string;
+  productId: string;
+  themeKey: string | null;
+  themeLabel: string | null;
+  artDirectionJson: string;
+  planJson: string;
+  status: "DRAFT";
+};
+
+export type PlanProductImageSetDependencies = {
+  createBatchId: () => string;
+  createDraft: (data: ProductImageSetDraftData) => Promise<unknown>;
+  buildArtDirection?: (
+    profile: ProductVisualProfile,
+    brand: ProductBrandFacts,
+    theme: ImageSetTheme | null,
+  ) => ImageSetArtDirection;
+};
+
+export type PlanProductImageSetResult =
+  | { ok: true; value: {
+    batchId: string;
+    productId: string;
+    theme: ImageSetTheme | null;
+    themes: ImageSetTheme[];
+    artDirection: ImageSetArtDirection;
+    items: ImageSetPlanItem[];
+    maxAssets: number;
+  } }
+  | { ok: false; status: 400 | 409; error: string };
+
+function publicPlanItem(role: ReturnType<typeof planImageSetRoles>[number]): ImageSetPlanItem {
+  const { id, category, assetRole, assetSubtype, purpose, core, defaultSelected } = role;
+  return { id, category, assetRole, assetSubtype, purpose, core, defaultSelected };
+}
+
+/** Creates a free, immutable planning snapshot from the current cached product analysis. */
+export async function planProductImageSet(
+  request: {
+    product: StoredImageSetProduct;
+    client: ImageSetClient;
+    themeKey?: string;
+    themeKind?: ImageSetTheme["kind"];
+  },
+  dependencies: PlanProductImageSetDependencies,
+): Promise<PlanProductImageSetResult> {
+  const { profile } = cachedProfileFor(request.product);
+  if (!profile) {
+    return { ok: false, status: 409, error: "商品資料或圖片已更新，請先重新分析產品後再規劃套圖。" };
+  }
+  let theme: ImageSetTheme | null;
+  try {
+    theme = resolveImageSetTheme(request.themeKey, request.themeKind);
+  } catch (error) {
+    return { ok: false, status: 400, error: error instanceof Error ? error.message : "套圖主題資料無效" };
+  }
+  const buildDirection = dependencies.buildArtDirection ?? buildImageSetArtDirection;
+  const artDirection = buildDirection(profile, imageSetBrand(request.client, request.product.primaryColorOverride), theme);
+  const items = planImageSetRoles({ profile, artDirection, theme: theme ?? undefined }).map(publicPlanItem);
+  const batchId = dependencies.createBatchId();
+  await dependencies.createDraft({
+    id: batchId,
+    productId: request.product.id,
+    themeKey: theme?.key ?? null,
+    themeLabel: theme?.label ?? null,
+    artDirectionJson: JSON.stringify(artDirection),
+    planJson: JSON.stringify(items),
+    status: "DRAFT",
+  });
+  return {
+    ok: true,
+    value: {
+      batchId,
+      productId: request.product.id,
+      theme,
+      themes: imageSetThemeCatalog(),
+      artDirection,
+      items,
+      maxAssets: IMAGE_SET_MAX_ASSETS,
+    },
+  };
 }
 
 export type ImageSetAnalysisDependencies = {

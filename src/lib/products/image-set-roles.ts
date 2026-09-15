@@ -45,6 +45,25 @@ function assertCatalogTheme(theme: ImageSetTheme): void {
   if (!known) throw new Error("套圖主題不在行銷日曆中");
 }
 
+export function imageSetThemeCatalog(): ImageSetTheme[] {
+  return [
+    ...PROMO_FIXED.map(([month, day, label]) => ({ key: `promo-${month}-${day}`, label, kind: "PROMO" as const })),
+    ...Object.entries(TAIWAN_SEASONAL).flatMap(([month, themes]) => themes.map(({ label }, index) => ({
+      key: `seasonal-${month}-${index + 1}`,
+      label,
+      kind: "SEASONAL" as const,
+    }))),
+  ];
+}
+
+export function resolveImageSetTheme(key?: string, kind?: ImageSetTheme["kind"]): ImageSetTheme | null {
+  if (!key && !kind) return null;
+  if (!key || !kind) throw new Error("套圖主題資料不完整");
+  const theme = imageSetThemeCatalog().find((candidate) => candidate.key === key && candidate.kind === kind);
+  if (!theme) throw new Error("找不到指定的套圖主題");
+  return theme;
+}
+
 function withPlanMetadata(
   spec: ImageSetRoleSpec,
   input: { category: ImageSetCategory; assetSubtype: string; purpose: string; core: boolean; themeKey: string },

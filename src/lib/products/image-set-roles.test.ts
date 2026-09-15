@@ -34,6 +34,8 @@ test("new batches plan a composable ad-asset pack instead of five product photog
   assert.equal(roles[3].path, "text");
   assert.match(roles[1].sceneCn, /質地|液體|泡沫/);
   assert.match(roles[2].sceneCn, /明亮浴室/);
+  assert.match(roles[2].sceneCn, /連續文字留白|可放置商品/);
+  assert.match(roles[2].mustNotShow.join("\n"), /切半|鏡子|水槽/);
   assert.match(roles[2].mustNotShow.join("\n"), /產品|Logo|文字/);
   assert.match(roles[3].sceneCn, /腿部日常修整/);
   assert.match(roles[3].mustNotShow.join("\n"), /產品|Logo/);

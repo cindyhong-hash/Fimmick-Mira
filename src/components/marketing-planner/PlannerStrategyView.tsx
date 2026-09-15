@@ -4,10 +4,11 @@
  * 底部 CTA「確認企劃 → 安排到內容日曆」進入③內容日曆。
  * 生成邏輯沿用 pack StrategyAndTopics；改為 redesign 白卡樣式，移除日曆與批次器。
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarRange, ChevronLeft, Loader2, Minus, Plus, RefreshCw, Sparkles, Trash2, TrendingUp } from "lucide-react";
-import { CONTENT_TYPE_META, CONTENT_TYPES, type ContentType, type PlannerStrategy } from "@/lib/marketing-planner";
+import { CalendarRange, CheckCircle2, ChevronLeft, Loader2, Minus, Plus, RefreshCw, Sparkles, Trash2, TrendingUp } from "lucide-react";
+import { CONTENT_TYPE_META, CONTENT_TYPES, type PlannerStrategy } from "@/lib/marketing-planner";
+import { runTopicGeneration, type TopicGenerationPhase } from "@/lib/planner/topic-generation-progress";
 
 type Signal = { id: string; source: string; label: string; score?: number };
 type Topic = { id: string; campaignId?: string | null; contentType: string; topic: string; contentDirection: string; format: string; platforms: string[]; recommendationReason?: string; sourceSignals?: Signal[]; status?: string };
@@ -28,22 +29,49 @@ export function PlannerStrategyView({ planId, clientId, total, campaigns, hasPro
   const [topics, setTopics] = useState<Topic[]>(initialTopics);
   const [signals, setSignals] = useState<Signal[]>(initialSignals ?? []);
   const [busy, setBusy] = useState<string | null>(null);
+  const [topicPhase, setTopicPhase] = useState<TopicGenerationPhase>(null);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [confirmReplan, setConfirmReplan] = useState(false);
+  const isBusy = Boolean(busy || topicPhase);
   const producedCount = topics.filter((t) => t.status && t.status !== "PLANNING").length; // 已製作/編輯過(非 PLANNING)
   const emptyCampaigns = campaigns.filter((c) => !topics.some((t) => t.campaignId === c.id)); // 尚無任何 topic 的 campaign
 
+  useEffect(() => {
+    if (!success) return;
+    const timeout = window.setTimeout(() => setSuccess(""), 4000);
+    return () => window.clearTimeout(timeout);
+  }, [success]);
+
   const confirmProductContext = () => hasProducts || window.confirm(MISSING_PRODUCT_WARNING);
+  const requestStrategy = async (current?: PlannerStrategy) => {
+    const r = await fetch(`/api/marketing-plans/${planId}/strategy`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(current ? { strategy: current } : {}) });
+    if (!r.ok) throw new Error();
+    setStrategy((await r.json()).strategy);
+  };
   const generateStrategy = async (current?: PlannerStrategy, productWarningConfirmed = false) => {
     if (!productWarningConfirmed && !confirmProductContext()) return;
-    setBusy("strategy"); setError("");
-    try { const r = await fetch(`/api/marketing-plans/${planId}/strategy`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(current ? { strategy: current } : {}) }); if (!r.ok) throw new Error(); setStrategy((await r.json()).strategy); }
+    setBusy("strategy"); setError(""); setSuccess("");
+    try { await requestStrategy(current); }
     catch { setError("策略暫時無法產生，請稍後再試。"); } finally { setBusy(null); }
   };
   const generateTopics = async (mode?: "all") => {
-    if (!strategy || !confirmProductContext()) return; setConfirmReplan(false); setBusy("topics"); setError("");
-    try { await generateStrategy(strategy, true); const r = await fetch(`/api/marketing-plans/${planId}/topics`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(mode ? { mode } : {}) }); if (!r.ok) throw new Error(); const data = await r.json(); setTopics(data.items ?? []); if (Array.isArray(data.signals)) setSignals(data.signals); }
-    catch { setError("Topics 暫時無法產生，請稍後再試。"); } finally { setBusy(null); }
+    if (!strategy || !confirmProductContext()) return; setConfirmReplan(false); setError(""); setSuccess("");
+    try {
+      const data = await runTopicGeneration({
+        saveStrategy: () => requestStrategy(strategy),
+        generateTopics: async () => {
+          const r = await fetch(`/api/marketing-plans/${planId}/topics`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(mode ? { mode } : {}) });
+          if (!r.ok) throw new Error();
+          return r.json();
+        },
+        onPhase: setTopicPhase,
+      });
+      const items = data.items ?? [];
+      setTopics(items);
+      if (Array.isArray(data.signals)) setSignals(data.signals);
+      setSuccess(`已更新 ${items.length} 個主題`);
+    } catch { setError("Topics 暫時無法產生，請稍後再試。"); }
   };
   const updateTopic = (id: string, patch: Partial<Topic>, save = false) => { setTopics((all) => all.map((x) => (x.id === id ? { ...x, ...patch } : x))); if (save) fetch(`/api/content-plan-items/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) }); };
   const saveText = (item: Topic) => fetch(`/api/content-plan-items/${item.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ topic: item.topic, contentDirection: item.contentDirection }) });
@@ -89,7 +117,7 @@ export function PlannerStrategyView({ planId, clientId, total, campaigns, hasPro
       <section className="mb-4 rounded-2xl border border-gray-200 bg-white p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <h2 className="text-lg font-semibold text-gray-900">本月內容策略</h2>
-          <button onClick={() => generateStrategy()} disabled={!!busy} className="rounded-lg border border-violet-200 px-4 py-2 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50">
+          <button onClick={() => generateStrategy()} disabled={isBusy} className="rounded-lg border border-violet-200 px-4 py-2 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50">
             {busy === "strategy" ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 inline h-4 w-4" />}{strategy ? "重新建議" : "產生內容策略"}
           </button>
         </div>
@@ -113,8 +141,8 @@ export function PlannerStrategyView({ planId, clientId, total, campaigns, hasPro
                 </div>
               ))}
             </div>
-            <button onClick={() => generateTopics()} disabled={!!busy} className="mt-6 ml-auto block rounded-lg bg-violet-600 px-6 py-3 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50">
-              {busy === "topics" && <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />}確認策略，產生 {total} 個 Topics →
+            <button onClick={() => generateTopics()} disabled={isBusy} className="mt-6 ml-auto block rounded-lg bg-violet-600 px-6 py-3 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50">
+              {topicPhase && <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />}{topicPhase ? "正在產生 Topics…" : `確認策略，產生 ${total} 個 Topics →`}
             </button>
           </>
         )}
@@ -129,17 +157,31 @@ export function PlannerStrategyView({ planId, clientId, total, campaigns, hasPro
               <p className="mt-1 text-xs text-gray-400">點文字即可修改，離開欄位自動儲存。</p>
             </div>
             <div className="flex gap-2">
-              <button onClick={add} className="rounded-lg border border-gray-200 px-3 py-2 text-xs hover:bg-gray-50"><Plus className="mr-1 inline h-3.5 w-3.5" />新增</button>
-              <button onClick={() => generateTopics()} disabled={!!busy} title="保留已製作的主題，只重產尚未製作的" className="rounded-lg border border-gray-200 px-3 py-2 text-xs hover:bg-gray-50 disabled:opacity-50"><RefreshCw className="mr-1 inline h-3.5 w-3.5" />重新產生（保留已製作）</button>
-              <button onClick={() => setConfirmReplan(true)} disabled={!!busy} title="清空所有主題重新規劃" className="rounded-lg border border-red-200 px-3 py-2 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50">全部重新規劃</button>
+              <button onClick={add} disabled={isBusy} className="rounded-lg border border-gray-200 px-3 py-2 text-xs hover:bg-gray-50 disabled:opacity-50"><Plus className="mr-1 inline h-3.5 w-3.5" />新增</button>
+              <button onClick={() => generateTopics()} disabled={isBusy} title="保留已製作的主題，只重產尚未製作的" className={`rounded-lg border px-3 py-2 text-xs disabled:opacity-100 ${topicPhase ? "border-violet-200 bg-violet-50 font-medium text-violet-700" : "border-gray-200 hover:bg-gray-50"}`}>
+                {topicPhase ? <Loader2 className="mr-1 inline h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1 inline h-3.5 w-3.5" />}{topicPhase ? "正在重新產生…" : "重新產生（保留已製作）"}
+              </button>
+              <button onClick={() => setConfirmReplan(true)} disabled={isBusy} title="清空所有主題重新規劃" className="rounded-lg border border-red-200 px-3 py-2 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50">全部重新規劃</button>
             </div>
           </div>
+
+          {topicPhase && (
+            <div role="status" aria-live="polite" className="mb-4 flex items-center gap-3 rounded-xl border border-violet-200 bg-violet-50/70 px-4 py-3 text-xs text-violet-800">
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-violet-600" />
+              <div><span className="font-medium">{topicPhase === "preparing" ? "正在整理企劃資料…" : "正在取得近期話題並產生 Topics…"}</span><span className="ml-2 text-violet-500">可能需要 30–90 秒，請勿關閉頁面。</span></div>
+            </div>
+          )}
+          {success && !topicPhase && (
+            <div role="status" aria-live="polite" className="mb-4 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-medium text-emerald-700">
+              <CheckCircle2 className="h-4 w-4" />{success}
+            </div>
+          )}
 
           {topics.length > 0 && emptyCampaigns.length > 0 && (
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2.5 text-xs text-amber-800">
               <span>⚠️ 「{emptyCampaigns.map((c) => c.name).join("、")}」尚無內容。可「重新產生（保留已製作）」自動分配，或「新增」後手動指定 Campaign。</span>
               <div className="flex shrink-0 gap-2">
-                <button onClick={() => generateTopics()} disabled={!!busy} className="rounded-md border border-amber-300 bg-white px-2.5 py-1 font-medium hover:bg-amber-100 disabled:opacity-50">重新產生（保留已製作）</button>
+                <button onClick={() => generateTopics()} disabled={isBusy} className="rounded-md border border-amber-300 bg-white px-2.5 py-1 font-medium hover:bg-amber-100 disabled:opacity-50">重新產生（保留已製作）</button>
                 <button onClick={add} className="rounded-md border border-amber-300 bg-white px-2.5 py-1 font-medium hover:bg-amber-100">新增</button>
               </div>
             </div>
@@ -150,7 +192,6 @@ export function PlannerStrategyView({ planId, clientId, total, campaigns, hasPro
           ) : (
             <div className="space-y-3">
               {topics.map((item, i) => {
-                const meta = CONTENT_TYPE_META[item.contentType as ContentType];
                 return (
                   <div key={item.id} className="rounded-xl border border-gray-200 p-4">
                     <div className="flex items-start gap-3">

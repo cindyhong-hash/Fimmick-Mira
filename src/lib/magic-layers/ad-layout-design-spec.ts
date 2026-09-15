@@ -10,6 +10,7 @@ import { planProductIntegration, type ProductIntegrationPlan } from "./ad-layout
 import type { AdLayoutCompositionAdvice } from "./ad-layout-vision-policy.ts";
 import { resolveCompositionPlan, type CompositionPlan } from "./ad-layout-composition-plan.ts";
 import type { BackgroundAnalysis } from "./ad-layout-background-analysis.ts";
+import { evaluateAdLayout, repairAdLayoutSpec } from "./ad-layout-scoring.ts";
 
 export type AdLayoutPurpose = "product" | "benefit" | "scene" | "promo";
 export type AdLayoutDirection = "product-focus" | "editorial" | "scene-led";
@@ -120,9 +121,10 @@ export function validateAndRepairDesignSpec(spec: AdLayoutDesignSpec, available:
   const integrated = assets.product
     ? { ...repaired, productIntegration: planProductIntegration(repaired) }
     : { ...repaired, productIntegration: undefined };
-  const checks = validateAdLayoutSpec(integrated);
-  const failed = checks.filter((check) => !check.passed);
-  return { ...integrated, quality: { score: Math.max(0, 100 - warnings.length * 8 - failed.length * 15), warnings: [...warnings, ...failed.map((check) => check.message)], checks } };
+  const repairedForHierarchy = repairAdLayoutSpec(integrated);
+  const evaluation = evaluateAdLayout(repairedForHierarchy);
+  const failed = evaluation.checks.filter((check) => !check.passed);
+  return { ...repairedForHierarchy, quality: { score: Math.max(0, evaluation.score - warnings.length * 8), warnings: [...warnings, ...failed.map((check) => check.message)], checks: evaluation.checks } };
 }
 
 export function resolveAdLayoutDesignSpecs(input: AdLayoutDesignInput): AdLayoutDesignSpec[] {

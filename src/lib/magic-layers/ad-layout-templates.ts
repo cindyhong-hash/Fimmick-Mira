@@ -50,7 +50,7 @@ export const AD_LAYOUT_TEMPLATES: readonly AdLayoutTemplate[] = [
   {
     id: "scene-copy-overlay", direction: "scene-led", textSafeArea: "left-top",
     zones: {
-      text: { x: 0.08, y: 0.12, w: 0.38, h: 0.16 }, hero: { x: 0.58, y: 0.53, w: 0.29, h: 0.35 },
+      text: { x: 0.08, y: 0.12, w: 0.38, h: 0.16 }, hero: { x: 0.55, y: 0.32, w: 0.38, h: 0.44 },
       support: { x: 0.08, y: 0.60, w: 0.22, h: 0.15 }, decoration: { x: 0.78, y: 0.30, w: 0.10, h: 0.09 },
       logo: { x: 0.08, y: 0.91, w: 0.17, h: 0.05 }, safePanel: { x: 0.05, y: 0.07, w: 0.45, h: 0.27 },
     },
@@ -58,7 +58,7 @@ export const AD_LAYOUT_TEMPLATES: readonly AdLayoutTemplate[] = [
   {
     id: "scene-product-corner", direction: "scene-led", textSafeArea: "left-center",
     zones: {
-      text: { x: 0.08, y: 0.43, w: 0.37, h: 0.17 }, hero: { x: 0.62, y: 0.59, w: 0.251, h: 0.29 },
+      text: { x: 0.08, y: 0.43, w: 0.37, h: 0.17 }, hero: { x: 0.55, y: 0.34, w: 0.38, h: 0.42 },
       support: { x: 0.65, y: 0.15, w: 0.18, h: 0.12 }, decoration: { x: 0.13, y: 0.18, w: 0.10, h: 0.09 },
       logo: { x: 0.08, y: 0.91, w: 0.17, h: 0.05 }, safePanel: { x: 0.05, y: 0.37, w: 0.44, h: 0.29 },
     },

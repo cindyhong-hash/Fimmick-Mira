@@ -8,6 +8,7 @@ import { validateAdLayoutSpec, type AdLayoutQualityCheck } from "./ad-layout-qua
 import { polishAdLayoutSpec } from "./ad-layout-polish.ts";
 import { planProductIntegration, type ProductIntegrationPlan } from "./ad-layout-product-integration.ts";
 import type { AdLayoutCompositionAdvice } from "./ad-layout-vision-policy.ts";
+import { resolveCompositionPlan, type CompositionPlan } from "./ad-layout-composition-plan.ts";
 
 export type AdLayoutPurpose = "product" | "benefit" | "scene" | "promo";
 export type AdLayoutDirection = "product-focus" | "editorial" | "scene-led";
@@ -41,6 +42,7 @@ export interface AdLayoutDesignInput {
   productAspectRatio?: number;
   planning?: { brief: CreativeBrief; recipe: DesignRecipe; assetPlan: AdLayoutAssetPlan; gapPlan: GapPlanEntry[] };
   compositionAdvice?: AdLayoutCompositionAdvice;
+  compositionPlans?: Partial<Record<AdLayoutDirection, CompositionPlan>>;
 }
 export interface AdLayoutDesignSpec {
   benefits?: BenefitInput[];
@@ -55,6 +57,7 @@ export interface AdLayoutDesignSpec {
   assetPlan?: AdLayoutAssetPlan;
   gapPlan?: GapPlanEntry[];
   compositionAdvice?: AdLayoutCompositionAdvice;
+  compositionPlan?: CompositionPlan;
   rationale: string[];
   canvas: { width: number; height: number; ratio: string };
   assets: { background?: AssetSelection; product?: AssetSelection; support?: AssetSelection; decorations: AssetSelection[] };
@@ -123,6 +126,12 @@ export function resolveAdLayoutDesignSpecs(input: AdLayoutDesignInput): AdLayout
   const directions: AdLayoutDirection[] = ["product-focus", "editorial", "scene-led"];
   return directions.map((direction) => {
     const directionDecision = input.directionDecisions?.[direction];
+    const compositionPlan = input.compositionPlans?.[direction] ?? resolveCompositionPlan({
+      canvas: input.canvas,
+      purpose: input.purpose,
+      hasBenefits: Boolean(input.benefits?.length),
+      preferredTextSafeArea: input.compositionAdvice?.preferredTextSafeArea,
+    }, direction, directionDecision);
     const fallbackTemplate = templateForAdvice(direction, input.purpose, input.canvas.ratio, input.compositionAdvice?.preferredTextSafeArea);
     const layout = input.layouts?.[direction] ?? resolveAdComposition(input, direction, directionDecision);
     const template = templateById(layout?.templateId ?? fallbackTemplate.id);
@@ -156,6 +165,7 @@ export function resolveAdLayoutDesignSpecs(input: AdLayoutDesignInput): AdLayout
       assetPlan: directionalPlan ?? input.planning?.assetPlan,
       gapPlan: input.planning?.gapPlan,
       compositionAdvice: input.compositionAdvice,
+      compositionPlan,
       rationale: rationaleFor(direction, assets),
       canvas: input.canvas,
       assets,

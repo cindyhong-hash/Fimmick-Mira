@@ -11,6 +11,7 @@ import {
   isImageSetBatchSettled,
   mergeImageSetPollResult,
   readSavedImageSetBatch,
+  reconcileImageSetResumeRows,
   shouldAnalyzeBeforeImageSetPicker,
   shouldNotifySettledBatch,
   shouldRenderDeterminateImageSetProgress,
@@ -120,4 +121,32 @@ test("resume completeness requires the exact saved IDs once each", () => {
   assert.equal(isCompleteImageSetResume(saved, ["row-a", "row-b", "row-b"]), false);
   assert.equal(isCompleteImageSetResume(saved, ["row-a", "row-b", "unexpected"]), false);
   assert.equal(isCompleteImageSetResume(["row-a", "row-a"], ["row-a", "row-a"]), false);
+});
+
+test("missing saved rows become non-retryable placeholders without hiding surviving progress", () => {
+  const result = reconcileImageSetResumeRows(
+    [
+      { id: "row-hero", role: "hero", label: "商品主視覺" },
+      { id: "row-detail", role: "detail", label: "質地細節" },
+      { id: "row-background", role: "background", label: "情境空景" },
+    ],
+    [
+      { id: "row-hero", role: "hero", label: "商品主視覺", status: "DONE", imageUrl: "/hero.png" },
+      { id: "row-background", role: "background", label: "情境空景", status: "GENERATING" },
+    ],
+  );
+
+  assert.equal(result.missingCount, 1);
+  assert.deepEqual(result.rows, [
+    { id: "row-hero", role: "hero", label: "商品主視覺", status: "DONE", imageUrl: "/hero.png" },
+    {
+      id: "row-detail",
+      role: "detail",
+      label: "質地細節",
+      status: "FAILED",
+      errorMessage: "原本的素材紀錄已不存在，請建立另一組補回這張素材。",
+      missing: true,
+    },
+    { id: "row-background", role: "background", label: "情境空景", status: "GENERATING" },
+  ]);
 });

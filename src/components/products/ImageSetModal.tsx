@@ -11,29 +11,23 @@ import {
   imageSetGenerationAnnouncement,
   imageSetProgressLabel,
   imageSetRecoveryAction,
-  isCompleteImageSetResume,
   isImageSetBatchSettled,
   mergeImageSetPollResult,
   readSavedImageSetBatch,
+  reconcileImageSetResumeRows,
   shouldAnalyzeBeforeImageSetPicker,
   shouldNotifySettledBatch,
   shouldRenderDeterminateImageSetProgress,
   writeSavedImageSetBatch,
   type SavedImageSetBatch,
   type ImageSetRecoveryKind,
+  type ImageSetResumeRow,
   type ImageSetUiPhase,
   type ImageSetUiRoleStatus,
 } from "@/lib/products/image-set-ui";
 
 type ItemState = SetItem & { checked: boolean };
-type GenState = {
-  id: string;
-  role: string;
-  label: string;
-  status: ImageSetUiRoleStatus;
-  imageUrl?: string;
-  errorMessage?: string | null;
-};
+type GenState = ImageSetResumeRow;
 type ImageSetPayload = {
   profile: ProductVisualProfile | null;
   artDirection: ImageSetArtDirection | null;
@@ -43,7 +37,7 @@ type ImageSetPayload = {
   sourceHash: string;
 };
 type ResumeRecovery = { payload: ImageSetPayload; saved: SavedImageSetBatch };
-type LoadedRows = { rows: GenState[]; complete: boolean };
+type LoadedRows = { rows: GenState[]; missingCount: number };
 
 const POLL_INTERVAL_MS = 2_000;
 const POLL_WINDOW_MS = 150_000;
@@ -64,7 +58,6 @@ async function loadRows(items: SavedImageSetBatch["items"]): Promise<LoadedRows>
   if (!response.ok) throw new Error("無法讀取套圖進度");
   const data = await response.json() as { items?: Array<Record<string, unknown>> };
   const responseRows = Array.isArray(data.items) ? data.items : [];
-  const returnedIds = responseRows.map((row) => typeof row.id === "string" ? row.id : "");
   const rowsById = new Map(responseRows.map((row) => [String(row.id), row]));
   const rows = items.flatMap((item) => {
     const row = rowsById.get(item.id);
@@ -76,11 +69,7 @@ async function loadRows(items: SavedImageSetBatch["items"]): Promise<LoadedRows>
       errorMessage: typeof row.errorMessage === "string" ? row.errorMessage : null,
     }];
   });
-  return {
-    rows,
-    complete: rows.length === items.length
-      && isCompleteImageSetResume(items.map(({ id }) => id), returnedIds),
-  };
+  return reconcileImageSetResumeRows(items, rows);
 }
 
 export function ImageSetModal({ productId, onClose, onFinished }: {
@@ -163,13 +152,6 @@ export function ImageSetModal({ productId, onClose, onFinished }: {
     try {
       const loaded = await loadRows(saved.items);
       if (!isActive()) return;
-      if (!loaded.complete) {
-        setResumeRecovery({ payload, saved });
-        setRecoveryKind("resume");
-        setError("既有套圖進度資料尚未完整，請重新讀取。");
-        setPhase("analyzing");
-        return;
-      }
       const persisted = loaded.rows;
       setError(null);
       setRecoveryKind(null);
@@ -268,6 +250,7 @@ export function ImageSetModal({ productId, onClose, onFinished }: {
   }, [phase, batchItemsKey]);
 
   const chosen = useMemo(() => items.filter(({ checked }) => checked), [items]);
+  const missingResumeCount = gen.filter(({ missing }) => missing).length;
   const progress = imageSetBatchProgress(gen);
   const progressLabel = phase === "analyzing"
     ? imageSetProgressLabel({ phase: "analyzing", sourceImageCount })
@@ -439,15 +422,15 @@ export function ImageSetModal({ productId, onClose, onFinished }: {
           ) : (
             <div className="space-y-5">
               {preparingRows ? <div role="status" aria-live="polite" aria-busy="true" className="flex min-h-40 flex-col items-center justify-center rounded-2xl border border-[#ebe4f9] bg-[#f9f6ff] text-sm font-bold text-gray-700"><Loader2 className="mb-3 h-5 w-5 animate-spin text-violet-600" />{preparingAnnouncement ?? "正在準備生成…"}</div> : <div role="status" aria-live="polite" className="rounded-2xl border border-[#ebe4f9] bg-[#f9f6ff] p-4">
-                <div className="flex items-center gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white">{phase === "done" ? <Check className="h-5 w-5 text-emerald-500" /> : <Loader2 className="h-5 w-5 animate-spin text-violet-600" />}</span><div className="min-w-0"><p className="text-sm font-bold text-gray-900">{phase === "done" ? `套圖已完成 ${progress.completed}/${progress.total}` : progressLabel}</p><p className="mt-1 text-xs leading-5 text-gray-500">{phase === "done" ? "完成的素材已存回產品；失敗項目可以單獨重試。" : "建立完成後會自動更新；現在可以關閉視窗，生成仍會繼續。"}</p></div></div>
+                <div className="flex items-center gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white">{phase === "done" ? <Check className="h-5 w-5 text-emerald-500" /> : <Loader2 className="h-5 w-5 animate-spin text-violet-600" />}</span><div className="min-w-0"><p className="text-sm font-bold text-gray-900">{phase === "done" ? (missingResumeCount ? `已恢復套圖進度，${missingResumeCount} 張待重新生成` : `套圖已完成 ${progress.completed}/${progress.total}`) : progressLabel}</p><p className="mt-1 text-xs leading-5 text-gray-500">{phase === "done" ? (missingResumeCount ? "這批有素材已被刪除；其餘素材已保留，請丟棄舊批次後重新開始。" : "完成的素材已存回產品；失敗項目可以單獨重試。") : "建立完成後會自動更新；現在可以關閉視窗，生成仍會繼續。"}</p></div></div>
                 <div role="progressbar" aria-label="商品套圖建立進度" aria-valuemin={0} aria-valuemax={Math.max(progress.total, 1)} aria-valuenow={progress.completed} aria-valuetext={`完成 ${progress.completed}/${progress.total}`} className="mt-3 h-1.5 overflow-hidden rounded-full bg-white"><div className="h-full rounded-full bg-violet-600 transition-[width] duration-500" style={{ width: `${progress.total ? (progress.completed / progress.total) * 100 : 0}%` }} /></div>
               </div>}
               {!preparingRows && <div className="space-y-2.5">{gen.map((item) => <RoleRow key={item.id} item={item} onRetry={() => void retry(item)} />)}</div>}
               {pollingTimedOut && phase !== "done" && <HelpPopover label="等待時間較長">已暫停更新畫面，但生成仍在背景進行。關閉後重新開啟即可繼續查看，不會改動後端狀態。</HelpPopover>}
               {error && <ErrorMessage>{error}</ErrorMessage>}
               <div className="flex flex-col-reverse items-stretch justify-center gap-2 pt-1 sm:flex-row">
-                {phase === "done" && <button type="button" onClick={startAnotherSet} className="rounded-full border border-[#ebe4f9] bg-white px-6 py-3 text-sm font-bold text-violet-600 hover:bg-violet-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">建立另一組</button>}
-                <button type="button" onClick={requestClose} disabled={creatingRows} className="rounded-full bg-violet-600 px-9 py-3 text-sm font-bold text-white hover:bg-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50">{phase === "done" ? "完成" : "關閉並在背景繼續"}</button>
+                {phase === "done" && <button type="button" onClick={startAnotherSet} className={`rounded-full px-6 py-3 text-sm font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${missingResumeCount ? "bg-violet-600 text-white hover:bg-violet-700" : "border border-[#ebe4f9] bg-white text-violet-600 hover:bg-violet-50"}`}>{missingResumeCount ? "丟棄這批重新開始" : "建立另一組"}</button>}
+                <button type="button" onClick={requestClose} disabled={creatingRows} className={`rounded-full px-9 py-3 text-sm font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${phase === "done" && missingResumeCount ? "border border-[#ebe4f9] bg-white text-violet-600 hover:bg-violet-50" : "bg-violet-600 text-white hover:bg-violet-700"}`}>{phase === "done" ? "完成" : "關閉並在背景繼續"}</button>
               </div>
             </div>
           )}
@@ -484,6 +467,6 @@ function RoleRow({ item, onRetry }: { item: GenState; onRetry: () => void }) {
       ) : item.status === "GENERATING" ? <Loader2 className="h-4 w-4 animate-spin text-violet-500" /> : item.status === "FAILED" ? <AlertCircle className="h-4 w-4 text-red-400" /> : <Clock3 className="h-4 w-4 text-gray-400" />}
     </div>
     <div className="min-w-0 flex-1"><div className="text-sm font-bold text-gray-900">{item.label}</div><div role="status" aria-live="polite" className={`mt-0.5 text-xs leading-5 ${item.status === "FAILED" ? "text-red-500" : "text-gray-400"}`}>{item.status === "PENDING" ? "等待生成" : item.status === "GENERATING" ? "正在生成…" : item.status === "DONE" ? "已完成" : (item.errorMessage || `${item.label}生成失敗，可單獨重新產生。`)}</div></div>
-    {item.status === "FAILED" ? <button type="button" onClick={onRetry} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[#ebe4f9] bg-[#f9f6ff] px-3 py-2 text-xs font-bold text-violet-600 hover:bg-violet-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"><RefreshCw className="h-3.5 w-3.5" />重新產生</button> : item.status === "DONE" ? <Check className="h-4 w-4 shrink-0 text-emerald-500" /> : null}
+    {item.status === "FAILED" && !item.missing ? <button type="button" onClick={onRetry} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[#ebe4f9] bg-[#f9f6ff] px-3 py-2 text-xs font-bold text-violet-600 hover:bg-violet-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"><RefreshCw className="h-3.5 w-3.5" />重新產生</button> : item.status === "DONE" ? <Check className="h-4 w-4 shrink-0 text-emerald-500" /> : null}
   </div>;
 }

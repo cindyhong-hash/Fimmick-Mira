@@ -13,6 +13,13 @@ export type SavedImageSetBatch = {
   items: Array<{ id: string; role: string; label: string }>;
 };
 
+export type ImageSetResumeRow = SavedImageSetBatch["items"][number] & {
+  status: ImageSetUiRoleStatus;
+  imageUrl?: string;
+  errorMessage?: string | null;
+  missing?: boolean;
+};
+
 export type ImageSetStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
 const savedBatchKey = (productId: string) => `product-image-set:${productId}:latest-batch`;
@@ -69,6 +76,26 @@ export function isCompleteImageSetResume(savedIds: string[], returnedIds: string
   if (new Set(returnedIds).size !== returnedIds.length) return false;
   const expectedIds = new Set(savedIds);
   return returnedIds.every((id) => expectedIds.has(id));
+}
+
+export function reconcileImageSetResumeRows(
+  savedItems: SavedImageSetBatch["items"],
+  returnedRows: ImageSetResumeRow[],
+): { rows: ImageSetResumeRow[]; missingCount: number } {
+  const rowsById = new Map(returnedRows.map((row) => [row.id, row]));
+  let missingCount = 0;
+  const rows = savedItems.map((item) => {
+    const row = rowsById.get(item.id);
+    if (row) return row;
+    missingCount += 1;
+    return {
+      ...item,
+      status: "FAILED" as const,
+      errorMessage: "原本的素材紀錄已不存在，請建立另一組補回這張素材。",
+      missing: true,
+    };
+  });
+  return { rows, missingCount };
 }
 
 export function imageSetRecoveryAction(kind: ImageSetRecoveryKind): { title: string; actionLabel: string } {

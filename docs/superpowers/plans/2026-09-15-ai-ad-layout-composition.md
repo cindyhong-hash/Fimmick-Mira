@@ -44,6 +44,7 @@
 | `src/lib/magic-layers/ad-layout-polish.ts` | Replace fixed 8% growth with score-directed bounded repair. |
 | `src/lib/magic-layers/ad-layout-art-direction.ts` | Parse supported values while safely ignoring unknown keys; then remove `graphics`. |
 | `src/lib/products/image-set-roles.ts` | Tighten future background-role prompt; no provider invocation. |
+| `src/app/api/magic-layers/ad-layout/route.ts` | Analyse the already-prepared background buffer once and pass plain analysis data into the synchronous layout pipeline. |
 | `src/lib/magic-layers/ad-layout-*.test.ts` | Extend existing focused tests for composition, renderer, quality, polish, graphics, and art direction. |
 | `scripts/evaluate-ad-layout-composition.ts` | New deterministic 72-case matrix report and contact-sheet manifest. |
 
@@ -183,7 +184,8 @@ git commit -m "feat: fit ad products from composition plans"
 **Interfaces:**
 - Produces `analyzePreparedBackground(buffer, canvas): BackgroundAnalysis` and `scoreBackgroundRect(analysis, rect): BackgroundRectScore`.
 - `BackgroundRectScore` has `contrast`, `texture`, `stability`, `safeForCopy`, and `needsPanel`.
-- Task 5 consumes scores; it never calls a provider.
+- Route calls the analyser once after `backgroundBuffer = await prepareAdBackground(...)`, then passes `backgroundAnalysis` into `AdLayoutInput` and `AdLayoutDesignInput`.
+- Task 5 consumes plain analysis data; it never calls a provider.
 
 - [ ] **Step 1: Write failing buffer tests**
 
@@ -204,9 +206,9 @@ Expected: FAIL because analyzer module does not exist.
 
 Use `sharp` to read the already ratio-prepared buffer at a small fixed resolution such as 12×12. For each cell calculate average luminance, luminance variance, and adjacent-cell luminance difference. Normalize each metric to `[0, 1]`. `scoreBackgroundRect` aggregates covered cells and marks `needsPanel` when edge density or luminance variance exceeds the fixed copy threshold. Do not inspect remote URLs or make vision requests.
 
-- [ ] **Step 4: Keep preparation ownership unchanged**
+- [ ] **Step 4: Pass analysis through the existing synchronous boundary**
 
-Pass the `Buffer` returned by the existing `prepareAdBackground` directly to `analyzePreparedBackground`. Do not change `prepareAdBackground`, its crop behavior, or any vision request path.
+In `src/app/api/magic-layers/ad-layout/route.ts`, immediately after `backgroundBuffer` is prepared, call `analyzePreparedBackground(backgroundBuffer, { width: W, height: H })`. Add optional `backgroundAnalysis?: BackgroundAnalysis` to `AdLayoutInput` and `AdLayoutDesignInput`, and pass it unchanged to `resolveAdLayoutDesignSpecs`. Do not change `prepareAdBackground`, its crop behavior, or any vision request path.
 
 - [ ] **Step 5: Run focused tests**
 
@@ -216,7 +218,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/lib/magic-layers/ad-layout-background-analysis.ts src/lib/magic-layers/ad-layout-background-analysis.test.ts
+git add src/lib/magic-layers/ad-layout-background-analysis.ts src/lib/magic-layers/ad-layout-background-analysis.test.ts src/app/api/magic-layers/ad-layout/route.ts src/lib/magic-layers/ad-layout-recipes.ts src/lib/magic-layers/ad-layout-design-spec.ts
 git commit -m "feat: score prepared ad backgrounds deterministically"
 ```
 

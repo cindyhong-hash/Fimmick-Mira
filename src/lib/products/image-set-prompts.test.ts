@@ -41,6 +41,8 @@ const artDirection: ImageSetArtDirection = {
   backgroundLanguage: "明亮浴室",
   cameraLanguage: "清晰產品攝影，保留真實比例",
   consistencyRules: ["所有畫面視為同一產品的不同視角。"],
+  mood: ["清新", "可信賴"],
+  decorationStyle: ["細緻冰藍線框", "柔和光點"],
 };
 
 test("product roles contain identity locks", () => {
@@ -138,4 +140,15 @@ test("handles alpha hex conservatively and drops invalid hash-prefixed colors", 
   assert.doesNotMatch(prompt, /not-a-color|#12345|#[0-9a-f]{3,8}\b/i);
   assert.equal((prompt.match(/translucent vivid violet/gi) ?? []).length, 1);
   assert.equal((prompt.match(/translucent warm light yellow/gi) ?? []).length, 1);
+});
+
+test("every role receives confirmed mood, campaign consistency, and text safety rules", () => {
+  for (const role of planImageSetRoles(beautyDeviceProfile)) {
+    const prompt = compileImageSetPrompt({ product, profile: beautyDeviceProfile, artDirection, role });
+    assert.match(prompt, /Mood: 清新、可信賴/);
+    assert.match(prompt, /Campaign consistency rules: 所有畫面視為同一產品的不同視角。/);
+    assert.match(prompt, /Do not render new words, letters, numbers, captions, badges with text, or typographic marks\./);
+    assert.match(prompt, /Preserve genuine logo and packaging label details visible on the supplied product reference\./);
+    if (role.role === "decoration") assert.match(prompt, /Decoration style: 細緻冰藍線框、柔和光點/);
+  }
 });

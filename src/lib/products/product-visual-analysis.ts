@@ -25,7 +25,45 @@ export type ImageSetArtDirection = {
   backgroundLanguage: string;
   cameraLanguage: string;
   consistencyRules: string[];
+  mood: string[];
+  decorationStyle: string[];
 };
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+export function parseImageSetArtDirection(raw: unknown): ImageSetArtDirection | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const value = raw as Record<string, unknown>;
+  const palette = value.palette;
+  if (!palette || typeof palette !== "object" || Array.isArray(palette)) return null;
+  const colors = palette as Record<string, unknown>;
+  if (
+    typeof value.concept !== "string"
+    || !isStringArray(colors.dominant)
+    || !isStringArray(colors.accent)
+    || typeof value.lighting !== "string"
+    || !isStringArray(value.materials)
+    || typeof value.backgroundLanguage !== "string"
+    || typeof value.cameraLanguage !== "string"
+    || !isStringArray(value.consistencyRules)
+    || (value.mood !== undefined && !isStringArray(value.mood))
+    || (value.decorationStyle !== undefined && !isStringArray(value.decorationStyle))
+  ) return null;
+
+  return {
+    concept: value.concept,
+    palette: { dominant: colors.dominant, accent: colors.accent },
+    lighting: value.lighting,
+    materials: value.materials,
+    backgroundLanguage: value.backgroundLanguage,
+    cameraLanguage: value.cameraLanguage,
+    consistencyRules: value.consistencyRules,
+    mood: value.mood ?? [],
+    decorationStyle: value.decorationStyle ?? [],
+  };
+}
 
 export type VisionRequest = {
   imageDataUrls: string[];
@@ -194,5 +232,7 @@ export function buildImageSetArtDirection(
       ...profile.prohibitedChanges,
       ...(brand.toneLabels?.filter(Boolean).map((tone) => `品牌調性：${tone}`) ?? []),
     ],
+    mood: [...new Set(brand.toneLabels?.map((tone) => tone.trim()).filter(Boolean) ?? [])],
+    decorationStyle: [...new Set(profile.visualMotifs.map((motif) => motif.trim()).filter(Boolean))],
   };
 }

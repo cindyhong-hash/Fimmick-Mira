@@ -107,11 +107,21 @@ export function compileImageSetPrompt({ product, profile, artDirection, role }: 
     `dominant palette: ${paletteText(artDirection.palette.dominant, "product-visible colors only")}`,
     `accent palette: ${paletteText(artDirection.palette.accent, "none")}; accent only, never dominant.`,
   ].join("\n");
+  const sharedDirection = [
+    `Mood: ${list(artDirection.mood, "clean and consistent")}`,
+    ...(role.role === "decoration" ? [`Decoration style: ${list(artDirection.decorationStyle, "minimal non-typographic accents")}`] : []),
+    `Campaign consistency rules: ${list(artDirection.consistencyRules, "use the confirmed shared art direction")}`,
+  ].join("\n");
+  const textSafety = [
+    "Do not render new words, letters, numbers, captions, badges with text, or typographic marks.",
+    "Preserve genuine logo and packaging label details visible on the supplied product reference.",
+  ];
   const exclusions = [
     ...role.mustNotShow,
     ...profile.prohibitedChanges,
     "未提供的成分、功效、認證、安全或醫療宣稱",
     "不得加入任何額外文字、色碼（hex）、數字、標籤或浮水印（產品本身既有的品牌字樣除外）",
+    ...textSafety,
   ];
 
   // Only legacy edit rows use a generated product photograph. New ad-asset roles
@@ -130,6 +140,7 @@ export function compileImageSetPrompt({ product, profile, artDirection, role }: 
         : "不得出現任何商品、瓶罐、包裝、Logo 或文字",
       "不得加入未提供的成分、功效、認證、安全或醫療宣稱",
       "不得加入任何色碼（hex）、數字、標籤或浮水印",
+      ...textSafety,
     ];
     return [
       "[ROLE OBJECTIVE]",
@@ -140,6 +151,7 @@ export function compileImageSetPrompt({ product, profile, artDirection, role }: 
       palette,
       `Lighting: ${artDirection.lighting}`,
       `Background language: ${artDirection.backgroundLanguage}`,
+      sharedDirection,
       "[COMPOSITION]",
       role.composition,
       `Role scene: ${role.sceneCn}`,
@@ -161,6 +173,7 @@ export function compileImageSetPrompt({ product, profile, artDirection, role }: 
     `Lighting: ${artDirection.lighting}`,
     `Materials language: ${list(artDirection.materials, "visible product materials only")}`,
     `Background language: ${artDirection.backgroundLanguage}`,
+    sharedDirection,
     "[COMPOSITION AND CAMERA]",
     role.composition,
     `Camera: ${artDirection.cameraLanguage}`,

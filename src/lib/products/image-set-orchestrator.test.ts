@@ -46,6 +46,8 @@ const artDirection: ImageSetArtDirection = {
   backgroundLanguage: "明亮浴室",
   cameraLanguage: "清晰攝影",
   consistencyRules: [],
+  mood: [],
+  decorationStyle: [],
 };
 
 const roles: ImageSetRoleSpec[] = [

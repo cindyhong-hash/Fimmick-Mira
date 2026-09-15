@@ -1,4 +1,4 @@
-import { matchBenefitGraphic } from "./ad-layout-graphics.ts";
+import { matchBenefitGraphic, splitBenefitClaim } from "./ad-layout-graphics.ts";
 import { fitText } from "./editable-text.ts";
 import { CopyTooLongError } from "./ad-layout-composition.ts";
 import { DEFAULT_TEXT_LAYOUT } from "./editable-text.ts";
@@ -201,12 +201,14 @@ export function renderAdLayoutSpec(spec: AdLayoutDesignSpec, options: AdLayoutRe
   }
   if (spec.benefits?.length) {
     const n = spec.benefits.length;
-    const cellW = width * 0.86 / n;
+    const benefitRect = layout?.benefit ?? { x: Math.round(width * 0.07), y: Math.round(height * 0.77), w: Math.round(width * 0.86), h: Math.round(height * 0.15) };
+    const cellW = benefitRect.w / n;
     const unit = Math.min(width, height);
     spec.benefits.forEach((benefit, index) => {
-      const x = width * 0.07 + index * cellW;
-      const y = height * 0.77;
+      const x = benefitRect.x + index * cellW;
+      const y = benefitRect.y;
       const match = matchBenefitGraphic(benefit);
+      const claim = splitBenefitClaim(benefit.text);
       const groupId = `benefit_group_${benefit.id}`;
       if (index > 0) {
         const length = Math.round(height * 0.105);
@@ -256,34 +258,36 @@ export function renderAdLayoutSpec(spec: AdLayoutDesignSpec, options: AdLayoutRe
         graphic.meta.groupId = groupId;
         layers.push(graphic);
       }
-      if (match.number) {
+      if (claim.value) {
         const numberRect = {
           x: Math.round(x + (match.icon ? unit * 0.065 : 0)),
           y: Math.round(y),
           w: Math.max(24, Math.floor(cellW - (match.icon ? unit * 0.08 : unit * 0.02))),
           h: Math.round(unit * 0.05),
         };
-        const fittedNumber = fitText(match.number, numberRect.w, numberRect.h, unit * 0.02, unit * 0.036);
+        const fittedNumber = fitText(claim.value, numberRect.w, numberRect.h, unit * 0.02, unit * 0.036);
         if (!fittedNumber.fits) throw new CopyTooLongError();
-        const callout = textLayer("text_title", zIndex++, match.number, numberRect, spec.typography.accentColor, 800, "left", fittedNumber.fontSize);
+        const callout = textLayer("text_title", zIndex++, claim.value, numberRect, spec.typography.accentColor, 800, "left", fittedNumber.fontSize);
         callout.id = `benefit_number_${benefit.id}`;
         callout.instanceId = callout.id;
         callout.meta.groupId = groupId;
         layers.push(callout);
       }
-      const rect = {
-        x: Math.round(x),
-        y: Math.round(y + unit * 0.065),
-        w: Math.floor(cellW - unit * 0.02),
-        h: Math.floor(height * 0.075),
-      };
-      const fitted = fitText(benefit.text, rect.w, rect.h, unit * 0.018, unit * 0.024);
-      if (!fitted.fits) throw new CopyTooLongError();
-      const label = textLayer("text_sub", zIndex++, benefit.text, rect, spec.typography.subtitleColor, 500, "left", fitted.fontSize);
-      label.id = `benefit_text_${benefit.id}`;
-      label.instanceId = label.id;
-      label.meta.groupId = groupId;
-      layers.push(label);
+      if (claim.description) {
+        const rect = {
+          x: Math.round(x),
+          y: Math.round(y + unit * 0.065),
+          w: Math.floor(cellW - unit * 0.02),
+          h: Math.floor(benefitRect.h - unit * 0.065),
+        };
+        const fitted = fitText(claim.description, rect.w, rect.h, unit * 0.018, unit * 0.024);
+        if (!fitted.fits) throw new CopyTooLongError();
+        const label = textLayer("text_sub", zIndex++, claim.description, rect, spec.typography.subtitleColor, 500, "left", fitted.fontSize);
+        label.id = `benefit_text_${benefit.id}`;
+        label.instanceId = label.id;
+        label.meta.groupId = groupId;
+        layers.push(label);
+      }
     });
   }
   if (options.logoUrl) {

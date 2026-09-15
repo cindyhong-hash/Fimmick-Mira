@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BENEFIT_ICON_REGISTRY, matchBenefitGraphic, parseBenefits } from "./ad-layout-graphics.ts";
+import { BENEFIT_ICON_REGISTRY, matchBenefitGraphic, parseBenefits, splitBenefitClaim } from "./ad-layout-graphics.ts";
+test("splits a numeric benefit claim so the value is rendered once",()=>{
+ assert.deepEqual(splitBenefitClaim("48 小時保濕"),{value:"48 小時",description:"保濕"});
+});
 test("maps every confirmed semantic category through the exported registry",()=>{
  const cases = [
   ["雙重保濕", "water-drop"], ["吸震設計", "spring"], ["五刀片", "blade"],

@@ -49,3 +49,11 @@ export function matchBenefitGraphic(benefit: BenefitInput): BenefitGraphic {
   const match = BENEFIT_ICON_REGISTRY.find((entry) => hasAffirmedMatch(benefit.text, entry.patterns));
   return { benefitId: benefit.id, icon: match?.icon ?? null, number };
 }
+
+export function splitBenefitClaim(text: string): { value: string | null; description: string } {
+  const match = text.match(NUMBER_PHRASE);
+  if (!match) return { value: null, description: text.trim() };
+  const value = match[0].trim();
+  const index = match.index ?? 0;
+  return { value, description: `${text.slice(0, index)}${text.slice(index + match[0].length)}`.trim() };
+}

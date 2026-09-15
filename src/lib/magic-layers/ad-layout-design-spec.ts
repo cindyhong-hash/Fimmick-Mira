@@ -143,8 +143,8 @@ export function resolveAdLayoutDesignSpecs(input: AdLayoutDesignInput): AdLayout
       : undefined;
     const assets = directionalPlan ? selectionsFromPlan(directionalPlan) : assetPlan(direction, input.purpose, input.assets);
     if (input.benefits?.length || directionDecision?.support === "none") assets.support = undefined;
-    if (directionDecision?.support === "detail" && input.assets.detail) assets.support = selected("detail", input.assets.detail);
-    if (directionDecision?.support === "benefit" && input.assets.benefit) assets.support = selected("benefit", input.assets.benefit);
+    if (!input.benefits?.length && directionDecision?.support === "detail" && input.assets.detail) assets.support = selected("detail", input.assets.detail);
+    if (!input.benefits?.length && directionDecision?.support === "benefit" && input.assets.benefit) assets.support = selected("benefit", input.assets.benefit);
     if (directionDecision?.decoration === "none") assets.decorations = [];
     const treatment = typeof input.typography.treatment === "string"
       ? input.typography.treatment

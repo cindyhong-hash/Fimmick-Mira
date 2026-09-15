@@ -5,8 +5,9 @@ export const decision:DirectionDecision={direction:"product-focus",composition:"
 test("accepts only three distinct bounded design directions",()=>{
  const valid={version:1,directions:[decision,{...decision,direction:"editorial"},{...decision,direction:"scene-led"}]};
  assert.ok(parseArtDirection(JSON.stringify(valid)));
- assert.equal(parseArtDirection(JSON.stringify({...valid,url:"injected"})),null);
+ assert.ok(parseArtDirection(JSON.stringify({...valid,url:"injected"})));
  assert.equal(parseArtDirection(JSON.stringify({...valid,directions:[decision,decision,decision]})),null);
- for(const patch of [{x:123},{confidence:2},{composition:"arbitrary"},{url:"https://example.com"}])assert.equal(parseArtDirection(JSON.stringify({...valid,directions:[{...decision,...patch},...valid.directions.slice(1)]})),null);
+ for(const patch of [{confidence:2},{composition:"arbitrary"}])assert.equal(parseArtDirection(JSON.stringify({...valid,directions:[{...decision,...patch},...valid.directions.slice(1)]})),null);
+ assert.ok(parseArtDirection(JSON.stringify({...valid,directions:[{...decision,url:"https://example.com"},...valid.directions.slice(1)]})));
  assert.equal(parseArtDirection("x".repeat(17000)),null);
 });

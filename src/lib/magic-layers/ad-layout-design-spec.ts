@@ -42,6 +42,7 @@ export interface AdLayoutDesignInput {
   productAspectRatio?: number;
   planning?: { brief: CreativeBrief; recipe: DesignRecipe; assetPlan: AdLayoutAssetPlan; gapPlan: GapPlanEntry[] };
   compositionAdvice?: AdLayoutCompositionAdvice;
+  compositionPlan?: CompositionPlan;
   compositionPlans?: Partial<Record<AdLayoutDirection, CompositionPlan>>;
 }
 export interface AdLayoutDesignSpec {
@@ -133,7 +134,7 @@ export function resolveAdLayoutDesignSpecs(input: AdLayoutDesignInput): AdLayout
       preferredTextSafeArea: input.compositionAdvice?.preferredTextSafeArea,
     }, direction, directionDecision);
     const fallbackTemplate = templateForAdvice(direction, input.purpose, input.canvas.ratio, input.compositionAdvice?.preferredTextSafeArea);
-    const layout = input.layouts?.[direction] ?? resolveAdComposition(input, direction, directionDecision);
+    const layout = input.layouts?.[direction] ?? resolveAdComposition({ ...input, compositionPlan }, direction, directionDecision);
     const template = templateById(layout?.templateId ?? fallbackTemplate.id);
     const directionalPlan = input.planning
       ? planRecipeAssets(input.planning.recipe, input.planning.brief.inventory, direction)

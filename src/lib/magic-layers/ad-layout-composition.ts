@@ -2,10 +2,11 @@ import { fitText } from "./editable-text.ts";
 import { templateForAdvice } from "./ad-layout-templates.ts";
 import type { DirectionDecision } from "./ad-layout-art-direction.ts";
 import type { AdLayoutDesignInput, AdLayoutDirection } from "./ad-layout-design-spec.ts";
+import type { CompositionPlan } from "./ad-layout-composition-plan.ts";
 export type LayoutRect = { x: number; y: number; w: number; h: number };
 export type ResolvedAdLayout = {
   templateId: string; product: LayoutRect; headline: LayoutRect; subtitle: LayoutRect;
-  safePanel: LayoutRect; support: LayoutRect; decoration: LayoutRect; logo: LayoutRect;
+  safePanel: LayoutRect; support: LayoutRect; decoration: LayoutRect; logo: LayoutRect; benefit?: LayoutRect;
   headlineSize: number; subtitleSize: number;
 };
 export class CopyTooLongError extends Error { constructor() { super("文案較長，請縮短標題或副標後再試"); } }
@@ -84,11 +85,13 @@ export function resolveAdComposition(input: AdLayoutDesignInput, direction: AdLa
     decision?.composition,
   );
   const zone = (value: { x: number; y: number; w: number; h: number }) => rect(value.x, value.y, value.w, value.h);
-  const copy = zone(template.zones.text);
-  const heroZone = zone(template.zones.hero);
+  const plan: CompositionPlan | undefined = input.compositionPlan;
+  const copy = zone(plan?.copyZone ?? template.zones.text);
+  const heroZone = zone(plan?.productZone ?? template.zones.hero);
+  const benefit = plan?.benefitZone ? zone(plan.benefitZone) : undefined;
   let w = Math.min(heroZone.w, heroZone.h * aspect), h = w / aspect;
   w = Math.round(w); h = Math.round(h);
-  if (input.benefits?.length) {
+  if (input.benefits?.length && !benefit) {
     // 賣點列畫在 y=0.77，所以限制其實是「商品底部要在它上面」。
     // 原本只把 hero 區塊壓扁，對起點本來就低的 scene-led 版型（y=0.53 / 0.59）
     // 等於只剩 0.13–0.19 個畫布高，商品縮到畫布的 1.7%，等於白給一個選項。
@@ -124,5 +127,6 @@ export function resolveAdComposition(input: AdLayoutDesignInput, direction: AdLa
     support: zone(template.zones.support),
     decoration: zone(template.zones.decoration),
     logo: zone(template.zones.logo),
+    ...(benefit ? { benefit } : {}),
   };
 }

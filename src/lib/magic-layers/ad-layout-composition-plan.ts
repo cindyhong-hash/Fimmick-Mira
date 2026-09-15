@@ -60,12 +60,19 @@ export function resolveCompositionPlan(
     input.preferredTextSafeArea,
     decision?.composition,
   );
-  const productZone = input.hasBenefits ? reserveBenefitZone(template.zones.hero) : copy(template.zones.hero);
+  const benefitVariant = input.hasBenefits && template.id === "center-product-bottom-copy"
+    ? { product: { x: 0.24, y: 0.24, w: 0.52, h: 0.52 }, copy: { x: 0.09, y: 0.07, w: 0.75, h: 0.15 } }
+    : input.hasBenefits && template.id === "editorial-product-left"
+      ? { product: { x: 0.05, y: 0.25, w: 0.50, h: 0.51 }, copy: template.zones.text }
+    : input.hasBenefits && template.id === "editorial-product-bottom"
+      ? { product: { x: 0.24, y: 0.25, w: 0.52, h: 0.51 }, copy: { x: 0.09, y: 0.05, w: 0.64, h: 0.18 } }
+      : undefined;
+  const productZone = input.hasBenefits ? reserveBenefitZone(benefitVariant?.product ?? template.zones.hero) : copy(template.zones.hero);
   return {
     strategy: STRATEGY_BY_DIRECTION[direction],
     variant: template.id,
     productZone,
-    copyZone: copy(template.zones.text),
+    copyZone: copy(benefitVariant?.copy ?? template.zones.text),
     ...(input.hasBenefits ? { benefitZone: copy(BENEFIT_ZONE) } : {}),
     supportZone: copy(template.zones.support),
     alignment: ALIGNMENT_BY_SAFE_AREA[template.textSafeArea],

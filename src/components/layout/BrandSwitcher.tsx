@@ -16,9 +16,9 @@ export function BrandSwitcher({ currentClientId }: { currentClientId: string }) 
   return (
     <div className="relative">
       <button type="button" onClick={() => setOpen(v => !v)}
-        className="flex w-full items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm hover:bg-gray-50">
+        className="flex w-full items-center justify-between rounded-lg border border-[#ebe4f9] bg-[#f9f6ff] px-3 py-2 text-sm transition-colors hover:bg-violet-50">
         <span className="truncate font-medium text-gray-800">{current?.name ?? "選擇品牌"}</span>
-        <ChevronDown className="h-3 w-3 text-gray-400" />
+        <ChevronDown className="h-3 w-3 text-violet-400" />
       </button>
       {open && (
         <>

@@ -20,6 +20,7 @@ import { planArtDirection } from "@/lib/magic-layers/ad-layout-art-direction-pro
 import { buildDirectedCandidates } from "@/lib/magic-layers/ad-layout-orchestration.ts";
 import { availableBrandPostReferences, selectDesignReferences } from "@/lib/magic-layers/ad-layout-references.ts";
 import { artDirectionStatus } from "@/lib/magic-layers/ad-layout-art-direction-status.ts";
+import { analyzePreparedBackground } from "@/lib/magic-layers/ad-layout-background-analysis.ts";
 import { loadBuffer, saveBuffer } from "@/lib/storage";
 import sharp from "sharp";
 
@@ -73,11 +74,13 @@ export async function POST(request: Request) {
     // 以 full-bleed cover 準備背景，避免 contain 產生白邊／像貼上去的照片。
     let backgroundUrl: string;
     let backgroundBuffer: Buffer;
+    let backgroundAnalysis;
     try {
       const source = rawBg
         ? Buffer.from(await loadBuffer(rawBg))
         : await sharp({ create: { width: W, height: H, channels: 3, background: { r: 248, g: 249, b: 252 } } }).png().toBuffer();
       backgroundBuffer = await prepareAdBackground(source, W, H);
+      backgroundAnalysis = await analyzePreparedBackground(backgroundBuffer);
       backgroundUrl = await saveBuffer(backgroundBuffer, "png", "ml-adlayout-bg-");
     } catch {
       return NextResponse.json({ error: "背景處理失敗" }, { status: 500 });
@@ -146,6 +149,7 @@ export async function POST(request: Request) {
       benefits, layouts, textColors, brandColor: accentColor, textColor: "#241f47", textSafeTreatment, artDirection,
       purpose, ratio, heroAspectRatio, planning: { brief, recipe, assetPlan, gapPlan }, compositionAdvice: assessed.advice,
       assessment: { source: assessed.advice.source, warnings: assessed.advice.warnings }, secondaryBrandColor: safeContext.brand.secondaryColor, canvasWidth: W, canvasHeight: H,
+      backgroundAnalysis,
     };
     const options = buildDirectedCandidates(
       designInput,

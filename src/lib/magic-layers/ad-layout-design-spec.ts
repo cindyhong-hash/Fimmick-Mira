@@ -9,6 +9,7 @@ import { polishAdLayoutSpec } from "./ad-layout-polish.ts";
 import { planProductIntegration, type ProductIntegrationPlan } from "./ad-layout-product-integration.ts";
 import type { AdLayoutCompositionAdvice } from "./ad-layout-vision-policy.ts";
 import { resolveCompositionPlan, type CompositionPlan } from "./ad-layout-composition-plan.ts";
+import type { BackgroundAnalysis } from "./ad-layout-background-analysis.ts";
 
 export type AdLayoutPurpose = "product" | "benefit" | "scene" | "promo";
 export type AdLayoutDirection = "product-focus" | "editorial" | "scene-led";
@@ -44,6 +45,7 @@ export interface AdLayoutDesignInput {
   compositionAdvice?: AdLayoutCompositionAdvice;
   compositionPlan?: CompositionPlan;
   compositionPlans?: Partial<Record<AdLayoutDirection, CompositionPlan>>;
+  backgroundAnalysis?: BackgroundAnalysis;
 }
 export interface AdLayoutDesignSpec {
   benefits?: BenefitInput[];

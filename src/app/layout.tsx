@@ -38,7 +38,7 @@ const manrope = Manrope({
 });
 
 export const metadata: Metadata = {
-  title: "行銷圖文工具",
+  title: "MIRA",
   robots: { index: false, follow: false, nocache: true },
 };
 

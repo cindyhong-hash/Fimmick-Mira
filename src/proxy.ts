@@ -12,7 +12,7 @@ const MAX_AGE = 60 * 60 * 24 * 30; // 30 日內唔使再輸入
 
 function gatePage(error?: string): string {
   return `<!doctype html>
-<html lang="zh-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>行銷圖文工具</title>
+<html lang="zh-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>MIRA</title>
 <style>
 body{font-family:system-ui,-apple-system,sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center;background:#0b0b0f;color:#eee;margin:0}
 form{background:#16161d;padding:2rem;border-radius:12px;width:280px;box-shadow:0 8px 30px rgba(0,0,0,.4)}

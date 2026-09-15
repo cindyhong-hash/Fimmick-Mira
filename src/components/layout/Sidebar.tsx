@@ -1,5 +1,6 @@
 "use client";
 import { useSyncExternalStore } from "react";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { PanelLeft, PanelLeftOpen } from "lucide-react";
 import { BrandSwitcher } from "./BrandSwitcher";
@@ -24,6 +25,14 @@ export function Sidebar() {
   if (collapsed) {
     return (
       <aside className="sticky top-0 flex h-screen w-16 shrink-0 flex-col items-center self-start overflow-y-auto border-r border-gray-200 bg-white p-4">
+        <Image
+          src="/mira-mark.png"
+          alt="MIRA"
+          width={125}
+          height={64}
+          priority
+          className="mb-5 w-8"
+        />
         <button
           type="button"
           onClick={toggleCollapsed}
@@ -41,7 +50,14 @@ export function Sidebar() {
   return (
     <aside className="sticky top-0 flex h-screen w-[220px] shrink-0 flex-col self-start overflow-y-auto border-r border-gray-200 bg-white p-4">
       <div className="mb-6 flex items-center justify-between px-1">
-        <span className="text-lg font-bold text-gray-900">Content</span>
+        <Image
+          src="/mira-logo.png"
+          alt="MIRA"
+          width={399}
+          height={96}
+          priority
+          className="h-6 w-auto"
+        />
         <button
           type="button"
           onClick={toggleCollapsed}

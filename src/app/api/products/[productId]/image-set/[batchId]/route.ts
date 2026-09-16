@@ -5,11 +5,13 @@ import { parseImageSetArtDirection } from "@/lib/products/product-visual-analysi
 
 export const dynamic = "force-dynamic";
 
-export async function GET(_request: Request, { params }: {
+export async function GET(request: Request, { params }: {
   params: Promise<{ productId: string; batchId: string }>;
 }) {
   const { productId, batchId } = await params;
-  const kit = await db.productImageSet.findFirst({ where: { id: batchId, productId } });
+  const clientId = new URL(request.url).searchParams.get("clientId");
+  if (!clientId) return NextResponse.json({ error: "clientId required" }, { status: 400 });
+  const kit = await db.productImageSet.findFirst({ where: { id: batchId, productId, product: { clientId } } });
   if (!kit) return NextResponse.json({ error: "找不到這項產品的視覺套組" }, { status: 404 });
   const rows = await db.libraryImage.findMany({
     where: { productId, batchId },

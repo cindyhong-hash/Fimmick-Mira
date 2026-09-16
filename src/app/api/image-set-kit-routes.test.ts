@@ -30,7 +30,7 @@ test("paid image-set generation consumes and confirms a persisted DRAFT", async 
 test("kit reader scopes metadata and assets to the requested product and batch", async () => {
   const source = await readFile(new URL("./products/[productId]/image-set/[batchId]/route.ts", import.meta.url), "utf8");
 
-  assert.match(source, /productImageSet\.findFirst\(\{ where: \{ id: batchId, productId \} \}\)/);
+  assert.match(source, /productImageSet\.findFirst\(\{ where: \{ id: batchId, productId, product: \{ clientId \} \} \}\)/);
   assert.match(source, /libraryImage\.findMany/);
   assert.match(source, /where: \{ productId, batchId \}/);
   assert.match(source, /normalizeImageSetKitAssets/);

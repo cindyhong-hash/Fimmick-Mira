@@ -35,7 +35,7 @@ DATABASE_URL="file:./prisma/dev.db"
 | `prisma generate` | exit 0 |
 | `tsc --noEmit --incremental false` | exit 0 |
 | 改動的 TS / TSX ESLint | 0 errors；`ComposeView.tsx` 有 3 個既有 `no-img-element` warnings |
-| 全套 Node tests | 329 tests，328 pass，1 fail |
+| 全套 Node tests | 330 tests，329 pass，1 fail |
 | `next build` | exit 0；46 個 static pages 生成完成 |
 
 唯一失敗仍是 Task 1 記錄的既有案例：
@@ -104,3 +104,22 @@ UI 驗證期間，localhost server 記錄到一個 8 張的 plan 與 generation 
 本批沒有 lifecycle 失敗，因此沒有可合法呼叫 FAILED-only retry endpoint 的列。PARTIAL／FAILED 看板與
 重試入口已由隔離 fixture 驗證，route 的同批次／同角色／同 subtype 限制也由全套測試覆蓋。沒有擅自
 把 DONE 改成 FAILED 或額外花費重試；上述兩個視覺品質問題保留為人工審核結果。
+
+## 6. 實際使用回報：material detail 商品失真
+
+使用者比對原商品後確認，舊版 `material-detail` 生成結果把白色筆型除毛刀的圓形刀網改成玫瑰金圓筒端蓋，
+屬於商品識別失真，不能作為產品細節素材。
+
+根因是非保養品的 `material-detail` 被設定為 `path: "text"`。批次執行時因此清空所有原始商品參考圖，
+Prompt 也把產品降成不可描繪的背景脈絡，模型只能依色彩與材質文字自由想像。
+
+修正後：
+
+- 實體商品的 `material-detail`／`fabric-detail` 使用 `path: "edit"`。
+- 生成時載入原始商品照、商品 hero 與批次去背 hero，並套用形狀、結構、材質、Logo 與禁止變更規則。
+- 保養品／彩妝的 `formula-texture` 仍走純文字生成，避免把完整包裝帶進乳液、凝露或泡沫特寫。
+- 舊批次若重試非配方 detail，已保存的 `path: "text"` 會升級成 reference edit。
+- 新增測試覆蓋角色選路、Prompt identity locks、批次參考圖傳遞與舊批次 retry 升級。
+
+修正後驗收：TypeScript 與 ESLint exit 0；全套測試 330 個、329 通過，唯一失敗仍是既有
+`planner/content-brief`；production build exit 0。舊的錯誤圖片不會被靜默覆寫，重新生成仍需使用者主動操作。

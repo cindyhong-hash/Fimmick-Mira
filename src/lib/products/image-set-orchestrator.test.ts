@@ -319,7 +319,7 @@ test("records transparency from the generated PNG pixels", async () => {
   assert.equal(result.statuses.decoration, "DONE");
 });
 
-test("new ad-asset roles load an original only for the cutout and keep text assets product-free", async () => {
+test("physical detail loads product references while conceptual assets stay product-free", async () => {
   const batch = input();
   batch.rows = planImageSetRoles(profile).map((role) => ({ id: `ad-${role.role}`, role }));
   const requests: Array<{ role: string; path: string | undefined; hasProductReference: boolean }> = [];
@@ -336,7 +336,8 @@ test("new ad-asset roles load an original only for the cutout and keep text asse
   });
 
   assert.deepEqual(requests.find(({ role }) => role === "hero"), { role: "hero", path: "cutout", hasProductReference: true });
-  for (const role of ["detail", "background", "benefit", "decoration"]) {
+  assert.deepEqual(requests.find(({ role }) => role === "detail"), { role: "detail", path: "edit", hasProductReference: true });
+  for (const role of ["background", "benefit", "decoration"]) {
     assert.deepEqual(requests.find((request) => request.role === role), { role, path: "text", hasProductReference: false });
   }
 });
@@ -1409,6 +1410,7 @@ test("kit retry keeps the persisted art direction and rejects cross-batch or cha
   product.visualProfileSourceHash = sourceHash;
   const planned = planImageSetRoles({ profile, artDirection });
   const role = planned[1];
+  const legacyTextRole = { ...role, path: "text" as const, mustNotShow: [...role.mustNotShow, "Logo", "文字"] };
   const row = {
     id: "row-detail",
     productId: product.id,
@@ -1420,7 +1422,7 @@ test("kit retry keeps the persisted art direction and rejects cross-batch or cha
       profileVersion: 1,
       sourceHash,
       artDirection: { ...artDirection, concept: "obsolete row direction" },
-      roleSpec: role,
+      roleSpec: legacyTextRole,
     }),
     product,
   };
@@ -1438,6 +1440,8 @@ test("kit retry keeps the persisted art direction and rejects cross-batch or cha
     assert.equal(prepared.value.input.artDirection.concept, "confirmed kit direction");
     assert.equal(prepared.value.input.rows.length, 1);
     assert.equal(prepared.value.input.rows[0].id, "row-detail");
+    assert.equal(prepared.value.input.rows[0].role.path, "edit");
+    assert.doesNotMatch(prepared.value.input.rows[0].role.mustNotShow.join("\n"), /^Logo$|^文字$/m);
   }
   assert.equal(prepareKitAssetRegenerationFromRecords({ ...row, batchId: "another-batch" }, kit).ok, false);
   assert.equal(prepareKitAssetRegenerationFromRecords({ ...row, assetSubtype: "unsupported" }, kit).ok, false);

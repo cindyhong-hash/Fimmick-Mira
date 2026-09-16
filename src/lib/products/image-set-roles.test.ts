@@ -32,7 +32,7 @@ test("new batches plan a composable ad-asset pack instead of five product photog
   assert.deepEqual(roles.map((role) => role.label), ["商品主體", "質地細節", "情境背景", "賣點視覺", "裝飾元素"]);
   assert.equal(roles[0].path, "cutout");
   assert.equal(roles[0].cutout, true);
-  assert.equal(roles[1].path, "text");
+  assert.equal(roles[1].path, "edit");
   assert.equal(roles[2].path, "text");
   assert.equal(roles[3].path, "text");
   assert.match(roles[1].sceneCn, /質地|液體|泡沫/);
@@ -44,6 +44,20 @@ test("new batches plan a composable ad-asset pack instead of five product photog
   assert.match(roles[3].mustNotShow.join("\n"), /產品|Logo/);
   assert.match(roles[4].sceneCn, /銀藍曲線/);
   assert.match(roles[4].mustNotShow.join("\n"), /完整場景/);
+});
+
+test("physical product details use references while formula textures remain product-free", () => {
+  const deviceDetail = planImageSetRoles(beautyDeviceProfile).find(({ role }) => role === "detail");
+  const skincareDetail = planImageSetRoles({
+    ...beautyDeviceProfile,
+    productArchetype: "skincare",
+    productType: "保濕凝露",
+  }).find(({ role }) => role === "detail");
+
+  assert.equal(deviceDetail?.assetSubtype, "material-detail");
+  assert.equal(deviceDetail?.path, "edit");
+  assert.equal(skincareDetail?.assetSubtype, "formula-texture");
+  assert.equal(skincareDetail?.path, "text");
 });
 
 test("sparse archetype profiles keep ad-asset copy generic without inventing product facts", () => {

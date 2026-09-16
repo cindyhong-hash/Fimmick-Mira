@@ -1433,6 +1433,16 @@ function isValidSavedRoleSpec(role: unknown): role is ImageSetRoleSpec {
   );
 }
 
+function normalizeRetryRoleSpec(role: ImageSetRoleSpec): ImageSetRoleSpec {
+  const saved = role as ImageSetRoleSpec & { assetSubtype?: string };
+  if (saved.role !== "detail" || saved.assetSubtype === "formula-texture" || saved.path !== "text") return role;
+  return {
+    ...saved,
+    path: "edit",
+    mustNotShow: saved.mustNotShow.filter((item) => item !== "Logo" && item !== "文字"),
+  };
+}
+
 export function prepareImageSetRegenerationFromRow(row: ImageSetRegenerationRow): ImageSetRegenerationPreparation {
   const params = parseImageSetParams(row.paramsJson);
   if (!params) return { ok: false, status: 400, error: "這不是可重新產生的商品套圖素材" };
@@ -1470,7 +1480,7 @@ export function prepareImageSetRegenerationFromRow(row: ImageSetRegenerationRow)
         profile,
         artDirection: params.artDirection,
         product,
-        rows: [{ id: row.id, role: params.roleSpec }],
+        rows: [{ id: row.id, role: normalizeRetryRoleSpec(params.roleSpec) }],
       },
     },
   };

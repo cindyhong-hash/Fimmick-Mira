@@ -97,11 +97,11 @@ function detailSpec(profile: ProductVisualProfile, context: string): ImageSetRol
     : hasAppearanceEvidence && profile.productArchetype === "food_beverage" ? "食品或飲品本身可見的表面質地"
       : "商品材質與表面質地細節";
   return {
-    role: "detail", label: "質地細節", usageDescription: `呈現${detail}`, path: "text", cutout: false,
+    role: "detail", label: "質地細節", usageDescription: `呈現${detail}`, path: "edit", cutout: false,
     sceneCn: `真實攝影微距的${detail}；只依已提供的外觀資料呈現，不加入不存在的材料或功能；${context}`,
     objective: `Create a real photographic macro study of the supplied ${detail}. Do not invent materials, ingredients, controls, or functions.`,
     composition: "Photographic macro close-up with authentic surface detail, natural highlights, and shallow depth of field.",
-    mustNotShow: ["抽象功效意象", "完整商品", "Logo", "文字", "未提供的材料、成分或功能"],
+    mustNotShow: ["抽象功效意象", "完整商品", "未提供的材料、成分或功能"],
     subtype: hasAppearanceEvidence && profile.productArchetype === "fashion" ? "fabric-detail" : "material-detail",
     purpose: `呈現已提供資訊支持的${detail}`,
   };

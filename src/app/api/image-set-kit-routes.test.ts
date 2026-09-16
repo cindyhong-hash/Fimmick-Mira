@@ -36,6 +36,16 @@ test("kit reader scopes metadata and assets to the requested product and batch",
   assert.match(source, /normalizeImageSetKitAssets/);
 });
 
+test("kit history lists only confirmed sets owned by the requested client and product", async () => {
+  const source = await readFile(new URL("./products/[productId]/image-sets/route.ts", import.meta.url), "utf8");
+
+  assert.match(source, /productImageSet\.findMany/);
+  assert.match(source, /productId, confirmedAt: \{ not: null \}, product: \{ clientId \}/);
+  assert.match(source, /orderBy: \{ createdAt: "desc" \}/);
+  assert.match(source, /libraryImage\.findMany/);
+  assert.match(source, /buildVisualAssetKitHistory/);
+});
+
 test("kit retry rejects metadata changes and rebuilds from the persisted kit snapshot", async () => {
   const source = await readFile(new URL("./products/[productId]/image-set/[batchId]/assets/[assetId]/retry/route.ts", import.meta.url), "utf8");
 

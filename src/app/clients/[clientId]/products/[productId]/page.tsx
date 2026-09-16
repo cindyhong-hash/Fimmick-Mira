@@ -1,12 +1,21 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Sparkles, Trash2, Loader2, ImageOff, RefreshCw, PenLine } from "lucide-react";
+import { ArrowLeft, Sparkles, Trash2, Loader2, ImageOff, RefreshCw, PenLine, Layers3, ChevronRight } from "lucide-react";
 import { ASSET_ROLE_LABELS, CORE_SET_ROLES as CORE_ROLES, imageSetCompleteness, type Product } from "@/lib/productMeta";
 import { ImageSetModal } from "@/components/products/ImageSetModal";
 import { ACTIVITY_HANDOFF_KEY } from "@/components/activities/RolePickerModal";
 import { AdLayoutModal } from "@/components/adcreation/AdLayoutModal";
 import { useAdLayoutEnabled } from "@/lib/feature-flags";
+import type { VisualAssetKitHistoryItem } from "@/lib/products/visual-asset-board";
+
+const KIT_STATUS_LABELS: Record<string, string> = {
+  CONFIRMED: "準備中",
+  GENERATING: "生成中",
+  COMPLETE: "已完成",
+  PARTIAL: "部分完成",
+  FAILED: "生成失敗",
+};
 
 export default function ProductDetailPage({
   params,
@@ -24,19 +33,29 @@ export default function ProductDetailPage({
   const [showAdLayout, setShowAdLayout] = useState(false);
   // 旗標關著時點按鈕不開排版流程，改顯示「籌備中」說明。
   const [showAdLayoutSoon, setShowAdLayoutSoon] = useState(false);
+  const [kits, setKits] = useState<VisualAssetKitHistoryItem[]>([]);
   const adLayoutOn = useAdLayoutEnabled();
 
   useEffect(() => {
     params.then(({ clientId, productId }) => { setClientId(clientId); setProductId(productId); });
   }, [params]);
 
-  const load = useCallback(() => {
-    if (!productId) return;
-    fetch(`/api/products/${productId}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => setProduct(data))
-      .finally(() => setLoading(false));
-  }, [productId]);
+  const load = useCallback(async () => {
+    if (!productId || !clientId) return;
+    try {
+      const [productResponse, kitsResponse] = await Promise.all([
+        fetch(`/api/products/${productId}`),
+        fetch(`/api/products/${productId}/image-sets?clientId=${encodeURIComponent(clientId)}`),
+      ]);
+      setProduct(productResponse.ok ? await productResponse.json() : null);
+      const kitPayload = kitsResponse.ok
+        ? await kitsResponse.json() as { kits?: VisualAssetKitHistoryItem[] }
+        : { kits: [] };
+      setKits(kitPayload.kits ?? []);
+    } finally {
+      setLoading(false);
+    }
+  }, [clientId, productId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -219,9 +238,65 @@ export default function ProductDetailPage({
         </div>
       </div>
 
-      {/* 資產分區 */}
+      {/* 視覺套組歷史：每次生成獨立成組，避免不同批次按角色混在一起。 */}
+      <section className="mt-6">
+        <div className="mb-3 flex items-end justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-bold text-gray-900">產品視覺套組</h2>
+            <p className="mt-1 text-xs text-gray-400">每次生成都會保留成一組，可隨時回來查看與管理。</p>
+          </div>
+          <span className="text-xs text-gray-400">{kits.length} 組</span>
+        </div>
+        {kits.length === 0 ? (
+          <div className="rounded-2xl border-[1.5px] border-dashed border-[#ebeff5] bg-white py-10 text-center text-sm text-gray-400">
+            還沒有已生成的視覺套組
+          </div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {kits.map((kit) => (
+              <button
+                key={kit.id}
+                type="button"
+                onClick={() => router.push(`/clients/${clientId}/products/${productId}/image-sets/${kit.id}`)}
+                className="group overflow-hidden rounded-2xl border border-[#e5e9f0] bg-white text-left shadow-sm transition hover:border-violet-200 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+              >
+                <div className="grid aspect-[2/1] grid-cols-2 gap-px bg-gray-100">
+                  {Array.from({ length: 4 }, (_, index) => {
+                    const url = kit.previewUrls[index];
+                    return <div key={index} className="flex items-center justify-center overflow-hidden bg-gray-50">
+                      {url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={url} alt="" className="h-full w-full object-contain" />
+                      ) : <Layers3 className="h-5 w-5 text-gray-200" />}
+                    </div>;
+                  })}
+                </div>
+                <div className="flex items-center justify-between gap-3 p-4">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="truncate text-sm font-bold text-gray-900">{kit.theme?.label ?? "常態品牌素材"}</h3>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${kit.status === "COMPLETE" ? "bg-emerald-50 text-emerald-700" : kit.status === "FAILED" ? "bg-red-50 text-red-700" : "bg-violet-50 text-violet-700"}`}>
+                        {KIT_STATUS_LABELS[kit.status] ?? kit.status}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-gray-400">
+                      {new Intl.DateTimeFormat("zh-TW", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(kit.createdAt))}
+                      {` · ${kit.counts.done}/${kit.counts.total} 張完成`}
+                      {kit.counts.failed > 0 ? ` · ${kit.counts.failed} 張失敗` : ""}
+                    </p>
+                  </div>
+                  <ChevronRight className="h-5 w-5 shrink-0 text-gray-300 transition group-hover:translate-x-0.5 group-hover:text-violet-500" />
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* 所有資產分區 */}
       <div className="mt-6">
-        <h2 className="text-sm font-bold text-gray-900 mb-3">產品素材</h2>
+        <h2 className="text-sm font-bold text-gray-900 mb-1">所有產品素材</h2>
+        <p className="mb-3 text-xs text-gray-400">依用途彙整所有套組的素材；要管理特定一組，請從上方進入。</p>
         {assets.length === 0 ? (
           <div className="rounded-2xl border-[1.5px] border-dashed border-[#ebeff5] bg-white py-12 text-center text-sm text-gray-400">
             還沒有素材，用上方「AI 建立商品套圖」生成一組可疊積木

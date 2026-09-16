@@ -73,6 +73,16 @@ export default function LogoPlacerModal({
   const [composing, setComposing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [imgRatio, setImgRatio] = useState(1); // 底圖寬高比，讓畫布容器精確匹配圖片（消除留白座標錯位）
+
+  /* 只靠 <img onLoad> 會漏掉「圖片已在快取、mount 時就 complete」的情況——
+     那時 load 事件早就過去了，onLoad 永遠不會觸發，imgRatio 停在 1，
+     畫布變成正方形把橫圖上下留白置中，拖曳座標就跟合成結果對不上。
+     用 ref callback 在掛載當下補讀一次 naturalWidth。 */
+  const measureImg = useCallback((im: HTMLImageElement | null) => {
+    if (im?.complete && im.naturalWidth && im.naturalHeight) {
+      setImgRatio(im.naturalWidth / im.naturalHeight);
+    }
+  }, []);
   const uploadRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
 
@@ -229,6 +239,7 @@ export default function LogoPlacerModal({
             <img
               src={imageUrl}
               alt=""
+              ref={measureImg}
               onLoad={(e) => {
                 const im = e.currentTarget;
                 if (im.naturalWidth && im.naturalHeight) setImgRatio(im.naturalWidth / im.naturalHeight);

@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertCircle, ArrowLeft, Check, Download, Loader2, RefreshCw, Trash2 } from "lucide-react";
+import { AlertCircle, ArrowLeft, Check, Download, Loader2, RefreshCw, Sparkles, Trash2 } from "lucide-react";
+import { AdLayoutModal } from "@/components/adcreation/AdLayoutModal";
+import { useAdLayoutEnabled } from "@/lib/feature-flags";
 import type { ImageSetArtDirection } from "@/lib/products/product-visual-analysis";
 import type { ImageSetCategory, ImageSetPlanItem } from "@/lib/products/image-set-kit";
 import { buildAssetKitSelection, groupVisualAssetBoardAssets, visualAssetBoardCounts } from "@/lib/products/visual-asset-board";
@@ -44,10 +46,12 @@ export function VisualAssetBoard({ clientId, productId, batchId, productName }: 
   productName: string;
 }) {
   const router = useRouter();
+  const adLayoutEnabled = useAdLayoutEnabled();
   const [data, setData] = useState<BoardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [showAdLayout, setShowAdLayout] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -113,7 +117,7 @@ export function VisualAssetBoard({ clientId, productId, batchId, productName }: 
     <button type="button" onClick={() => router.push(`/clients/${clientId}/products/${productId}`)} className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-900"><ArrowLeft className="h-4 w-4" />返回產品</button>
     <header className="mt-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div><p className="text-xs font-bold uppercase tracking-[0.14em] text-violet-600">Visual Asset Kit</p><h1 className="mt-1 text-2xl font-bold text-gray-950 sm:text-3xl">{productName} 視覺套組</h1><p className="mt-2 text-sm text-gray-500">{data?.theme?.label ?? "常態品牌素材"} · {counts.done}/{counts.total} 張完成</p></div>
-      <div className="flex flex-wrap gap-2 text-xs font-bold"><span className="rounded-full bg-emerald-50 px-3 py-1.5 text-emerald-700">完成 {counts.done}</span>{counts.active > 0 && <span className="rounded-full bg-violet-50 px-3 py-1.5 text-violet-700">處理中 {counts.active}</span>}{counts.failed > 0 && <span className="rounded-full bg-red-50 px-3 py-1.5 text-red-700">失敗 {counts.failed}</span>}</div>
+      <div className="flex flex-wrap items-center gap-2 text-xs font-bold"><span className="rounded-full bg-emerald-50 px-3 py-1.5 text-emerald-700">完成 {counts.done}</span>{counts.active > 0 && <span className="rounded-full bg-violet-50 px-3 py-1.5 text-violet-700">處理中 {counts.active}</span>}{counts.failed > 0 && <span className="rounded-full bg-red-50 px-3 py-1.5 text-red-700">失敗 {counts.failed}</span>}{adLayoutEnabled && selection.assetIds.length > 0 && <button type="button" onClick={() => setShowAdLayout(true)} className="inline-flex items-center gap-1.5 rounded-full bg-violet-600 px-4 py-2 text-white hover:bg-violet-700"><Sparkles className="h-3.5 w-3.5" />AI 幫我排版</button>}</div>
     </header>
     {error && <div role="alert" className="mt-5 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
@@ -139,5 +143,6 @@ export function VisualAssetBoard({ clientId, productId, batchId, productName }: 
         </div>
       </article>)}</div></section>;
     })}</div>
+    {showAdLayout && <AdLayoutModal clientId={clientId} productId={productId} productName={productName} assetKit={{ batchId, assetIds: selection.assetIds }} onClose={() => setShowAdLayout(false)} />}
   </div>;
 }

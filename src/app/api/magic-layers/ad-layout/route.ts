@@ -2,7 +2,7 @@ import { parseBenefits } from "@/lib/magic-layers/ad-layout-graphics.ts";
 /* ============================================================
    POST /api/magic-layers/ad-layout
    AI 幫我排版：用商品素材包 + 用途，組成一張「~80% 完成」的可編輯設計稿（真 LayerData[]）。
-   Body: { clientId, productId, purpose?, ratio?, title?, subtitle? }
+   Body: { clientId, productId, purpose?, ratio?, title?, subtitle?, assetKit? }
    Returns: { options: AdLayoutOption[], canvasWidth, canvasHeight } | { error }
    ============================================================ */
 import { NextResponse } from "next/server";
@@ -36,6 +36,24 @@ export async function POST(request: Request) {
     const clientId = String(body.clientId ?? "");
     const productId = String(body.productId ?? "");
     if (!clientId || !productId) return NextResponse.json({ error: "clientId and productId required" }, { status: 400 });
+    let assetKit: { productId: string; batchId: string; assetIds?: string[] } | null = null;
+    if (body.assetKit !== undefined) {
+      if (!body.assetKit || typeof body.assetKit !== "object" || Array.isArray(body.assetKit)) {
+        return NextResponse.json({ error: "assetKit 格式不正確" }, { status: 400 });
+      }
+      const candidate = body.assetKit as Record<string, unknown>;
+      if (candidate.productId !== productId || typeof candidate.batchId !== "string" || !candidate.batchId.trim()) {
+        return NextResponse.json({ error: "assetKit 與目前產品不一致" }, { status: 400 });
+      }
+      if (candidate.assetIds !== undefined && (!Array.isArray(candidate.assetIds) || !candidate.assetIds.every((id) => typeof id === "string"))) {
+        return NextResponse.json({ error: "assetKit.assetIds 格式不正確" }, { status: 400 });
+      }
+      assetKit = {
+        productId,
+        batchId: candidate.batchId,
+        ...(Array.isArray(candidate.assetIds) ? { assetIds: [...new Set(candidate.assetIds as string[])] } : {}),
+      };
+    }
 
     const purpose = (["product", "benefit", "scene", "promo"].includes(body.purpose) ? body.purpose : "product") as NonNullable<AdLayoutInput["purpose"]>;
     let benefits;
@@ -43,14 +61,21 @@ export async function POST(request: Request) {
     const ratio = typeof body.ratio === "string" && RATIO_SIZE[body.ratio] ? body.ratio : "4:5";
     const [W, H] = RATIO_SIZE[ratio];
 
+    const assetScope = assetKit
+      ? { status: "DONE", batchId: assetKit.batchId, ...(assetKit.assetIds ? { id: { in: assetKit.assetIds } } : {}) }
+      : { status: "DONE" };
     const product = await db.product.findUnique({
       where: { id: productId },
       select: {
         id: true, clientId: true, name: true, description: true, category: true, visualProfileJson: true, heroImageUrl: true, primaryColorOverride: true,
-        assets: { where: { status: "DONE" }, orderBy: { createdAt: "desc" }, select: { assetRole: true, imageUrl: true } },
+        assets: { where: assetScope, orderBy: { createdAt: "desc" }, select: { id: true, assetRole: true, imageUrl: true } },
       },
     });
     if (!product || product.clientId !== clientId) return NextResponse.json({ error: "Product not found" }, { status: 404 });
+    if (assetKit) {
+      const kit = await db.productImageSet.findFirst({ where: { id: assetKit.batchId, productId } });
+      if (!kit) return NextResponse.json({ error: "找不到這項產品的視覺套組" }, { status: 404 });
+    }
     const client = await db.client.findUnique({
       where: { id: clientId },
       select: { name: true, description: true, industry: true, logoUrls: true, primaryColor: true, secondaryColor: true, toneLabels: true, paletteColors: true, fonts: true, pastPostImageUrls: true },

@@ -39,9 +39,9 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex w-[220px] shrink-0 flex-col border-r border-gray-200 bg-white p-4">
+    <aside className="flex w-16 shrink-0 flex-col items-center border-r border-gray-200 bg-white p-4 sm:w-[220px] sm:items-stretch">
       <div className="mb-6 flex items-center justify-between px-1">
-        <span className="text-lg font-bold text-gray-900">Content</span>
+        <span className="hidden text-lg font-bold text-gray-900 sm:block">Content</span>
         <button
           type="button"
           onClick={toggleCollapsed}
@@ -53,11 +53,15 @@ export function Sidebar() {
       </div>
       {clientId && (
         <>
-          <div className="mb-4"><BrandSwitcher currentClientId={clientId} /></div>
-          <SidebarNav currentClientId={clientId} />
+          <div className="hidden sm:block">
+            <div className="mb-4"><BrandSwitcher currentClientId={clientId} /></div>
+            <SidebarNav currentClientId={clientId} />
+          </div>
+          <div className="sm:hidden"><SidebarNav currentClientId={clientId} collapsed /></div>
         </>
       )}
-      <div className="mt-auto"><SidebarUser /></div>
+      <div className="mt-auto hidden sm:block"><SidebarUser /></div>
+      <div className="mt-auto sm:hidden"><SidebarUser collapsed /></div>
     </aside>
   );
 }

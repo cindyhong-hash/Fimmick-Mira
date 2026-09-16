@@ -1,3 +1,6 @@
+import type { ImageSetArtDirection } from "./product-visual-analysis.ts";
+import { IMAGE_SET_MAX_ASSETS, type ImageSetPlanItem } from "./image-set-kit.ts";
+
 export type ImageSetUiPhase = "analyzing" | "pick" | "generating" | "done";
 
 export type ImageSetUiRoleStatus = "PENDING" | "GENERATING" | "DONE" | "FAILED";
@@ -21,6 +24,59 @@ export type ImageSetResumeRow = SavedImageSetBatch["items"][number] & {
 };
 
 export type ImageSetStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+export type ImageSetPlanSelection = ImageSetPlanItem & { checked: boolean };
+
+export function initializeImageSetPlanSelection(items: ImageSetPlanItem[]): ImageSetPlanSelection[] {
+  return items.map((item) => ({ ...item, checked: item.core && item.defaultSelected }));
+}
+
+export function toggleImageSetPlanItem(
+  items: ImageSetPlanSelection[],
+  itemId: string,
+  maxAssets = IMAGE_SET_MAX_ASSETS,
+): ImageSetPlanSelection[] {
+  const target = items.find(({ id }) => id === itemId);
+  if (!target) return items;
+  const selectedCount = items.filter(({ checked }) => checked).length;
+  if (!target.checked && selectedCount >= maxAssets) return items;
+  return items.map((item) => item.id === itemId ? { ...item, checked: !item.checked } : item);
+}
+
+export function buildImageSetConfirmationPayload(input: {
+  batchId: string;
+  items: ImageSetPlanSelection[];
+  artDirection: ImageSetArtDirection;
+  maxAssets?: number;
+}): { ok: true; payload: { batchId: string; selectedItemIds: string[]; artDirection: ImageSetArtDirection } }
+  | { ok: false; error: string } {
+  const selectedItemIds = input.items.filter(({ checked }) => checked).map(({ id }) => id);
+  if (!selectedItemIds.length) return { ok: false, error: "至少要選擇一項素材" };
+  if (selectedItemIds.length > (input.maxAssets ?? IMAGE_SET_MAX_ASSETS)) {
+    return { ok: false, error: `單批最多只能生成 ${input.maxAssets ?? IMAGE_SET_MAX_ASSETS} 項素材` };
+  }
+  return { ok: true, payload: { batchId: input.batchId, selectedItemIds, artDirection: input.artDirection } };
+}
+
+export function imageSetTerminalSummary(items: Array<Pick<ImageSetUiRole, "status">>): {
+  status: "COMPLETE" | "PARTIAL" | "FAILED";
+  completed: number;
+  failed: number;
+  canViewKit: boolean;
+} {
+  const completed = items.filter(({ status }) => status === "DONE").length;
+  const failed = items.filter(({ status }) => status === "FAILED").length;
+  return {
+    status: completed === items.length && items.length > 0 ? "COMPLETE" : completed > 0 ? "PARTIAL" : "FAILED",
+    completed,
+    failed,
+    canViewKit: completed > 0,
+  };
+}
+
+export function imageSetOpeningAction(saved: SavedImageSetBatch | null): "resume" | "load-product" {
+  return saved ? "resume" : "load-product";
+}
 
 const savedBatchKey = (productId: string) => `product-image-set:${productId}:latest-batch`;
 

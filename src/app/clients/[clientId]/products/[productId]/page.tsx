@@ -247,6 +247,7 @@ export default function ProductDetailPage({
 
       {showSet && (
         <ImageSetModal
+          clientId={clientId}
           productId={productId}
           onClose={() => setShowSet(false)}
           onFinished={load}

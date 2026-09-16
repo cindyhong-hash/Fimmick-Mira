@@ -1,9 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { IMAGE_SET_MAX_ASSETS } from "@/lib/products/image-set-kit";
+import { imageSetThemeCatalog } from "@/lib/products/image-set-roles";
 import { planProductImageSet } from "@/lib/products/image-set-orchestrator";
 
 export const dynamic = "force-dynamic";
+
+export function GET() {
+  return NextResponse.json({ themes: imageSetThemeCatalog(), maxAssets: IMAGE_SET_MAX_ASSETS });
+}
 
 export async function POST(request: Request, { params }: { params: Promise<{ productId: string }> }) {
   const { productId } = await params;

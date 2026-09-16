@@ -5,8 +5,11 @@ import {
   dialogFocusTargetIndex,
   imageSetBatchProgress,
   imageSetGenerationAnnouncement,
+  imageSetOpeningAction,
   imageSetProgressLabel,
   imageSetRecoveryAction,
+  imageSetTerminalSummary,
+  initializeImageSetPlanSelection,
   isCompleteImageSetResume,
   isImageSetBatchSettled,
   mergeImageSetPollResult,
@@ -15,8 +18,52 @@ import {
   shouldAnalyzeBeforeImageSetPicker,
   shouldNotifySettledBatch,
   shouldRenderDeterminateImageSetProgress,
+  toggleImageSetPlanItem,
+  buildImageSetConfirmationPayload,
   writeSavedImageSetBatch,
 } from "./image-set-ui.ts";
+
+const planItems = Array.from({ length: 8 }, (_, index) => ({
+  id: `asset-${index}`,
+  category: index === 0 ? "product" as const : "decoration" as const,
+  assetRole: index === 0 ? "hero" as const : "decoration" as const,
+  assetSubtype: `subtype-${index}`,
+  purpose: `purpose-${index}`,
+  core: index < 5,
+  defaultSelected: index < 5,
+}));
+
+test("kit review defaults to the five core assets and keeps optional items unselected", () => {
+  const selection = initializeImageSetPlanSelection(planItems);
+  assert.equal(selection.filter(({ checked }) => checked).length, 5);
+  assert.ok(selection.slice(0, 5).every(({ checked }) => checked));
+  assert.ok(selection.slice(5).every(({ checked }) => !checked));
+  assert.equal(toggleImageSetPlanItem(selection, "asset-5").filter(({ checked }) => checked).length, 6);
+});
+
+test("kit confirmation enforces the selection limit and builds the exact paid payload", () => {
+  const selected = initializeImageSetPlanSelection(planItems);
+  const direction = {
+    concept: "同一檔期", palette: { dominant: ["白"], accent: [] }, lighting: "柔光", materials: [],
+    backgroundLanguage: "留白", cameraLanguage: "正面", consistencyRules: ["一致"], mood: [], decorationStyle: [],
+  };
+  const valid = buildImageSetConfirmationPayload({ batchId: "batch-1", items: selected, artDirection: direction });
+  assert.deepEqual(valid, {
+    ok: true,
+    payload: { batchId: "batch-1", selectedItemIds: planItems.slice(0, 5).map(({ id }) => id), artDirection: direction },
+  });
+  assert.equal(buildImageSetConfirmationPayload({ batchId: "batch-1", items: selected, artDirection: direction, maxAssets: 4 }).ok, false);
+  assert.equal(buildImageSetConfirmationPayload({ batchId: "batch-1", items: selected.map((item) => ({ ...item, checked: false })), artDirection: direction }).ok, false);
+});
+
+test("terminal kit summaries keep partial results viewable and reopening resumes without planning", () => {
+  assert.deepEqual(imageSetTerminalSummary([{ status: "DONE" }, { status: "FAILED" }]), {
+    status: "PARTIAL", completed: 1, failed: 1, canViewKit: true,
+  });
+  assert.equal(imageSetTerminalSummary([{ status: "FAILED" }]).canViewKit, false);
+  assert.equal(imageSetOpeningAction({ batchId: "batch-1", items: [{ id: "row-1", role: "hero", label: "主體" }] }), "resume");
+  assert.equal(imageSetOpeningAction(null), "load-product");
+});
 
 test("reports analysis and batch progress in Traditional Chinese", () => {
   assert.equal(

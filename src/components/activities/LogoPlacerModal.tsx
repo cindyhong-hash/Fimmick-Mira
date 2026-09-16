@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { X, Upload, Loader2, Check, Trash2, Stamp } from "lucide-react";
+import { X, Upload, Loader2, Check, Stamp } from "lucide-react";
 
 export type LogoVersion = { url: string; label: string };
 

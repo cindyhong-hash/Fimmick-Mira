@@ -219,7 +219,11 @@ export default function LogoPlacerModal({
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             className="relative mx-auto rounded-lg border bg-gray-50 overflow-hidden select-none touch-none"
-            style={{ aspectRatio: String(imgRatio), maxHeight: 420, height: 420, width: 420 * imgRatio }}
+            /* 高度不可寫死：寫死 420 再用比例反推寬度，16:9 會算出 747px，
+               超過 modal（max-w-2xl 扣內距約 632px）而被 overflow-hidden 切掉右邊。
+               改成寬度優先吃滿容器、上限才是 420*ratio，高度交給 aspect-ratio 推導：
+               橫圖縮到裝得下（16:9 → 632x355），直圖仍維持 420 高。 */
+            style={{ aspectRatio: String(imgRatio), width: "100%", maxWidth: 420 * imgRatio, maxHeight: 420 }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img

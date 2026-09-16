@@ -184,7 +184,7 @@ export default function ActivityPage({ params }: { params: Promise<{ clientId: s
         <div className="text-3xl">⚠️</div>
         <div className="font-medium text-gray-700">生成失敗</div>
         <div className="text-sm text-gray-400 text-center max-w-sm">
-          AI 圖片生成失敗（可能係 API 額度／逾時／網路問題）。<br />
+          AI 圖片生成失敗（可能是 API 額度／逾時／網路問題）。<br />
           文案仍可重試。
         </div>
         <Link href={editHref}>

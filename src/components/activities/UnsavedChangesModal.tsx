@@ -37,7 +37,7 @@ export function UnsavedChangesModal({ open, saving, onCancel, onLeaveWithoutSavi
           </Button>
           <Button onClick={onCancel} disabled={saving} variant="ghost"
             className="w-full text-gray-500 hover:bg-gray-50">
-            取消，留喺呢頁
+            取消，留在這頁
           </Button>
         </div>
       </div>

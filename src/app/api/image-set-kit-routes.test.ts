@@ -26,3 +26,23 @@ test("paid image-set generation consumes and confirms a persisted DRAFT", async 
   assert.match(source, /planJson: data\.planJson/);
   assert.doesNotMatch(source, /selectedRoles|requestSourceHash/);
 });
+
+test("kit reader scopes metadata and assets to the requested product and batch", async () => {
+  const source = await readFile(new URL("./products/[productId]/image-set/[batchId]/route.ts", import.meta.url), "utf8");
+
+  assert.match(source, /productImageSet\.findFirst\(\{ where: \{ id: batchId, productId \} \}\)/);
+  assert.match(source, /libraryImage\.findMany/);
+  assert.match(source, /where: \{ productId, batchId \}/);
+  assert.match(source, /normalizeImageSetKitAssets/);
+});
+
+test("kit retry rejects metadata changes and rebuilds from the persisted kit snapshot", async () => {
+  const source = await readFile(new URL("./products/[productId]/image-set/[batchId]/assets/[assetId]/retry/route.ts", import.meta.url), "utf8");
+
+  assert.match(source, /protectPaidRoute/);
+  assert.match(source, /where: \{ id: assetId, productId, batchId \}/);
+  assert.match(source, /prepareKitAssetRegenerationFromRecords\(target, kit\)/);
+  assert.match(source, /body\.assetRole !== target\.assetRole/);
+  assert.match(source, /body\.assetSubtype !== target\.assetSubtype/);
+  assert.doesNotMatch(source, /analyzeProductVisualProfile|buildImageSetArtDirection/);
+});

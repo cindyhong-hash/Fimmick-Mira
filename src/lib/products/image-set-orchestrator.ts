@@ -1384,8 +1384,18 @@ export type ImageSetRegenerationPreparation =
 export type ImageSetRegenerationRow = {
   id: string;
   batchId: string | null;
+  productId?: string | null;
+  assetRole?: string | null;
+  assetSubtype?: string | null;
   paramsJson: string;
   product: StoredImageSetProduct | null;
+};
+
+export type ProductImageSetRetrySnapshot = {
+  id: string;
+  productId: string;
+  artDirectionJson: string;
+  planJson: string;
 };
 
 function parseRawImageUrls(raw: string): string[] {
@@ -1461,6 +1471,50 @@ export function prepareImageSetRegenerationFromRow(row: ImageSetRegenerationRow)
         artDirection: params.artDirection,
         product,
         rows: [{ id: row.id, role: params.roleSpec }],
+      },
+    },
+  };
+}
+
+/** Reuses one persisted kit direction and rejects rows whose role metadata no longer matches its confirmed plan. */
+export function prepareKitAssetRegenerationFromRecords(
+  row: ImageSetRegenerationRow,
+  kit: ProductImageSetRetrySnapshot,
+): ImageSetRegenerationPreparation {
+  if (
+    row.batchId !== kit.id
+    || row.productId !== kit.productId
+    || row.product?.id !== kit.productId
+  ) return { ok: false, status: 404, error: "找不到這份套圖中的素材" };
+
+  let plan: ImageSetPlanItem[];
+  let kitDirection: ImageSetArtDirection | null = null;
+  try {
+    plan = parseImageSetPlanJson(kit.planJson);
+    kitDirection = parseImageSetArtDirection(JSON.parse(kit.artDirectionJson));
+  } catch {
+    return { ok: false, status: 409, error: "套圖方向或角色資料已失效，請重新建立套圖。" };
+  }
+  if (!kitDirection) return { ok: false, status: 409, error: "套圖方向或角色資料已失效，請重新建立套圖。" };
+  const planned = plan.find((item) => item.assetRole === row.assetRole && item.assetSubtype === row.assetSubtype);
+  if (!planned) return { ok: false, status: 400, error: "這張素材的角色或變化不在已確認的套圖清單中" };
+
+  const prepared = prepareImageSetRegenerationFromRow(row);
+  if (!prepared.ok) return prepared;
+  const savedRole = prepared.value.input.rows[0]?.role as ImageSetRoleSpec & { assetRole?: string; assetSubtype?: string };
+  if (
+    savedRole.role !== planned.assetRole
+    || savedRole.assetSubtype !== planned.assetSubtype
+  ) return { ok: false, status: 400, error: "這張素材的角色或變化資料不一致" };
+
+  return {
+    ok: true,
+    value: {
+      ...prepared.value,
+      input: {
+        ...prepared.value.input,
+        batchId: kit.id,
+        artDirection: kitDirection,
       },
     },
   };

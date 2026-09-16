@@ -3,11 +3,27 @@ import test from "node:test";
 import {
   IMAGE_SET_MAX_ASSETS,
   deriveImageSetKitStatus,
+  normalizeImageSetKitAssets,
   parseImageSetPlanJson,
   toImageSetCategory,
   toStoredAssetRole,
   type ImageSetPlanItem,
 } from "./image-set-kit.ts";
+
+test("kit assets are normalized only from the requested product and batch", () => {
+  const base = {
+    assetRole: "detail", assetSubtype: "macro", status: "DONE", imageUrl: "/detail.png",
+    errorMessage: null, hasTransparentBackground: false,
+  };
+  const assets = normalizeImageSetKitAssets("product-a", "batch-a", [
+    { ...base, id: "kept", productId: "product-a", batchId: "batch-a" },
+    { ...base, id: "other-batch", productId: "product-a", batchId: "batch-b" },
+    { ...base, id: "other-product", productId: "product-b", batchId: "batch-a" },
+  ]);
+  assert.deepEqual(assets.map(({ id, category, status }) => ({ id, category, status })), [
+    { id: "kept", category: "texture", status: "DONE" },
+  ]);
+});
 
 const item = (overrides: Partial<ImageSetPlanItem> = {}): ImageSetPlanItem => ({
   id: "hero-clean",

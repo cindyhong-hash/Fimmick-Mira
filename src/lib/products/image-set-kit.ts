@@ -14,6 +14,31 @@ export type ImageSetPlanItem = {
 
 export const IMAGE_SET_MAX_ASSETS = 20;
 
+export type ImageSetKitAssetRecord = {
+  id: string;
+  productId: string | null;
+  batchId: string | null;
+  assetRole: string | null;
+  assetSubtype: string | null;
+  status: string;
+  imageUrl: string;
+  subject?: string | null;
+  prompt?: string;
+  errorMessage: string | null;
+  hasTransparentBackground: boolean | null;
+  createdAt?: Date | string;
+};
+
+export function normalizeImageSetKitAssets(
+  productId: string,
+  batchId: string,
+  assets: ImageSetKitAssetRecord[],
+) {
+  return assets
+    .filter((asset) => asset.productId === productId && asset.batchId === batchId)
+    .map((asset) => ({ ...asset, category: asset.assetRole ? toImageSetCategory(asset.assetRole) : null }));
+}
+
 export function deriveImageSetKitStatus(
   statuses: Array<"PENDING" | "GENERATING" | "DONE" | "FAILED">,
 ): Exclude<ImageSetKitStatus, "DRAFT" | "CONFIRMED"> {

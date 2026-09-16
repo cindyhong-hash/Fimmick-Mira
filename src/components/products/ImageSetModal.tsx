@@ -412,7 +412,7 @@ export function ImageSetModal({ clientId, productId, onClose, onFinished }: {
     setError(null);
     setPollingTimedOut(false);
     try {
-      const response = await fetch(`/api/library/images/${item.id}/regenerate`, { method: "POST" });
+      const response = await fetch(`/api/products/${productId}/image-set/${draftBatchId}/assets/${item.id}/retry`, { method: "POST" });
       const data = await response.json().catch(() => ({})) as { error?: string };
       if (!response.ok) throw new Error(data.error || `${item.label}目前無法重新產生`);
       setGen((current) => current.map((row) => row.id === item.id ? { ...row, status: "GENERATING", errorMessage: null } : row));

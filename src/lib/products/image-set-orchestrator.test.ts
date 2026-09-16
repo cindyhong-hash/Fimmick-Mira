@@ -11,6 +11,7 @@ import {
   createImageSetExecution,
   prepareImageSetRegenerationFromRow,
   planProductImageSet,
+  prepareKitAssetRegenerationFromRecords,
   reconcileImageSetCleanupJobs,
   reconcileStaleImageSetWork,
   requestImageSetAnalysis,
@@ -1400,6 +1401,47 @@ test("stale retry returns 409 Traditional Chinese guidance and mutates no row", 
   assert.match(response.error, /請先重新分析產品/);
   assert.equal(updates, 0);
   assert.equal(schedules, 0);
+});
+
+test("kit retry keeps the persisted art direction and rejects cross-batch or changed subtype rows", () => {
+  const product = storedProduct();
+  const sourceHash = computeProductVisualSourceHash({ ...product, rawImageUrls: JSON.parse(product.rawImageUrls) });
+  product.visualProfileSourceHash = sourceHash;
+  const planned = planImageSetRoles({ profile, artDirection });
+  const role = planned[1];
+  const row = {
+    id: "row-detail",
+    productId: product.id,
+    batchId: "batch-kit",
+    assetRole: role.assetRole,
+    assetSubtype: role.assetSubtype,
+    paramsJson: JSON.stringify({
+      imageSet: true,
+      profileVersion: 1,
+      sourceHash,
+      artDirection: { ...artDirection, concept: "obsolete row direction" },
+      roleSpec: role,
+    }),
+    product,
+  };
+  const kitDirection = { ...artDirection, concept: "confirmed kit direction" };
+  const kit = {
+    id: "batch-kit",
+    productId: product.id,
+    artDirectionJson: JSON.stringify(kitDirection),
+    planJson: JSON.stringify([planned[0], role]),
+  };
+
+  const prepared = prepareKitAssetRegenerationFromRecords(row, kit);
+  assert.equal(prepared.ok, true);
+  if (prepared.ok) {
+    assert.equal(prepared.value.input.artDirection.concept, "confirmed kit direction");
+    assert.equal(prepared.value.input.rows.length, 1);
+    assert.equal(prepared.value.input.rows[0].id, "row-detail");
+  }
+  assert.equal(prepareKitAssetRegenerationFromRecords({ ...row, batchId: "another-batch" }, kit).ok, false);
+  assert.equal(prepareKitAssetRegenerationFromRecords({ ...row, assetSubtype: "unsupported" }, kit).ok, false);
+  assert.equal(prepareKitAssetRegenerationFromRecords({ ...row, assetRole: "background" }, kit).ok, false);
 });
 
 test("retry preparation accepts a legacy lifestyle row and preserves its saved edit role spec", async () => {

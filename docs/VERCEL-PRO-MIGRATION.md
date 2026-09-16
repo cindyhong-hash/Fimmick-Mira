@@ -6,13 +6,43 @@
 ================================================================================
 
 【怎麼拿到「值」】
- Vercel 後台的 Secret 設定後就看不到了，不要想從畫面上抄。
- 在「舊」專案連結的目錄下跑：
 
-     vercel env pull .env.old.local
+ ⚠️ 2026-09-16 實測更正：`vercel env pull` 對這個專案「拿不到值」。
+ 舊專案的 17 個變數全是 Sensitive 型態，Vercel 設計上就不可讀回，
+ 拉下來只會是 "[SENSITIVE]" 佔位符。這條路行不通，別浪費時間。
 
- 一次把所有值拉成一個檔，再照這張表貼進新專案。
- 外部服務的金鑰（OpenRouter / fal.ai / RapidAPI）也可以直接去各服務後台重拿。
+ ── 實際可行的四個來源 ──────────────────────────────────
+
+ 1. 本機 ~/Desktop/marketing-tool/.env.local（實測最有用）
+    已經有：BLOB_READ_WRITE_TOKEN / OPENROUTER_API_KEY / FAL_KEY
+            / RAPIDAPI_KEY / RAPIDAPI_KEY_IG / RAPIDAPI_KEY_IG2
+    注意這個檔的 DATABASE_URL 是本機 file: 版，不是正式庫，別直接抄。
+
+ 2. Turso CLI（資料庫那兩個）
+
+        turso db show marketing-tool --url      # 位址，非機密
+        turso db tokens create marketing-tool   # 直接發新的，不用找回舊的
+
+    ⚠️ 不要加 --expiration，正式站用會到期後整站連不上資料庫。
+
+ 3. 外部服務後台重發：OpenRouter / fal.ai / RapidAPI 都可以重新產生。
+
+ 4. SITE_PASSWORD 由你自己定，新舊站可以不一樣。
+
+ ── 怎麼確認 Blob token 沒拿錯 store ────────────────────
+
+ 填錯 store 圖片會全壞。store id 是公開資訊（就印在圖片網址裡），可安全比對：
+
+     # token 前綴裡的 store id
+     grep '^BLOB_READ_WRITE_TOKEN=' .env.local \
+       | sed -E 's/^[^=]+=//; s/"//g; s/^vercel_blob_rw_([A-Za-z0-9]+)_.*/\1/'
+
+     # 實際圖片網址裡的 store id
+     strings prisma/dev.db \
+       | grep -oE 'https://[a-zA-Z0-9]+\.public\.blob\.vercel-storage\.com' \
+       | sed -E 's#https://([^.]+)\..*#\1#' | sort | uniq -c
+
+     兩者比對（大小寫不敏感）。2026-09-16 實測結果：v16uryj9gfmy6re4 ✅
 
 
 ================================================================================

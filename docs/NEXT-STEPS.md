@@ -1,4 +1,18 @@
-# 明天接著做 — 搬到公司 Vercel Pro
+# 搬到公司 Vercel Pro
+
+> ✅ **2026-09-16 已完成**：新站 https://fimmick-mira.vercel.app 已上線
+> （team `Fimmick Limited`、專案 `fimmick-mira`）。
+> 六個必填環境變數都已設定，驗證通過：標題 MIRA、favicon 4711 bytes、
+> 密碼閘正常回 401（代表 SITE_PASSWORD 有吃到，沒設會是 503）。
+>
+> 下面保留當時的步驟紀錄，以及**還沒做完的收尾**（見最後兩節）。
+>
+> ⚠️ 實測更正：步驟 1 的 `vercel env pull` **拿不到值**（全是 Sensitive）。
+> 實際的取值來源見 `VERCEL-PRO-MIGRATION.md` 開頭那節。
+
+---
+
+## 原始步驟紀錄（2026-09-15 寫）
 
 > 寫於 2026-09-15 下班前。搭配 `docs/VERCEL-PRO-MIGRATION.md`（完整清單）一起看。
 > 這份只寫「接下來的動作」，細節與原因在那份裡。
@@ -151,3 +165,20 @@ cd /Users/chesterchiu/Desktop/marketing-tool/.worktrees/rename-mira && git push 
   **部署前要先套到正式 Turso**，而且要先確認他的 `.env.local` 指向本機不是正式庫。
 - 素材背景圖有 AI 亂碼文字（例：「Eaodr Shavts」），輸出品質問題，還沒處理。
 - lint 還有 34 個 error，全是刻意不改的。
+
+---
+
+## 上線後還沒做的收尾（2026-09-16）
+
+- [ ] `BLOB_READ_WRITE_TOKEN` 目前只勾 **Production**，其他五個是
+      Production and Preview。正式站沒問題，但分支預覽的圖片會壞。
+      Settings → Environment Variables → 該行 ⋯ → Edit → 加勾 Preview
+- [ ] 舊專案 `taiwan-image-process`（不是 x5hn）**斷開 GitHub 連結**
+      → 現在同一個 repo 接了三個 Vercel 專案，推一次跑三次建置
+      → ⚠️ 斷開 ≠ 刪除，Blob store 還要靠個人帳號
+- [ ] 決定什麼時候把大家的網址從 x5hn 換到 fimmick-mira
+- [ ] **網域只換一次** —— SITE_PASSWORD 的 30 天免輸是綁網域的 cookie
+- [ ] 圖片仍存在**個人帳號**的 Blob store（`v16uryj9gfmy6re4`）。
+      新站是沿用舊 token，所以能正常讀寫。
+      🔴 **在寫腳本把圖搬到公司 store 之前，個人帳號絕對不能刪。**
+- [ ] RapidAPI key 輪替（`RAPIDAPI_KEY_IG` / `RAPIDAPI_KEY_IG2` 曾完整外洩）

@@ -123,6 +123,14 @@ export function compileImageSetPrompt({ product, profile, artDirection, role }: 
     "不得加入任何額外文字、色碼（hex）、數字、標籤或浮水印（產品本身既有的品牌字樣除外）",
     ...textSafety,
   ];
+  const physicalDetailGrounding = role.role === "detail" && role.path === "edit"
+    ? [
+        "The supplied product reference images are the sole source of truth. If metadata or art direction conflicts with visible pixels, follow the reference pixels.",
+        "Create a tight macro crop of one genuinely visible existing feature from the supplied product. Show only part of the product; never show the entire product or invent an alternate angle.",
+        "Do not redraw, redesign, recolor, replace, enlarge, simplify, or change the finish of the product body, head, controls, seams, logo, or label.",
+        "Apply the campaign palette only to the surroundings and background. Never apply campaign colors or materials to the product itself.",
+      ]
+    : [];
 
   // Only legacy edit rows use a generated product photograph. New ad-asset roles
   // intentionally receive context without the product identity that would make
@@ -170,6 +178,7 @@ export function compileImageSetPrompt({ product, profile, artDirection, role }: 
     productFacts,
     "[MUST PRESERVE]",
     identityLocks,
+    ...physicalDetailGrounding,
     "[SHARED ART DIRECTION]",
     `Concept: ${artDirection.concept}`,
     palette,

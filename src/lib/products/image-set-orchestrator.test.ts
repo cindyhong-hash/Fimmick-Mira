@@ -342,6 +342,29 @@ test("physical detail loads product references while conceptual assets stay prod
   }
 });
 
+test("batch execution upgrades a stale physical detail text path before generation", async () => {
+  const detail = planImageSetRoles(profile).find(({ role }) => role === "detail")!;
+  const staleDetail = {
+    ...detail,
+    path: "text" as const,
+    mustNotShow: [...detail.mustNotShow, "Logo", "文字"],
+  };
+  const batch = { ...input(), rows: [{ id: "legacy-detail", role: staleDetail }] };
+  let request: Parameters<NonNullable<ImageSetBatchDependencies["generateRole"]>>[0] | undefined;
+
+  await runImageSetBatch(batch, {
+    ...fakeDeps(),
+    generateRole: async (value) => {
+      request = value;
+      return { buffer: Buffer.from("detail"), contentType: "image/png", provider: "provider:detail" };
+    },
+  });
+
+  assert.equal(request?.generationPath, "edit");
+  assert.ok(request?.rawImageUrls?.length);
+  assert.match(request?.prompt ?? "", /reference images are the sole source of truth/i);
+});
+
 test("continues the remaining roles when hero fails", async () => {
   const result = await runImageSetBatch(input(), fakeDeps({ failRole: "hero" }));
   assert.equal(result.statuses.hero, "FAILED");

@@ -826,7 +826,8 @@ export async function runImageSetBatch(
   };
 
   const runRow = async (row: ImageSetRow, batchHeroImageUrl?: string): Promise<string | undefined> => {
-    const initialParams = createImageSetRowParams(input, row.role);
+    const role = normalizePhysicalDetailRoleSpec(row.role);
+    const initialParams = createImageSetRowParams(input, role);
     try {
       const claimed = await transitionRow(row.id, ["PENDING", "GENERATING"], {
         status: "GENERATING",
@@ -836,34 +837,34 @@ export async function runImageSetBatch(
         generationLeaseExpiresAt: new Date(execution.deadlineAt),
       }, execution);
       if (!claimed) {
-        result.statuses[row.role.role] = "FAILED";
-        result.params[row.role.role] = initialParams;
+        result.statuses[role.role] = "FAILED";
+        result.params[role.role] = initialParams;
         return undefined;
       }
       if (reachedDeadline()) {
         await transitionRow(row.id, ["GENERATING"], {
           status: "FAILED",
-          errorMessage: roleFailureMessage(row.role.role, true),
+          errorMessage: roleFailureMessage(role.role, true),
           paramsJson: JSON.stringify(initialParams),
           generationLeaseId: null,
           generationLeaseExpiresAt: null,
         }, execution).catch(() => {});
-        result.statuses[row.role.role] = "FAILED";
-        result.params[row.role.role] = initialParams;
+        result.statuses[role.role] = "FAILED";
+        result.params[role.role] = initialParams;
         return undefined;
       }
-      const references = row.role.path === "edit" || row.role.path === "cutout"
+      const references = role.path === "edit" || role.path === "cutout"
         ? await loadReferenceDataUris(input.product, batchHeroImageUrl, loadAsDataUri, abortController.signal)
         : { rawImageUrls: [] as string[] };
       const prompt = compileImageSetPrompt({
         product: { name: input.product.name, category: input.product.category },
         profile: input.profile,
         artDirection: input.artDirection,
-        role: row.role,
+        role,
       });
       abortController.signal.throwIfAborted();
       const generated = await dependencies.generateRole({
-        role: row.role.role,
+        role: role.role,
         prompt,
         heroImageUrl: references.heroImageUrl,
         rawImageUrls: references.rawImageUrls,
@@ -871,7 +872,7 @@ export async function runImageSetBatch(
         aspectRatio: "1:1",
         signal: abortController.signal,
         deadlineAt: execution.deadlineAt,
-        generationPath: row.role.path,
+        generationPath: role.path,
       });
       if (!isConcreteProvider(generated.provider)) throw new Error("Image provider trace is missing or synthetic");
       if (reachedDeadline()) throw new Error("Image-set batch deadline reached");
@@ -879,10 +880,10 @@ export async function runImageSetBatch(
       const imageUrl = await dependencies.saveBuffer(
         generated.buffer,
         extension(generated.contentType),
-        `product-set-${row.role.role}-`,
+        `product-set-${role.role}-`,
         abortController.signal,
       );
-      const finalParams = createImageSetRowParams(input, row.role, generated.provider);
+      const finalParams = createImageSetRowParams(input, role, generated.provider);
       if (reachedDeadline()) {
         await deleteOrphan(row, imageUrl);
         throw abortController.signal.reason ?? new Error("Image-set batch deadline reached");
@@ -895,20 +896,20 @@ export async function runImageSetBatch(
       }, execution);
       if (!completed) {
         await deleteOrphan(row, imageUrl);
-        result.statuses[row.role.role] = "FAILED";
-        result.params[row.role.role] = initialParams;
+        result.statuses[role.role] = "FAILED";
+        result.params[role.role] = initialParams;
         return undefined;
       }
-      result.statuses[row.role.role] = "DONE";
-      result.params[row.role.role] = finalParams;
+      result.statuses[role.role] = "DONE";
+      result.params[role.role] = finalParams;
       return imageUrl;
     } catch (error) {
-      logError(`[image-set:${row.role.role}] generation failed`, error);
-      result.statuses[row.role.role] = "FAILED";
-      result.params[row.role.role] = initialParams;
+      logError(`[image-set:${role.role}] generation failed`, error);
+      result.statuses[role.role] = "FAILED";
+      result.params[role.role] = initialParams;
       await transitionRow(row.id, ["PENDING", "GENERATING"], {
         status: "FAILED",
-        errorMessage: roleFailureMessage(row.role.role, reachedDeadline(), error),
+        errorMessage: roleFailureMessage(role.role, reachedDeadline(), error),
         paramsJson: JSON.stringify(initialParams),
         generationLeaseId: null,
         generationLeaseExpiresAt: null,
@@ -1433,7 +1434,7 @@ function isValidSavedRoleSpec(role: unknown): role is ImageSetRoleSpec {
   );
 }
 
-function normalizeRetryRoleSpec(role: ImageSetRoleSpec): ImageSetRoleSpec {
+function normalizePhysicalDetailRoleSpec(role: ImageSetRoleSpec): ImageSetRoleSpec {
   const saved = role as ImageSetRoleSpec & { assetSubtype?: string };
   if (saved.role !== "detail" || saved.assetSubtype === "formula-texture" || saved.path !== "text") return role;
   return {
@@ -1480,7 +1481,7 @@ export function prepareImageSetRegenerationFromRow(row: ImageSetRegenerationRow)
         profile,
         artDirection: params.artDirection,
         product,
-        rows: [{ id: row.id, role: normalizeRetryRoleSpec(params.roleSpec) }],
+        rows: [{ id: row.id, role: normalizePhysicalDetailRoleSpec(params.roleSpec) }],
       },
     },
   };

@@ -79,6 +79,10 @@ test("detail asks for a real photographic product texture while benefit stays co
   assert.match(detailPrompt, /Product name: 女性電動除毛刀/);
   assert.match(detailPrompt, /圓形刀頭/);
   assert.match(detailPrompt, /\[MUST PRESERVE\]/);
+  assert.match(detailPrompt, /reference images are the sole source of truth/i);
+  assert.match(detailPrompt, /tight macro crop of one genuinely visible existing feature/i);
+  assert.match(detailPrompt, /never show the entire product/i);
+  assert.match(detailPrompt, /campaign palette.*surroundings and background/i);
   assert.doesNotMatch(detailPrompt, /dispensed|pump|nozzle|spread on skin|dense foam/i);
   assert.match(detailPrompt, /抽象功效意象/);
   assert.match(benefitPrompt, /conceptual|abstract/i);

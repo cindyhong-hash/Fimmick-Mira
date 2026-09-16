@@ -45,6 +45,10 @@ next-env.d.ts
 
 # Local database & uploads
 prisma/dev.db
+prisma/*.db
+prisma/*.db-shm
+prisma/*.db-wal
+prisma/*.sql
 prisma/dev.db-shm
 prisma/dev.db-wal
 public/uploads/

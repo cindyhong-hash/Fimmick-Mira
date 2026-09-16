@@ -182,3 +182,9 @@ cd /Users/chesterchiu/Desktop/marketing-tool/.worktrees/rename-mira && git push 
       新站是沿用舊 token，所以能正常讀寫。
       🔴 **在寫腳本把圖搬到公司 store 之前，個人帳號絕對不能刪。**
 - [ ] RapidAPI key 輪替（`RAPIDAPI_KEY_IG` / `RAPIDAPI_KEY_IG2` 曾完整外洩）
+- [x] ~~Turso `DATABASE_AUTH_TOKEN` 輪替~~ ✅ 2026-09-16 已完成
+      （token 在終端機截圖中完整外洩 → invalidate + create + 兩個 Vercel 專案
+      更新並重新部署。做法見 `LOCAL-DEV-DB.md` 第二節）
+
+> ⚠️ 憑證外洩已發生三次，都是終端機／編輯器截圖帶到的。
+> 要給 agent 看終端機時，先 `clear` 或只截需要的那幾行。

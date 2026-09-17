@@ -4,6 +4,7 @@ import {
   generateImage,
   gptImageGenerateWithReferences,
 } from "../generate.ts";
+import sharp from "sharp";
 import type { ImageSetRole } from "./image-set-roles.ts";
 import type { ImageSetGenerationPath } from "./image-set-roles.ts";
 
@@ -135,6 +136,28 @@ function imageToDataUri(image: ProviderImage): string {
   return `data:${image.contentType || "image/png"};base64,${image.buffer.toString("base64")}`;
 }
 
+function dataUriToBuffer(dataUri: string): Buffer {
+  const match = dataUri.match(/^data:[^,]*?(;base64)?,([\s\S]*)$/i);
+  if (!match) throw new Error("商品細節裁切缺少有效的參考圖片");
+  return match[1]
+    ? Buffer.from(match[2], "base64")
+    : Buffer.from(decodeURIComponent(match[2]));
+}
+
+export async function createReferenceDetailCrop(dataUri: string): Promise<Buffer> {
+  const source = dataUriToBuffer(dataUri);
+  const normalized = await sharp(source, { failOn: "none" }).rotate().png().toBuffer();
+  const trimmed = await sharp(normalized).trim({ threshold: 12 }).png().toBuffer();
+  return sharp(trimmed)
+    .resize(1024, 1024, {
+      fit: "cover",
+      position: sharp.strategy.attention,
+      kernel: sharp.kernel.lanczos3,
+    })
+    .png()
+    .toBuffer();
+}
+
 export async function generateImageSetRole(
   input: ImageSetRoleGenerationInput,
   providers: ImageSetRoleProviders = defaultProviders,
@@ -165,6 +188,18 @@ export async function generateImageSetRole(
       if (input.signal?.aborted) throw input.signal.reason ?? error;
       throw new Error(`${input.role} 去背失敗，請單獨重試`);
     }
+  }
+
+  if (input.generationPath === "crop") {
+    // The uploaded raw photo is the identity source. Derived hero/cutout images
+    // are fallbacks because an earlier processing step may have altered edges.
+    const source = input.rawImageUrls?.find(Boolean) || input.heroImageUrl || input.batchHeroImageUrl;
+    if (!source) throw new Error(`${input.role} 細節裁切失敗：缺少商品參考圖`);
+    return {
+      buffer: await createReferenceDetailCrop(source),
+      contentType: "image/png",
+      provider: "local:reference-detail-crop",
+    };
   }
 
   if ((input.generationPath === "text" || input.role === "background") && input.role !== "decoration") {

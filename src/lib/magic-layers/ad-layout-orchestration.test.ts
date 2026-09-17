@@ -16,9 +16,9 @@ test("provider fallback returns the same deterministic candidates", () => {
 
 test("a valid vision decision changes only bounded design fields", () => {
   const result: ArtDirectionResult = { source: "vision", decision: { version: 1, directions: [
-    { direction: "product-focus", composition: "stacked", typography: "quiet", density: "balanced", support: "none", decoration: "none", accent: "primary", graphics: "none", backdrop: "dark-fade", confidence: 0.9 },
-    { direction: "editorial", composition: "copy-right", typography: "bold", density: "minimal", support: "none", decoration: "one", accent: "primary", graphics: "none", backdrop: "none", confidence: 0.9 },
-    { direction: "scene-led", composition: "copy-left", typography: "balanced", density: "minimal", support: "none", decoration: "one", accent: "primary", graphics: "none", backdrop: "none", confidence: 0.9 },
+    { direction: "product-focus", composition: "stacked", typography: "quiet", density: "balanced", support: "none", decoration: "none", accent: "primary", backdrop: "dark-fade", confidence: 0.9 },
+    { direction: "editorial", composition: "copy-right", typography: "bold", density: "minimal", support: "none", decoration: "one", accent: "primary", backdrop: "none", confidence: 0.9 },
+    { direction: "scene-led", composition: "copy-left", typography: "balanced", density: "minimal", support: "none", decoration: "one", accent: "primary", backdrop: "none", confidence: 0.9 },
   ] } };
   const candidates = buildDirectedCandidates(input, result, { hero: true, detail: false, benefit: false, decoration: true }, false, []);
   assert.equal(candidates[0].designDecision?.source, "vision");

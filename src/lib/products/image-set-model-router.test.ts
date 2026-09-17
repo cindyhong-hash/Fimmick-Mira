@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import sharp from "sharp";
 import {
   generateImageSetRole,
   type ImageSetRoleGenerationInput,
@@ -69,6 +70,60 @@ test("a cutout role removes the background from the raw original without startin
   assert.equal(output.contentType, "image/png");
   assert.equal(output.buffer.toString(), "transparent-product");
   assert.equal(output.provider, "fal:remove-background");
+});
+
+test("a physical detail crop uses exact reference pixels without starting a paid generator", async () => {
+  const reference = await sharp({
+    create: { width: 120, height: 360, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+  }).composite([
+    { input: await sharp({ create: { width: 60, height: 300, channels: 4, background: "#f5f5f5" } }).png().toBuffer(), left: 30, top: 20 },
+    { input: await sharp({ create: { width: 24, height: 24, channels: 4, background: "#8ecae6" } }).png().toBuffer(), left: 48, top: 95 },
+  ]).png().toBuffer();
+  const referenceDataUri = `data:image/png;base64,${reference.toString("base64")}`;
+  const generators: string[] = [];
+
+  const output = await generateImageSetRole(
+    {
+      ...productInput,
+      role: "detail",
+      generationPath: "crop",
+      rawImageUrls: [referenceDataUri],
+      heroImageUrl: undefined,
+      batchHeroImageUrl: undefined,
+    },
+    fakeProviders({
+      gpt: async () => { generators.push("gpt"); return image("gpt"); },
+      seedream: async () => { generators.push("seedream"); return image("seedream"); },
+      fluxEdit: async () => { generators.push("flux"); return image("flux"); },
+      textImage: async () => { generators.push("text"); return image("text"); },
+    }),
+  );
+
+  const metadata = await sharp(output.buffer).metadata();
+  assert.deepEqual(generators, []);
+  assert.equal(output.provider, "local:reference-detail-crop");
+  assert.equal(output.contentType, "image/png");
+  assert.equal(metadata.width, 1024);
+  assert.equal(metadata.height, 1024);
+});
+
+test("a physical detail crop prefers the uploaded raw image over derived hero images", async () => {
+  const raw = await sharp({
+    create: { width: 80, height: 240, channels: 3, background: "#ffffff" },
+  }).png().toBuffer();
+  const rawDataUri = `data:image/png;base64,${raw.toString("base64")}`;
+
+  const output = await generateImageSetRole({
+    ...productInput,
+    role: "detail",
+    generationPath: "crop",
+    rawImageUrls: [rawDataUri],
+    heroImageUrl: "data:image/png;base64,aW52YWxpZC1oZXJv",
+    batchHeroImageUrl: "data:image/png;base64,aW52YWxpZC1iYXRjaC1oZXJv",
+  }, fakeProviders());
+
+  assert.equal(output.provider, "local:reference-detail-crop");
+  assert.equal((await sharp(output.buffer).metadata()).width, 1024);
 });
 
 test("a malformed GPT response leaves a bounded Seedream attempt and a viable FLUX fallback before the batch deadline", async () => {

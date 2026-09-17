@@ -1,7 +1,7 @@
 import type { AdLayoutDesignSpec } from "./ad-layout-design-spec.ts";
 
 export type AdLayoutQualityCheck = {
-  id: "hero-present" | "decoration-budget" | "support-budget" | "direction-support" | "copy-treatment" | "product-aspect" | "product-bounds" | "product-integration" | "product-copy-overlap";
+  id: "hero-present" | "decoration-budget" | "support-budget" | "direction-support" | "copy-treatment" | "product-aspect" | "product-bounds" | "product-integration" | "product-copy-overlap" | "product-footprint" | "product-benefit-overlap" | "support-benefit-conflict";
   passed: boolean;
   message: string;
 };
@@ -27,6 +27,18 @@ export function validateAdLayoutSpec(spec: AdLayoutDesignSpec): AdLayoutQualityC
     spec.typography.subtitle ? spec.layout?.subtitle : undefined,
   ].filter((rect): rect is NonNullable<typeof rect> => Boolean(rect && rect.w > 0 && rect.h > 0));
   const copySeparate = !spec.assets.product || !product || copyRects.every((rect) => !overlaps(product, rect));
+  const productArea = product ? product.w * product.h / (spec.canvas.width * spec.canvas.height) : 0;
+  const productFootprint = !product || !spec.assets.product ? true
+    : spec.direction === "scene-led"
+      // Scene-led intentionally gives the environment more visual weight. The 3.5% floor is
+      // half of the reviewed 6.9% scene-led median and prevents a product from disappearing.
+      ? productArea >= 0.035
+      : aspect !== undefined && aspect <= 0.5
+        ? product.h / spec.canvas.height >= 0.51
+        : aspect !== undefined && aspect >= 1.5 && spec.canvas.ratio === "9:16"
+          ? product.w / spec.canvas.width >= 0.51
+          : productArea >= 0.08;
+  const benefitSeparate = !product || !spec.layout?.benefit || !overlaps(product, spec.layout.benefit);
   return [
     { id: "hero-present", passed: Boolean(spec.assets.product), message: "設計稿需要一個明確商品主體" },
     { id: "decoration-budget", passed: spec.assets.decorations.length <= 2, message: "裝飾元素不得超過兩個" },
@@ -41,5 +53,8 @@ export function validateAdLayoutSpec(spec: AdLayoutDesignSpec): AdLayoutQualityC
     { id: "product-bounds", passed: productInBounds, message: "商品主體必須完整位於畫布範圍內" },
     { id: "product-integration", passed: hasVisibleIntegration, message: "商品主體需要可編輯的光影或 grounding 才能融入畫面" },
     { id: "product-copy-overlap", passed: copySeparate, message: "商品主體不得與標題或副標重疊" },
+    { id: "product-footprint", passed: productFootprint, message: "商品主體未達該版型的最小視覺尺寸" },
+    { id: "product-benefit-overlap", passed: benefitSeparate, message: "商品主體不得壓到賣點群組" },
+    { id: "support-benefit-conflict", passed: !(spec.benefits?.length === 3 && spec.assets.support), message: "三條賣點已足夠傳達訊息，已省略競爭性的輔助視覺" },
   ];
 }

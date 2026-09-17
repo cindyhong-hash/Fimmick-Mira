@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { PROMO_FIXED, TAIWAN_SEASONAL } from "../calendar/tw-calendar.ts";
+import { IMAGE_SET_MAX_ASSETS } from "./image-set-kit.ts";
 import { planImageSetRoles } from "./image-set-roles.ts";
+import { buildImageSetArtDirection } from "./product-visual-analysis.ts";
 import type { ProductVisualProfile } from "./product-visual-profile.ts";
 
 const beautyDeviceProfile: ProductVisualProfile = {
@@ -29,16 +32,32 @@ test("new batches plan a composable ad-asset pack instead of five product photog
   assert.deepEqual(roles.map((role) => role.label), ["商品主體", "質地細節", "情境背景", "賣點視覺", "裝飾元素"]);
   assert.equal(roles[0].path, "cutout");
   assert.equal(roles[0].cutout, true);
-  assert.equal(roles[1].path, "text");
+  assert.equal(roles[1].path, "crop");
   assert.equal(roles[2].path, "text");
   assert.equal(roles[3].path, "text");
   assert.match(roles[1].sceneCn, /質地|液體|泡沫/);
   assert.match(roles[2].sceneCn, /明亮浴室/);
+  assert.match(roles[2].sceneCn, /連續文字留白|可放置商品/);
+  assert.match(roles[2].mustNotShow.join("\n"), /切半|鏡子|水槽/);
   assert.match(roles[2].mustNotShow.join("\n"), /產品|Logo|文字/);
   assert.match(roles[3].sceneCn, /腿部日常修整/);
   assert.match(roles[3].mustNotShow.join("\n"), /產品|Logo/);
   assert.match(roles[4].sceneCn, /銀藍曲線/);
   assert.match(roles[4].mustNotShow.join("\n"), /完整場景/);
+});
+
+test("physical product details use references while formula textures remain product-free", () => {
+  const deviceDetail = planImageSetRoles(beautyDeviceProfile).find(({ role }) => role === "detail");
+  const skincareDetail = planImageSetRoles({
+    ...beautyDeviceProfile,
+    productArchetype: "skincare",
+    productType: "保濕凝露",
+  }).find(({ role }) => role === "detail");
+
+  assert.equal(deviceDetail?.assetSubtype, "material-detail");
+  assert.equal(deviceDetail?.path, "crop");
+  assert.equal(skincareDetail?.assetSubtype, "formula-texture");
+  assert.equal(skincareDetail?.path, "text");
 });
 
 test("sparse archetype profiles keep ad-asset copy generic without inventing product facts", () => {
@@ -95,4 +114,53 @@ test("unknown products still receive five safe generic roles", () => {
   assert.deepEqual(roles.map((role) => role.role), ["hero", "detail", "background", "benefit", "decoration"]);
   assert.equal(roles[2].role, "background");
   assert.match(roles[2].sceneCn, /不出現任何產品/);
+});
+
+test("configurable plans select exactly one core asset in each category", () => {
+  const plan = planImageSetRoles({
+    profile: beautyDeviceProfile,
+    artDirection: buildImageSetArtDirection(beautyDeviceProfile, {}),
+  });
+  const core = plan.filter(({ core }) => core);
+
+  assert.equal(core.length, 5);
+  assert.deepEqual(core.map(({ category }) => category), ["product", "texture", "background", "benefit", "decoration"]);
+  assert.ok(core.every(({ defaultSelected }) => defaultSelected));
+  assert.ok(plan.filter(({ core }) => !core).every(({ defaultSelected }) => !defaultSelected));
+  assert.ok(plan.length <= IMAGE_SET_MAX_ASSETS);
+});
+
+test("theme-aware plans are deterministic and change a subtype or purpose", () => {
+  const artDirection = buildImageSetArtDirection(beautyDeviceProfile, {});
+  const promoLabel = PROMO_FIXED.find(([, , label]) => label.includes("雙 11"))?.[2] ?? PROMO_FIXED[0][2];
+  const seasonalLabel = TAIWAN_SEASONAL[9][0].label;
+  const promoInput = {
+    profile: beautyDeviceProfile,
+    artDirection,
+    theme: { key: "double-11", label: promoLabel, kind: "PROMO" as const },
+  };
+  const promo = planImageSetRoles(promoInput);
+  const seasonal = planImageSetRoles({
+    profile: beautyDeviceProfile,
+    artDirection,
+    theme: { key: "autumn-care", label: seasonalLabel, kind: "SEASONAL" },
+  });
+
+  assert.deepEqual(planImageSetRoles(promoInput), promo);
+  assert.deepEqual(planImageSetRoles(promoInput).map(({ id }) => id), promo.map(({ id }) => id));
+  assert.ok(promo.some((item, index) => item.assetSubtype !== seasonal[index]?.assetSubtype || item.purpose !== seasonal[index]?.purpose));
+});
+
+test("non-skincare plans avoid unsupported foam suggestions and label decorative frames as text-free", () => {
+  const plan = planImageSetRoles({
+    profile: { ...beautyDeviceProfile, productArchetype: "electronics", productType: "無線耳機" },
+    artDirection: buildImageSetArtDirection(beautyDeviceProfile, {}),
+    theme: { key: "double-11", label: PROMO_FIXED[10][2], kind: "PROMO" },
+  });
+  const copy = plan.map(({ assetSubtype, purpose }) => `${assetSubtype} ${purpose}`).join("\n");
+  const frame = plan.find(({ assetSubtype }) => assetSubtype === "layout-frame");
+
+  assert.doesNotMatch(copy, /foam|泡沫/i);
+  assert.match(frame?.purpose ?? "", /不含文字|無文字/);
+  assert.match(plan.find(({ assetSubtype }) => assetSubtype === "theme-ribbon")?.purpose ?? "", /不含文字|無文字/);
 });

@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { protectPaidRoute } from "@/lib/site-gate";
 import {
   claimProductPaidOperationLease,
-  createAndScheduleImageSetBatch,
+  confirmAndScheduleProductImageSet,
   createImageSetExecution,
   readImageSetProduct,
   reconcileImageSetCleanupJobs,
@@ -29,7 +29,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ pro
   return NextResponse.json(await readImageSetProduct(product, product.client));
 }
 
-// POST creates rows synchronously, then schedules one resilient batch callback.
+// POST confirms an existing DRAFT planning snapshot, then schedules one resilient batch callback.
 export const POST = protectPaidRoute(async (
   request: Request,
   { params }: { params: Promise<{ productId: string }> },
@@ -37,32 +37,48 @@ export const POST = protectPaidRoute(async (
 ) => {
   const { productId } = await params;
   const body = await request.json().catch(() => ({}));
-  const requestedItems: unknown[] = Array.isArray(body.items) ? body.items : [];
-  const selectedRoles = [...new Set(requestedItems.flatMap((item) => {
-    if (!item || typeof item !== "object") return [];
-    const role = (item as { role?: unknown }).role;
-    return typeof role === "string" ? [role] : [];
-  }))];
-  if (!selectedRoles.length) return NextResponse.json({ error: "未選擇任何套圖" }, { status: 400 });
+  const selectedItemIds = Array.isArray(body.selectedItemIds)
+    ? body.selectedItemIds.filter((id: unknown): id is string => typeof id === "string")
+    : [];
 
   const product = await db.product.findUnique({ where: { id: productId }, include: { client: true } });
   if (!product) return NextResponse.json({ error: "Not found" }, { status: 404 });
   await reconcileStaleImageSetWork(product.id, new Date());
   await reconcileImageSetCleanupJobs(10);
   const execution = createImageSetExecution(invocationStartedAt, randomUUID());
-  const result = await createAndScheduleImageSetBatch({
+  const result = await confirmAndScheduleProductImageSet({
     product,
     client: product.client,
-    selectedRoles,
-    requestSourceHash: typeof body.sourceHash === "string" ? body.sourceHash : undefined,
+    batchId: typeof body.batchId === "string" ? body.batchId : "",
+    selectedItemIds,
+    artDirection: body.artDirection,
     execution,
   }, {
+    loadDraft: (ownerProductId, batchId) => db.productImageSet.findFirst({ where: { id: batchId, productId: ownerProductId } }),
     claimProductLease: (id, value) => claimProductPaidOperationLease(id, value, "batch"),
     releaseProductLease: releaseProductPaidOperationLease,
-    createRows: (rows) => db.$transaction((tx) => Promise.all(rows.map((data) => tx.libraryImage.create({ data })))),
+    persistConfirmedBatch: (data) => db.$transaction(async (tx) => {
+      const confirmed = await tx.productImageSet.updateMany({
+        where: { id: data.batchId, productId: data.productId, status: "DRAFT" },
+        data: {
+          status: "CONFIRMED",
+          artDirectionJson: data.artDirectionJson,
+          planJson: data.planJson,
+          confirmedAt: data.confirmedAt,
+        },
+      });
+      if (confirmed.count !== 1) return null;
+      const rows = await Promise.all(data.rows.map((row) => tx.libraryImage.create({ data: row })));
+      const generating = await tx.productImageSet.updateMany({
+        where: { id: data.batchId, productId: data.productId, status: "CONFIRMED" },
+        data: { status: "GENERATING" },
+      });
+      if (generating.count !== 1) throw new Error("套圖批次狀態更新失敗");
+      return rows;
+    }),
     failCreatedRows: async (rowIds, value) => {
       const failed = await db.libraryImage.updateMany({
-        where: { id: { in: rowIds }, status: "PENDING", generationLeaseId: value.leaseId },
+        where: { id: { in: rowIds }, status: { in: ["PENDING", "GENERATING"] }, generationLeaseId: value.leaseId },
         data: {
           status: "FAILED",
           errorMessage: "背景工作未能啟動，請重新建立套圖。",
@@ -74,7 +90,11 @@ export const POST = protectPaidRoute(async (
     },
     scheduleAfter: (callback) => after(callback),
     runBatch: (input, value) => runImageSetBatch(input, undefined, value),
-    createBatchId: () => `pset_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    readBatchStatuses: async (batchId, ownerProductId) => (await db.libraryImage.findMany({
+      where: { batchId, productId: ownerProductId },
+      select: { status: true },
+    })).map(({ status }) => status as "PENDING" | "GENERATING" | "DONE" | "FAILED"),
+    updateKitStatus: (batchId, status) => db.productImageSet.update({ where: { id: batchId }, data: { status } }),
   });
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
   return NextResponse.json(result);

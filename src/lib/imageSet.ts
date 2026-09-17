@@ -5,6 +5,7 @@ import { loadBuffer, saveBuffer } from "@/lib/storage";
 import { buildImageSetArtDirection, type ImageSetArtDirection } from "@/lib/products/product-visual-analysis";
 import { fallbackProductVisualProfile, type ProductVisualProfile } from "@/lib/products/product-visual-profile";
 import { planImageSetRoles, type ImageSetGenerationPath, type ImageSetRole } from "@/lib/products/image-set-roles";
+import { createReferenceDetailCrop } from "@/lib/products/image-set-model-router";
 export { regenerateImageSetItem } from "@/lib/products/image-set-orchestrator";
 
 export type { ImageSetArtDirection } from "@/lib/products/product-visual-analysis";
@@ -15,6 +16,7 @@ export type { ImageSetRole, ImageSetRoleSpec } from "@/lib/products/image-set-ro
 //
 // 三條素材路徑（呼應設計決策）：
 //  • path="cutout" 原始商品照去背（falRemoveBg）→ 保留商品身份，輸出透明 PNG
+//  • path="crop"  商品細節：直接裁切參考圖像素，不經生成模型 → 商品外觀完全一致
 //  • path="edit"  實拍類：以去背主圖為錨點做合成/換背景（falFlux2Edit）→ 產品外觀一致
 //  • path="text"  概念/背景類：純文字生圖（generateImage）→ 走品牌風格、可不含產品實拍
 // cutout=true 的積木生成後再去背成透明 PNG，方便之後排版疊加。
@@ -91,6 +93,11 @@ export async function generateImageSetItem(
       const originalImageUrl = product.rawImageUrls?.find(Boolean);
       if (!originalImageUrl) throw new Error("需要原始商品照才能建立商品主體");
       out = await falRemoveBg(await toDataUri(await loadBuffer(originalImageUrl)));
+      contentType = "image/png";
+    } else if (item.path === "crop") {
+      const sourceUrl = product.rawImageUrls?.find(Boolean) || product.heroImageUrl;
+      if (!sourceUrl) throw new Error("需要商品參考圖才能建立細節裁切");
+      out = await createReferenceDetailCrop(await toDataUri(await loadBuffer(sourceUrl)));
       contentType = "image/png";
     } else if (item.path === "edit") {
       if (!product.heroImageUrl) throw new Error("需要去背主圖作為錨點");

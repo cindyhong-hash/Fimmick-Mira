@@ -41,6 +41,8 @@ const artDirection: ImageSetArtDirection = {
   backgroundLanguage: "明亮浴室",
   cameraLanguage: "清晰產品攝影，保留真實比例",
   consistencyRules: ["所有畫面視為同一產品的不同視角。"],
+  mood: ["清新", "可信賴"],
+  decorationStyle: ["細緻冰藍線框", "柔和光點"],
 };
 
 test("product roles contain identity locks", () => {
@@ -59,7 +61,7 @@ test("abstract benefit visuals receive supplied use-case context without product
   const prompt = compileImageSetPrompt({ product, profile: beautyDeviceProfile, artDirection, role });
 
   assert.match(prompt, /Supplied use cases: 腿部日常修整/);
-  assert.match(prompt, /liquid, particles, soft light/i);
+  assert.match(prompt, /conceptual abstract benefit visual/i);
   assert.match(prompt, /actual product|Logo/i);
   assert.doesNotMatch(prompt, /Product name: 女性電動除毛刀/);
   assert.doesNotMatch(prompt, /Visible text or logos: Schick/);
@@ -73,10 +75,18 @@ test("detail asks for a real photographic product texture while benefit stays co
   const benefitPrompt = compileImageSetPrompt({ product, profile: beautyDeviceProfile, artDirection, role: benefit });
 
   assert.match(detailPrompt, /photographic macro/i);
-  assert.match(detailPrompt, /dispensed|pump|nozzle|spread on skin|dense foam/i);
-  assert.match(detailPrompt, /抽象液體波浪|漂浮微粒|功效意象圖/);
+  assert.match(detailPrompt, /material|surface detail/i);
+  assert.match(detailPrompt, /Product name: 女性電動除毛刀/);
+  assert.match(detailPrompt, /圓形刀頭/);
+  assert.match(detailPrompt, /\[MUST PRESERVE\]/);
+  assert.match(detailPrompt, /reference images are the sole source of truth/i);
+  assert.match(detailPrompt, /tight macro crop of one genuinely visible existing feature/i);
+  assert.match(detailPrompt, /never show the entire product/i);
+  assert.match(detailPrompt, /campaign palette.*surroundings and background/i);
+  assert.doesNotMatch(detailPrompt, /dispensed|pump|nozzle|spread on skin|dense foam/i);
+  assert.match(detailPrompt, /抽象功效意象/);
   assert.match(benefitPrompt, /conceptual|abstract/i);
-  assert.match(benefitPrompt, /真實攝影微距質地|擠出的乳液、凝露或泡沫|按壓頭出料/);
+  assert.match(benefitPrompt, /真實攝影微距的商品材質或表面質地/);
 });
 
 test("background forbids the product and reserves layout space", () => {
@@ -86,7 +96,7 @@ test("background forbids the product and reserves layout space", () => {
   assert.match(prompt, /不出現任何產品/);
   assert.match(prompt, /留白/);
   assert.match(prompt, /product-free/i);
-  assert.match(prompt, /no product depiction/i);
+  assert.match(prompt, /do not depict any product/i);
   assert.doesNotMatch(prompt, /Product name: 女性電動除毛刀/);
   assert.doesNotMatch(prompt, /一致產品攝影/);
 });
@@ -138,4 +148,15 @@ test("handles alpha hex conservatively and drops invalid hash-prefixed colors", 
   assert.doesNotMatch(prompt, /not-a-color|#12345|#[0-9a-f]{3,8}\b/i);
   assert.equal((prompt.match(/translucent vivid violet/gi) ?? []).length, 1);
   assert.equal((prompt.match(/translucent warm light yellow/gi) ?? []).length, 1);
+});
+
+test("every role receives confirmed mood, campaign consistency, and text safety rules", () => {
+  for (const role of planImageSetRoles(beautyDeviceProfile)) {
+    const prompt = compileImageSetPrompt({ product, profile: beautyDeviceProfile, artDirection, role });
+    assert.match(prompt, /Mood: 清新、可信賴/);
+    assert.match(prompt, /Campaign consistency rules: 所有畫面視為同一產品的不同視角。/);
+    assert.match(prompt, /Do not render new words, letters, numbers, captions, badges with text, or typographic marks\./);
+    assert.match(prompt, /Preserve genuine logo and packaging label details visible on the supplied product reference\./);
+    if (role.role === "decoration") assert.match(prompt, /Decoration style: 細緻冰藍線框、柔和光點/);
+  }
 });

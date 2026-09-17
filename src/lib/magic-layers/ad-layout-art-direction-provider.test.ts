@@ -4,9 +4,9 @@ import { planArtDirection } from "./ad-layout-art-direction-provider.ts";
 import { completeDesignVision, withVisionDeadline } from "./ad-layout-vision-transport.ts";
 const context={product:{id:"p",name:"test",profile:null},brand:{primaryColor:"#123456",tones:[],palette:[]},inventory:{byRole:{hero:{role:"hero" as const,imageUrl:"hero",identityCritical:true,sourceRole:"hero"}}}};
 const validDecision=JSON.stringify({version:1,directions:[
- {direction:"product-focus",composition:"stacked",typography:"balanced",density:"minimal",support:"none",decoration:"none",accent:"primary",graphics:"none",backdrop:"none",confidence:0.9},
- {direction:"editorial",composition:"copy-right",typography:"quiet",density:"balanced",support:"none",decoration:"none",accent:"primary",graphics:"none",backdrop:"light-fade",confidence:0.9},
- {direction:"scene-led",composition:"copy-left",typography:"bold",density:"minimal",support:"none",decoration:"none",accent:"primary",graphics:"none",backdrop:"none",confidence:0.9},
+ {direction:"product-focus",composition:"stacked",typography:"balanced",density:"minimal",support:"none",decoration:"none",accent:"primary",backdrop:"none",confidence:0.9},
+ {direction:"editorial",composition:"copy-right",typography:"quiet",density:"balanced",support:"none",decoration:"none",accent:"primary",backdrop:"light-fade",confidence:0.9},
+ {direction:"scene-led",composition:"copy-left",typography:"bold",density:"minimal",support:"none",decoration:"none",accent:"primary",backdrop:"none",confidence:0.9},
 ]});
 test("disabled vision does not call provider",async()=>{
  let calls=0;const r=await planArtDirection(context,{},[],{enabled:false,complete:async()=>{calls++;return "";}});assert.equal(calls,0);assert.equal(r.reason,"disabled");

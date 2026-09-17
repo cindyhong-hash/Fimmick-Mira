@@ -3,6 +3,7 @@ import test from "node:test";
 import { resolveAdLayoutDesignSpecs } from "./ad-layout-design-spec.ts";
 import { renderAdLayoutSpec } from "./ad-layout-renderer.ts";
 import { resolveAdComposition } from "./ad-layout-composition.ts";
+import { resolveCompositionPlan } from "./ad-layout-composition-plan.ts";
 for (const [ratio, width, height] of [["1:1",1024,1024],["4:5",1024,1280],["9:16",720,1280],["16:9",1280,720]] as const) {
   test(`finite, contained, non-overlapping compositions for every purpose on ${ratio}`, () => {
     for (const aspect of [0.28,1,2.4]) for (const purpose of ["product","benefit","scene","promo"] as const) {
@@ -25,7 +26,7 @@ test("maps a trusted composition decision to a bounded template before resolving
     typography: { headline: "標題", dark: "#123456", light: "#fff", accent: "#68bbee" },
   }, "product-focus", {
     direction: "product-focus", composition: "stacked", typography: "balanced", density: "minimal",
-    support: "none", decoration: "none", accent: "primary", graphics: "none", backdrop: "none", confidence: 0.9,
+    support: "none", decoration: "none", accent: "primary", backdrop: "none", confidence: 0.9,
   });
 
   assert.equal(layout.templateId, "center-product-bottom-copy");
@@ -75,4 +76,22 @@ test("keeps template geometry when surface placement has no trusted rectangle", 
     resolveAdComposition({ ...base, compositionAdvice: { source: "vision", sceneGrounding: "surface", warnings: [] } }, "scene-led"),
     resolveAdComposition(base, "scene-led"),
   );
+});
+
+test("uses the plan benefit band by moving scene product before reducing it", () => {
+  const canvas = { width: 1024, height: 1280, ratio: "4:5" };
+  const compositionPlan = resolveCompositionPlan({ canvas, purpose: "scene", hasBenefits: true }, "scene-led");
+  const layout = resolveAdComposition({
+    canvas,
+    assets: { hero: "hero" },
+    purpose: "scene",
+    benefits: [{ id: "hydration", text: "48 小時保濕" }],
+    compositionPlan,
+    productAspectRatio: 0.6,
+    typography: { headline: "每天細緻保養", dark: "#123456", light: "#fff", accent: "#68bbee" },
+  }, "scene-led");
+
+  assert.ok(layout.benefit);
+  assert.ok(layout.product.y + layout.product.h <= layout.benefit.y);
+  assert.ok(layout.product.w * layout.product.h / (canvas.width * canvas.height) >= 0.08);
 });

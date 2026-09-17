@@ -152,7 +152,6 @@ test("keeps every user-confirmed benefit when vision chooses no optional graphic
     support: "none",
     decoration: "none",
     accent: "primary",
-    graphics: "none",
     backdrop: "none",
     confidence: 0.9,
   });

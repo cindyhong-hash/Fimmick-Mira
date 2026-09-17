@@ -4,7 +4,9 @@ import {
   analyzeProductVisualProfile,
   buildImageSetArtDirection,
   countProductVisualReferenceImages,
+  parseImageSetArtDirection,
 } from "./product-visual-analysis.ts";
+import { computeProductVisualSourceHash } from "./product-visual-profile.ts";
 
 const productWithThreeReferences = {
   name: "女性電動除毛刀",
@@ -148,4 +150,34 @@ test("art direction frames new sets as composable advertising assets rather than
 
   assert.match(art.concept, /可合成廣告素材包/);
   assert.doesNotMatch(`${art.concept}\n${art.lighting}\n${art.cameraLanguage}`, /產品攝影/);
+});
+
+test("parses legacy art direction snapshots with empty optional kit styling", () => {
+  const legacy = {
+    concept: "一致的商品素材",
+    palette: { dominant: ["白"], accent: ["金"] },
+    lighting: "柔和棚拍光",
+    materials: ["霧面材質"],
+    backgroundLanguage: "留白背景",
+    cameraLanguage: "正面視角",
+    consistencyRules: ["同一活動使用一致色調"],
+  };
+
+  assert.deepEqual(parseImageSetArtDirection(legacy), {
+    ...legacy,
+    mood: [],
+    decorationStyle: [],
+  });
+});
+
+test("optional art-direction styling does not invalidate the product source hash", () => {
+  const before = computeProductVisualSourceHash(productWithThreeReferences);
+  const parsed = parseImageSetArtDirection({
+    ...buildImageSetArtDirection(beautyDeviceProfile, {}),
+    mood: ["清爽"],
+    decorationStyle: ["細線框"],
+  });
+
+  assert.ok(parsed);
+  assert.equal(computeProductVisualSourceHash(productWithThreeReferences), before);
 });

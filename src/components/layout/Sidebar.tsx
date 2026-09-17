@@ -48,7 +48,10 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="sticky top-0 flex h-screen w-[220px] shrink-0 flex-col self-start overflow-y-auto border-r border-gray-200 bg-white p-4">
+    {/* 合併：main 的固定側欄（sticky/h-screen/self-start）＋ MIRA logo，
+        與 codex 的手機版窄欄（w-16 → sm:w-[220px]）。
+        手機版扣掉內距只剩 32px，放不下 logo 與收合鈕，沿用 codex 對文字的做法：小螢幕隱藏 logo。 */}
+    <aside className="sticky top-0 flex h-screen w-16 shrink-0 flex-col items-center self-start overflow-y-auto border-r border-gray-200 bg-white p-4 sm:w-[220px] sm:items-stretch">
       <div className="mb-6 flex items-center justify-between px-1">
         <Image
           src="/mira-logo.png"
@@ -56,7 +59,7 @@ export function Sidebar() {
           width={399}
           height={96}
           priority
-          className="h-6 w-auto"
+          className="hidden h-6 w-auto sm:block"
         />
         <button
           type="button"
@@ -69,11 +72,15 @@ export function Sidebar() {
       </div>
       {clientId && (
         <>
-          <div className="mb-4"><BrandSwitcher currentClientId={clientId} /></div>
-          <SidebarNav currentClientId={clientId} />
+          <div className="hidden sm:block">
+            <div className="mb-4"><BrandSwitcher currentClientId={clientId} /></div>
+            <SidebarNav currentClientId={clientId} />
+          </div>
+          <div className="sm:hidden"><SidebarNav currentClientId={clientId} collapsed /></div>
         </>
       )}
-      <div className="mt-auto"><SidebarUser /></div>
+      <div className="mt-auto hidden sm:block"><SidebarUser /></div>
+      <div className="mt-auto sm:hidden"><SidebarUser collapsed /></div>
     </aside>
   );
 }

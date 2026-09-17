@@ -80,8 +80,12 @@ function LayoutOptionPreview({
   );
 }
 
-export function AdLayoutModal({ clientId, productId, productName, onClose }: {
-  clientId: string; productId: string; productName?: string; onClose: () => void;
+export function AdLayoutModal({ clientId, productId, productName, assetKit, onClose }: {
+  clientId: string;
+  productId: string;
+  productName?: string;
+  assetKit?: { batchId: string; assetIds: string[] };
+  onClose: () => void;
 }) {
   const router = useRouter();
   const [purpose, setPurpose] = useState<(typeof PURPOSES)[number]["k"]>("product");
@@ -132,7 +136,16 @@ export function AdLayoutModal({ clientId, productId, productName, onClose }: {
     try {
       const res = await fetch("/api/magic-layers/ad-layout", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, productId, purpose, ratio, title: title.trim(), subtitle: subtitle.trim(), benefits: purpose === "benefit" ? benefitText.split("\n").map(s=>s.trim()).filter(Boolean) : [] }),
+        body: JSON.stringify({
+          clientId,
+          productId,
+          purpose,
+          ratio,
+          title: title.trim(),
+          subtitle: subtitle.trim(),
+          benefits: purpose === "benefit" ? benefitText.split("\n").map(s=>s.trim()).filter(Boolean) : [],
+          ...(assetKit ? { assetKit: { productId, ...assetKit } } : {}),
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "產生設計稿失敗");
@@ -159,10 +172,20 @@ export function AdLayoutModal({ clientId, productId, productName, onClose }: {
     if (gapBusy || gapJob) return;
     setGapBusy(true); setError(null);
     try {
+      const planResponse = await fetch(`/api/products/${productId}/image-set/plan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      const plan = await planResponse.json().catch(() => ({}));
+      const plannedItem = Array.isArray(plan.items) ? plan.items.find((item: { assetRole?: unknown }) => item.assetRole === gap.role) : null;
+      if (!planResponse.ok || typeof plan.batchId !== "string" || !plan.artDirection || typeof plannedItem?.id !== "string") {
+        throw new Error(typeof plan.error === "string" ? plan.error : "無法建立素材規劃");
+      }
       const response = await fetch(`/api/products/${productId}/image-set`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items: [{ role: gap.role }] }),
+        body: JSON.stringify({ batchId: plan.batchId, selectedItemIds: [plannedItem.id], artDirection: plan.artDirection }),
       });
       const data = await response.json().catch(() => ({}));
       const item = Array.isArray(data.items) ? data.items[0] : null;
@@ -220,7 +243,7 @@ export function AdLayoutModal({ clientId, productId, productName, onClose }: {
               </button>
             </div>
             {artDirection && <p className={`mt-2 text-xs ${artDirection.source === "vision" ? "text-violet-700" : "text-gray-500"}`}>{artDirection.message}</p>}
-            {(generationGaps.length > 0 || gapJob) && <div className="mt-3 rounded-xl border border-violet-100 bg-violet-50/60 p-3 text-xs leading-5 text-gray-600">
+            {!assetKit && (generationGaps.length > 0 || gapJob) && <div className="mt-3 rounded-xl border border-violet-100 bg-violet-50/60 p-3 text-xs leading-5 text-gray-600">
               {gapJob?.status === "DONE" ? <div><p><strong className="text-gray-800">{gapJob.label}</strong> 已加入商品素材。</p><button type="button" onClick={restartDesign} className="mt-2 font-bold text-violet-700 hover:text-violet-800">重新建立設計稿</button></div>
                 : gapJob?.status === "FAILED" ? <div><p>建立{gapJob.label}未完成{gapJob.errorMessage ? `：${gapJob.errorMessage}` : ""}</p><button type="button" onClick={() => setGapJob(null)} className="mt-2 font-bold text-violet-700 hover:text-violet-800">重新選擇補齊素材</button></div>
                   : gapJob ? <p>正在建立{gapJob.label}；完成後可重新建立設計稿。</p>

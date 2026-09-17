@@ -13,7 +13,9 @@ import {
   analyzeProductVisualProfile,
   buildImageSetArtDirection,
   countProductVisualReferenceImages,
+  parseImageSetArtDirection,
   type ImageSetArtDirection,
+  type ProductBrandFacts,
 } from "./product-visual-analysis.ts";
 import {
   computeProductVisualSourceHash,
@@ -21,7 +23,21 @@ import {
   parseProductVisualProfile,
   type ProductVisualProfile,
 } from "./product-visual-profile.ts";
-import { planImageSetRoles, type ImageSetRole, type ImageSetRoleSpec } from "./image-set-roles.ts";
+import {
+  imageSetThemeCatalog,
+  planImageSetRoles,
+  resolveImageSetTheme,
+  type ImageSetRole,
+  type ImageSetRoleSpec,
+  type ImageSetTheme,
+} from "./image-set-roles.ts";
+import {
+  deriveImageSetKitStatus,
+  IMAGE_SET_MAX_ASSETS,
+  parseImageSetPlanJson,
+  type ImageSetPlanItem,
+  type ImageSetKitStatus,
+} from "./image-set-kit.ts";
 import {
   claimImageAssetCleanupJobLease,
   completeGeneratedImageSetRowWithLease,
@@ -112,6 +128,7 @@ type ImageSetRowMutation = {
   errorMessage?: string | null;
   generationLeaseId?: string | null;
   generationLeaseExpiresAt?: Date | null;
+  hasTransparentBackground?: boolean;
 };
 
 export type ImageSetRowParams = {
@@ -135,7 +152,7 @@ export type ImageSetBatchInput = {
 export type ImageSetBatchDependencies = {
   updateRow?: (id: string, data: ImageSetRowMutation) => Promise<unknown>;
   transitionRow?: (id: string, from: ImageSetRowStatus[], data: ImageSetRowMutation, execution: ImageSetExecution) => Promise<boolean>;
-  completeRow?: (id: string, data: Required<Pick<ImageSetRowMutation, "imageUrl" | "prompt" | "paramsJson">>, execution: ImageSetExecution) => Promise<boolean>;
+  completeRow?: (id: string, data: Required<Pick<ImageSetRowMutation, "imageUrl" | "prompt" | "paramsJson" | "hasTransparentBackground">>, execution: ImageSetExecution) => Promise<boolean>;
   failUnfinishedRows?: (rows: Array<{ id: string; errorMessage: string }>, execution: ImageSetExecution) => Promise<unknown>;
   generateRole: (input: ImageSetRoleGenerationInput) => Promise<ImageSetRoleGenerationOutput>;
   saveBuffer: (buffer: Buffer, extension: string, prefix: string, signal?: AbortSignal) => Promise<string>;
@@ -147,12 +164,20 @@ export type ImageSetBatchDependencies = {
   waitForCleanupRetry?: (delayMs: number) => Promise<void>;
   now?: () => number;
   logError?: (...values: unknown[]) => void;
+  inspectTransparency?: (buffer: Buffer) => Promise<boolean>;
 };
 
 export type ImageSetBatchResult = {
   statuses: Partial<Record<ImageSetRole, "DONE" | "FAILED">>;
   params: Partial<Record<ImageSetRole, ImageSetRowParams>>;
 };
+
+async function hasTransparentPixels(buffer: Buffer): Promise<boolean> {
+  const metadata = await sharp(buffer).metadata();
+  if (!metadata.hasAlpha) return false;
+  const stats = await sharp(buffer).stats();
+  return (stats.channels[3]?.min ?? 255) < 255;
+}
 
 export type ImageSetSuggestion = {
   role: ImageSetRole;
@@ -436,6 +461,90 @@ function cachedProfileFor(product: StoredImageSetProduct): { profile: ProductVis
   }
 }
 
+export type ProductImageSetDraftData = {
+  id: string;
+  productId: string;
+  themeKey: string | null;
+  themeLabel: string | null;
+  artDirectionJson: string;
+  planJson: string;
+  status: "DRAFT";
+};
+
+export type PlanProductImageSetDependencies = {
+  createBatchId: () => string;
+  createDraft: (data: ProductImageSetDraftData) => Promise<unknown>;
+  buildArtDirection?: (
+    profile: ProductVisualProfile,
+    brand: ProductBrandFacts,
+    theme: ImageSetTheme | null,
+  ) => ImageSetArtDirection;
+};
+
+export type PlanProductImageSetResult =
+  | { ok: true; value: {
+    batchId: string;
+    productId: string;
+    theme: ImageSetTheme | null;
+    themes: ImageSetTheme[];
+    artDirection: ImageSetArtDirection;
+    items: ImageSetPlanItem[];
+    maxAssets: number;
+  } }
+  | { ok: false; status: 400 | 409; error: string };
+
+function publicPlanItem(role: ReturnType<typeof planImageSetRoles>[number]): ImageSetPlanItem {
+  const { id, category, assetRole, assetSubtype, purpose, core, defaultSelected } = role;
+  return { id, category, assetRole, assetSubtype, purpose, core, defaultSelected };
+}
+
+/** Creates a free, immutable planning snapshot from the current cached product analysis. */
+export async function planProductImageSet(
+  request: {
+    product: StoredImageSetProduct;
+    client: ImageSetClient;
+    themeKey?: string;
+    themeKind?: ImageSetTheme["kind"];
+  },
+  dependencies: PlanProductImageSetDependencies,
+): Promise<PlanProductImageSetResult> {
+  const { profile } = cachedProfileFor(request.product);
+  if (!profile) {
+    return { ok: false, status: 409, error: "商品資料或圖片已更新，請先重新分析產品後再規劃套圖。" };
+  }
+  let theme: ImageSetTheme | null;
+  try {
+    theme = resolveImageSetTheme(request.themeKey, request.themeKind);
+  } catch (error) {
+    return { ok: false, status: 400, error: error instanceof Error ? error.message : "套圖主題資料無效" };
+  }
+  const buildDirection = dependencies.buildArtDirection ?? buildImageSetArtDirection;
+  const artDirection = buildDirection(profile, imageSetBrand(request.client, request.product.primaryColorOverride), theme);
+  const items = planImageSetRoles({ profile, artDirection, theme: theme ?? undefined }).map(publicPlanItem);
+  const batchId = dependencies.createBatchId();
+  await dependencies.createDraft({
+    id: batchId,
+    productId: request.product.id,
+    themeKey: theme?.key ?? null,
+    themeLabel: theme?.label ?? null,
+    artDirectionJson: JSON.stringify(artDirection),
+    planJson: JSON.stringify(items),
+    status: "DRAFT",
+  });
+  return {
+    ok: true,
+    value: {
+      batchId,
+      productId: request.product.id,
+      theme,
+      themes: imageSetThemeCatalog(),
+      artDirection,
+      items,
+      maxAssets: IMAGE_SET_MAX_ASSETS,
+    },
+  };
+}
+
 export type ImageSetAnalysisDependencies = {
   analyze: (product: ImageSetProduct, signal?: AbortSignal) => Promise<ProductVisualProfile>;
   persistProfile: (productId: string, data: {
@@ -643,11 +752,13 @@ const defaultDependencies: ImageSetBatchDependencies = {
     imageUrl: data.imageUrl,
     prompt: data.prompt,
     paramsJson: data.paramsJson,
+    hasTransparentBackground: data.hasTransparentBackground,
   }),
   failUnfinishedRows: (rows, execution) => db.$transaction(rows.map(({ id, errorMessage }) => db.libraryImage.updateMany({
     where: { id, status: { in: ["PENDING", "GENERATING"] }, generationLeaseId: execution.leaseId },
     data: { status: "FAILED", errorMessage, generationLeaseId: null, generationLeaseExpiresAt: null },
   }))),
+  inspectTransparency: hasTransparentPixels,
   generateRole: generateImageSetRole,
   saveBuffer,
   cleanupOrphanAsset: cleanupImageSetOrphanAsset,
@@ -697,6 +808,7 @@ export async function runImageSetBatch(
   const cleanupOrphanAsset = dependencies.cleanupOrphanAsset ?? defaultDependencies.cleanupOrphanAsset!;
   const waitForCleanupRetry = dependencies.waitForCleanupRetry ?? defaultDependencies.waitForCleanupRetry!;
   const now = dependencies.now ?? Date.now;
+  const inspectTransparency = dependencies.inspectTransparency ?? defaultDependencies.inspectTransparency!;
   const abortController = (dependencies.createAbortController ?? defaultDependencies.createAbortController!)();
   const reachedDeadline = () => abortController.signal.aborted || now() >= execution.deadlineAt;
 
@@ -714,7 +826,8 @@ export async function runImageSetBatch(
   };
 
   const runRow = async (row: ImageSetRow, batchHeroImageUrl?: string): Promise<string | undefined> => {
-    const initialParams = createImageSetRowParams(input, row.role);
+    const role = normalizePhysicalDetailRoleSpec(row.role);
+    const initialParams = createImageSetRowParams(input, role);
     try {
       const claimed = await transitionRow(row.id, ["PENDING", "GENERATING"], {
         status: "GENERATING",
@@ -724,34 +837,34 @@ export async function runImageSetBatch(
         generationLeaseExpiresAt: new Date(execution.deadlineAt),
       }, execution);
       if (!claimed) {
-        result.statuses[row.role.role] = "FAILED";
-        result.params[row.role.role] = initialParams;
+        result.statuses[role.role] = "FAILED";
+        result.params[role.role] = initialParams;
         return undefined;
       }
       if (reachedDeadline()) {
         await transitionRow(row.id, ["GENERATING"], {
           status: "FAILED",
-          errorMessage: roleFailureMessage(row.role.role, true),
+          errorMessage: roleFailureMessage(role.role, true),
           paramsJson: JSON.stringify(initialParams),
           generationLeaseId: null,
           generationLeaseExpiresAt: null,
         }, execution).catch(() => {});
-        result.statuses[row.role.role] = "FAILED";
-        result.params[row.role.role] = initialParams;
+        result.statuses[role.role] = "FAILED";
+        result.params[role.role] = initialParams;
         return undefined;
       }
-      const references = row.role.path === "edit" || row.role.path === "cutout"
+      const references = role.path === "edit" || role.path === "crop" || role.path === "cutout"
         ? await loadReferenceDataUris(input.product, batchHeroImageUrl, loadAsDataUri, abortController.signal)
         : { rawImageUrls: [] as string[] };
       const prompt = compileImageSetPrompt({
         product: { name: input.product.name, category: input.product.category },
         profile: input.profile,
         artDirection: input.artDirection,
-        role: row.role,
+        role,
       });
       abortController.signal.throwIfAborted();
       const generated = await dependencies.generateRole({
-        role: row.role.role,
+        role: role.role,
         prompt,
         heroImageUrl: references.heroImageUrl,
         rawImageUrls: references.rawImageUrls,
@@ -759,17 +872,18 @@ export async function runImageSetBatch(
         aspectRatio: "1:1",
         signal: abortController.signal,
         deadlineAt: execution.deadlineAt,
-        generationPath: row.role.path,
+        generationPath: role.path,
       });
       if (!isConcreteProvider(generated.provider)) throw new Error("Image provider trace is missing or synthetic");
       if (reachedDeadline()) throw new Error("Image-set batch deadline reached");
+      const hasTransparentBackground = await inspectTransparency(generated.buffer);
       const imageUrl = await dependencies.saveBuffer(
         generated.buffer,
         extension(generated.contentType),
-        `product-set-${row.role.role}-`,
+        `product-set-${role.role}-`,
         abortController.signal,
       );
-      const finalParams = createImageSetRowParams(input, row.role, generated.provider);
+      const finalParams = createImageSetRowParams(input, role, generated.provider);
       if (reachedDeadline()) {
         await deleteOrphan(row, imageUrl);
         throw abortController.signal.reason ?? new Error("Image-set batch deadline reached");
@@ -778,23 +892,24 @@ export async function runImageSetBatch(
         imageUrl,
         prompt,
         paramsJson: JSON.stringify(finalParams),
+        hasTransparentBackground,
       }, execution);
       if (!completed) {
         await deleteOrphan(row, imageUrl);
-        result.statuses[row.role.role] = "FAILED";
-        result.params[row.role.role] = initialParams;
+        result.statuses[role.role] = "FAILED";
+        result.params[role.role] = initialParams;
         return undefined;
       }
-      result.statuses[row.role.role] = "DONE";
-      result.params[row.role.role] = finalParams;
+      result.statuses[role.role] = "DONE";
+      result.params[role.role] = finalParams;
       return imageUrl;
     } catch (error) {
-      logError(`[image-set:${row.role.role}] generation failed`, error);
-      result.statuses[row.role.role] = "FAILED";
-      result.params[row.role.role] = initialParams;
+      logError(`[image-set:${role.role}] generation failed`, error);
+      result.statuses[role.role] = "FAILED";
+      result.params[role.role] = initialParams;
       await transitionRow(row.id, ["PENDING", "GENERATING"], {
         status: "FAILED",
-        errorMessage: roleFailureMessage(row.role.role, reachedDeadline(), error),
+        errorMessage: roleFailureMessage(role.role, reachedDeadline(), error),
         paramsJson: JSON.stringify(initialParams),
         generationLeaseId: null,
         generationLeaseExpiresAt: null,
@@ -966,9 +1081,11 @@ export type ImageSetPendingRowData = {
   clientId: string;
   productId: string;
   assetRole: ImageSetRole;
+  assetSubtype?: string;
   subject: string;
   status: "PENDING";
   batchId: string;
+  prompt?: string;
   paramsJson: string;
   generationLeaseId: string;
   generationLeaseExpiresAt: Date;
@@ -1018,7 +1135,7 @@ export async function createAndScheduleImageSetBatch(
   if (roles.some((role) => role.path === "cutout") && !imageProduct.rawImageUrls.some(Boolean)) {
     return { ok: false, status: 400, error: "需要至少一張原始商品照，才能建立商品主體去背 PNG。" };
   }
-  if (roles.some((role) => role.path === "edit") && ![...imageProduct.rawImageUrls, imageProduct.heroImageUrl].some(Boolean)) {
+  if (roles.some((role) => role.path === "edit" || role.path === "crop") && ![...imageProduct.rawImageUrls, imageProduct.heroImageUrl].some(Boolean)) {
     return { ok: false, status: 400, error: "需要至少一張商品照，才能建立產品參考素材。" };
   }
 
@@ -1077,6 +1194,185 @@ export async function createAndScheduleImageSetBatch(
   };
 }
 
+export type StoredProductImageSetDraft = {
+  id: string;
+  productId: string;
+  status: string;
+  themeKey: string | null;
+  themeLabel: string | null;
+  artDirectionJson: string;
+  planJson: string;
+};
+
+export type ConfirmedImageSetBatchData = {
+  batchId: string;
+  productId: string;
+  artDirectionJson: string;
+  planJson: string;
+  confirmedAt: Date;
+  rows: ImageSetPendingRowData[];
+};
+
+export type ConfirmProductImageSetDependencies = {
+  loadDraft: (productId: string, batchId: string) => Promise<StoredProductImageSetDraft | null>;
+  claimProductLease: (productId: string, execution: ImageSetExecution) => Promise<boolean>;
+  releaseProductLease: (productId: string, leaseId: string) => Promise<unknown>;
+  persistConfirmedBatch: (data: ConfirmedImageSetBatchData) => Promise<Array<{ id: string }> | null>;
+  failCreatedRows?: (rowIds: string[], execution: ImageSetExecution) => Promise<boolean>;
+  scheduleAfter: (callback: () => Promise<unknown>) => void;
+  runBatch: (input: ImageSetBatchInput, execution: ImageSetExecution) => Promise<ImageSetBatchResult>;
+  readBatchStatuses: (batchId: string, productId: string) => Promise<ImageSetRowStatus[]>;
+  updateKitStatus: (batchId: string, status: Exclude<ImageSetKitStatus, "DRAFT" | "CONFIRMED">) => Promise<unknown>;
+  now?: () => Date;
+};
+
+export type ConfirmProductImageSetResult =
+  | { ok: true; batchId: string; items: Array<{ id: string; role: ImageSetRole; label: string; status: "PENDING" }> }
+  | { ok: false; status: 400 | 404 | 409; error: string };
+
+/** Validates an immutable DRAFT snapshot before any lease or paid generation can begin. */
+export async function confirmAndScheduleProductImageSet(
+  request: {
+    product: StoredImageSetProduct;
+    client: ImageSetClient;
+    batchId: string;
+    selectedItemIds: string[];
+    artDirection: unknown;
+    execution: ImageSetExecution;
+  },
+  dependencies: ConfirmProductImageSetDependencies,
+): Promise<ConfirmProductImageSetResult> {
+  if (!request.batchId.trim()) return { ok: false, status: 400, error: "缺少套圖批次" };
+  if (!request.selectedItemIds.length) return { ok: false, status: 400, error: "至少要選擇一項素材" };
+  if (request.selectedItemIds.length > IMAGE_SET_MAX_ASSETS) {
+    return { ok: false, status: 400, error: `單批最多只能生成 ${IMAGE_SET_MAX_ASSETS} 項素材` };
+  }
+  if (new Set(request.selectedItemIds).size !== request.selectedItemIds.length) {
+    return { ok: false, status: 400, error: "選取清單含有重複項目" };
+  }
+  const requestedArtDirection = parseImageSetArtDirection(request.artDirection);
+  if (!requestedArtDirection) return { ok: false, status: 400, error: "套圖視覺方向格式不正確" };
+  const { profile, sourceHash } = cachedProfileFor(request.product);
+  if (!profile) return { ok: false, status: 409, error: "商品分析已過期，請重新規劃套圖。" };
+
+  const draft = await dependencies.loadDraft(request.product.id, request.batchId);
+  if (!draft || draft.productId !== request.product.id || draft.id !== request.batchId) {
+    return { ok: false, status: 404, error: "找不到這項產品的套圖規劃" };
+  }
+  if (draft.status !== "DRAFT") return { ok: false, status: 409, error: "這份套圖規劃已確認或正在生成" };
+  let storedArtDirection: ImageSetArtDirection | null = null;
+  try {
+    storedArtDirection = parseImageSetArtDirection(JSON.parse(draft.artDirectionJson));
+  } catch {
+    // Handled by the invalid persisted snapshot response below.
+  }
+  if (!storedArtDirection) return { ok: false, status: 409, error: "儲存的套圖視覺方向已失效，請重新規劃。" };
+  const artDirection: ImageSetArtDirection = {
+    ...requestedArtDirection,
+    consistencyRules: storedArtDirection.consistencyRules,
+  };
+
+  let storedPlan: ImageSetPlanItem[];
+  try {
+    storedPlan = parseImageSetPlanJson(draft.planJson);
+  } catch {
+    return { ok: false, status: 409, error: "儲存的套圖規劃已失效，請重新規劃。" };
+  }
+  const selectedIds = new Set(request.selectedItemIds);
+  const selectedPlan = storedPlan.filter(({ id }) => selectedIds.has(id));
+  if (selectedPlan.length !== selectedIds.size) return { ok: false, status: 400, error: "選取清單包含未知素材" };
+
+  const theme = draft.themeKey
+    ? imageSetThemeCatalog().find(({ key, label }) => key === draft.themeKey && label === draft.themeLabel) ?? null
+    : null;
+  if (draft.themeKey && !theme) return { ok: false, status: 409, error: "儲存的套圖主題已失效，請重新規劃。" };
+  const currentSpecs = planImageSetRoles({ profile, artDirection, theme: theme ?? undefined });
+  const specsById = new Map(currentSpecs.map((spec) => [spec.id, spec]));
+  const selectedSpecs = selectedPlan.map((item) => {
+    const spec = specsById.get(item.id);
+    if (!spec || spec.assetRole !== item.assetRole || spec.assetSubtype !== item.assetSubtype || spec.category !== item.category) return null;
+    return spec;
+  });
+  if (selectedSpecs.some((spec) => !spec)) {
+    return { ok: false, status: 409, error: "儲存的套圖角色或素材變化已失效，請重新規劃。" };
+  }
+  const roles = selectedSpecs.filter((spec): spec is NonNullable<typeof spec> => !!spec);
+  const imageProduct = asImageSetProduct(request.product);
+  if (roles.some(({ path }) => path === "cutout") && !imageProduct.rawImageUrls.some(Boolean)) {
+    return { ok: false, status: 400, error: "需要至少一張原始商品照，才能建立商品主體去背 PNG。" };
+  }
+  if (roles.some(({ path }) => path === "edit" || path === "crop") && ![...imageProduct.rawImageUrls, imageProduct.heroImageUrl].some(Boolean)) {
+    return { ok: false, status: 400, error: "需要至少一張商品照，才能建立產品參考素材。" };
+  }
+
+  const claimed = await dependencies.claimProductLease(request.product.id, request.execution);
+  if (!claimed) return { ok: false, status: 409, error: "這項產品已有套圖正在生成，請等待完成後再試。" };
+  const confirmedAt = (dependencies.now ?? (() => new Date()))();
+  const pendingRows: ImageSetPendingRowData[] = roles.map((role) => ({
+    clientId: request.product.clientId,
+    productId: request.product.id,
+    assetRole: role.role,
+    assetSubtype: role.assetSubtype,
+    subject: role.label,
+    status: "PENDING",
+    batchId: request.batchId,
+    prompt: compileImageSetPrompt({ product: imageProduct, profile, artDirection, role }),
+    paramsJson: JSON.stringify(createImageSetRowParams({ sourceHash, profile, artDirection }, role)),
+    generationLeaseId: request.execution.leaseId,
+    generationLeaseExpiresAt: new Date(request.execution.deadlineAt),
+  }));
+  const created = await dependencies.persistConfirmedBatch({
+    batchId: request.batchId,
+    productId: request.product.id,
+    artDirectionJson: JSON.stringify(artDirection),
+    planJson: JSON.stringify(selectedPlan),
+    confirmedAt,
+    rows: pendingRows,
+  }).catch(async (error) => {
+    await dependencies.releaseProductLease(request.product.id, request.execution.leaseId).catch(() => {});
+    throw error;
+  });
+  if (!created || created.length !== roles.length) {
+    await dependencies.releaseProductLease(request.product.id, request.execution.leaseId).catch(() => {});
+    return { ok: false, status: 409, error: "這份套圖規劃已被其他請求確認" };
+  }
+  const batchInput: ImageSetBatchInput = {
+    batchId: request.batchId,
+    sourceHash,
+    profile,
+    artDirection,
+    product: imageProduct,
+    rows: created.map((row, index) => ({ id: row.id, role: roles[index] })),
+  };
+  try {
+    dependencies.scheduleAfter(async () => {
+      try {
+        await dependencies.runBatch(batchInput, request.execution);
+      } catch (error) {
+        await dependencies.failCreatedRows?.(created.map(({ id }) => id), request.execution).catch(() => false);
+        throw error;
+      } finally {
+        try {
+          const statuses = await dependencies.readBatchStatuses(request.batchId, request.product.id);
+          await dependencies.updateKitStatus(request.batchId, deriveImageSetKitStatus(statuses));
+        } finally {
+          await dependencies.releaseProductLease(request.product.id, request.execution.leaseId).catch(() => {});
+        }
+      }
+    });
+  } catch (error) {
+    await dependencies.failCreatedRows?.(created.map(({ id }) => id), request.execution).catch(() => false);
+    await dependencies.updateKitStatus(request.batchId, "FAILED").catch(() => {});
+    await dependencies.releaseProductLease(request.product.id, request.execution.leaseId).catch(() => {});
+    throw error;
+  }
+  return {
+    ok: true,
+    batchId: request.batchId,
+    items: created.map((row, index) => ({ id: row.id, role: roles[index].role, label: roles[index].label, status: "PENDING" })),
+  };
+}
+
 export type PreparedImageSetRegeneration = {
   rowId: string;
   input: ImageSetBatchInput;
@@ -1089,8 +1385,18 @@ export type ImageSetRegenerationPreparation =
 export type ImageSetRegenerationRow = {
   id: string;
   batchId: string | null;
+  productId?: string | null;
+  assetRole?: string | null;
+  assetSubtype?: string | null;
   paramsJson: string;
   product: StoredImageSetProduct | null;
+};
+
+export type ProductImageSetRetrySnapshot = {
+  id: string;
+  productId: string;
+  artDirectionJson: string;
+  planJson: string;
 };
 
 function parseRawImageUrls(raw: string): string[] {
@@ -1119,13 +1425,23 @@ function isValidSavedRoleSpec(role: unknown): role is ImageSetRoleSpec {
   return (
     typeof value.role === "string" &&
     typeof value.label === "string" &&
-    (value.path === "cutout" || value.path === "edit" || value.path === "text") &&
+    (value.path === "cutout" || value.path === "crop" || value.path === "edit" || value.path === "text") &&
     typeof value.cutout === "boolean" &&
     typeof value.sceneCn === "string" &&
     typeof value.objective === "string" &&
     typeof value.composition === "string" &&
     Array.isArray(value.mustNotShow) && value.mustNotShow.every((item) => typeof item === "string")
   );
+}
+
+function normalizePhysicalDetailRoleSpec(role: ImageSetRoleSpec): ImageSetRoleSpec {
+  const saved = role as ImageSetRoleSpec & { assetSubtype?: string };
+  if (saved.role !== "detail" || saved.assetSubtype === "formula-texture" || saved.path === "crop") return role;
+  return {
+    ...saved,
+    path: "crop",
+    mustNotShow: saved.mustNotShow.filter((item) => item !== "Logo" && item !== "文字"),
+  };
 }
 
 export function prepareImageSetRegenerationFromRow(row: ImageSetRegenerationRow): ImageSetRegenerationPreparation {
@@ -1165,7 +1481,51 @@ export function prepareImageSetRegenerationFromRow(row: ImageSetRegenerationRow)
         profile,
         artDirection: params.artDirection,
         product,
-        rows: [{ id: row.id, role: params.roleSpec }],
+        rows: [{ id: row.id, role: normalizePhysicalDetailRoleSpec(params.roleSpec) }],
+      },
+    },
+  };
+}
+
+/** Reuses one persisted kit direction and rejects rows whose role metadata no longer matches its confirmed plan. */
+export function prepareKitAssetRegenerationFromRecords(
+  row: ImageSetRegenerationRow,
+  kit: ProductImageSetRetrySnapshot,
+): ImageSetRegenerationPreparation {
+  if (
+    row.batchId !== kit.id
+    || row.productId !== kit.productId
+    || row.product?.id !== kit.productId
+  ) return { ok: false, status: 404, error: "找不到這份套圖中的素材" };
+
+  let plan: ImageSetPlanItem[];
+  let kitDirection: ImageSetArtDirection | null = null;
+  try {
+    plan = parseImageSetPlanJson(kit.planJson);
+    kitDirection = parseImageSetArtDirection(JSON.parse(kit.artDirectionJson));
+  } catch {
+    return { ok: false, status: 409, error: "套圖方向或角色資料已失效，請重新建立套圖。" };
+  }
+  if (!kitDirection) return { ok: false, status: 409, error: "套圖方向或角色資料已失效，請重新建立套圖。" };
+  const planned = plan.find((item) => item.assetRole === row.assetRole && item.assetSubtype === row.assetSubtype);
+  if (!planned) return { ok: false, status: 400, error: "這張素材的角色或變化不在已確認的套圖清單中" };
+
+  const prepared = prepareImageSetRegenerationFromRow(row);
+  if (!prepared.ok) return prepared;
+  const savedRole = prepared.value.input.rows[0]?.role as ImageSetRoleSpec & { assetRole?: string; assetSubtype?: string };
+  if (
+    savedRole.role !== planned.assetRole
+    || savedRole.assetSubtype !== planned.assetSubtype
+  ) return { ok: false, status: 400, error: "這張素材的角色或變化資料不一致" };
+
+  return {
+    ok: true,
+    value: {
+      ...prepared.value,
+      input: {
+        ...prepared.value.input,
+        batchId: kit.id,
+        artDirection: kitDirection,
       },
     },
   };

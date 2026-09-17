@@ -11,6 +11,7 @@ import type { LayerData } from "./types.ts";
 import type { CreativeBrief, DesignRecipe } from "./ad-layout-creative-brief.ts";
 import type { AdLayoutAssetPlan, GapPlanEntry } from "./ad-layout-gap-analysis.ts";
 import type { AdLayoutAssessmentMetadata, AdLayoutCompositionAdvice } from "./ad-layout-vision-policy.ts";
+import type { BackgroundAnalysis } from "./ad-layout-background-analysis.ts";
 
 export type { AdLayoutPurpose } from "./ad-layout-design-spec.ts";
 export type AdLayoutCandidateId = "product-focus" | "editorial" | "scene-led";
@@ -39,6 +40,7 @@ export interface AdLayoutInput {
   planning?: { brief: CreativeBrief; recipe: DesignRecipe; assetPlan: AdLayoutAssetPlan; gapPlan: GapPlanEntry[] };
   compositionAdvice?: AdLayoutCompositionAdvice;
   assessment?: AdLayoutAssessmentMetadata;
+  backgroundAnalysis?: BackgroundAnalysis;
   canvasWidth: number;
   canvasHeight: number;
 }
@@ -74,6 +76,7 @@ export function buildAdLayoutCandidates(input: AdLayoutInput): AdLayoutCandidate
     productAspectRatio: input.heroAspectRatio,
     planning: input.planning,
     compositionAdvice: input.compositionAdvice,
+    backgroundAnalysis: input.backgroundAnalysis,
     typography: {
       headline: input.title,
       subtitle: input.subtitle,

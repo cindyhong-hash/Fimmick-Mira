@@ -18,6 +18,7 @@ import { MagicLayersEditor, type SavedLayer } from "@/components/magic-layers/Ma
 import { savedToLayerData } from "@/lib/magic-layers/saved-layer.ts";
 import type { LayerData } from "@/lib/magic-layers/types.ts";
 import { ML_COMPOSE_BG_KEY, ML_COMPOSE_CLIENT_KEY, ML_WIZARD_SEED_KEY } from "@/components/activities/RolePickerModal";
+import { buildAssetKitSeedLayers, parseMagicLayersSeed, type HandoffKitAsset } from "@/lib/products/asset-kit-handoff";
 
 // 造一張 docW×docH 的空白圖，只用來給編輯器決定畫布尺寸（圖層自己帶各自的圖）。
 function blankImage(w: number, h: number): Promise<HTMLImageElement> {
@@ -55,6 +56,7 @@ export function ComposeView({ clientId: clientIdProp }: { clientId?: string }) {
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [layers, setLayers] = useState<LayerData[] | null>(null);
   const [bgLibrary, setBgLibrary] = useState<{ url: string; label?: string }[]>([]);
+  const [kitLibrary, setKitLibrary] = useState<{ url: string; label?: string }[]>([]);
   const [activityId, setActivityId] = useState<string | null>(null); // 已存草稿活動 id → 之後儲存變更新同一筆
   const [docName, setDocName] = useState<string | null>(null);       // 設計名稱（可重新命名）
   const [logos, setLogos] = useState<string[]>([]);                  // 品牌 logo（Logo 工具用）
@@ -63,12 +65,15 @@ export function ComposeView({ clientId: clientIdProp }: { clientId?: string }) {
 
   // 素材庫「用這張做背景排版」帶進來的背景圖（+ 獨立頁的 clientId）→ 落在素材庫模式並選中。
   useEffect(() => {
-    try {
-      const url = sessionStorage.getItem(ML_COMPOSE_BG_KEY);
-      const cid = sessionStorage.getItem(ML_COMPOSE_CLIENT_KEY);
-      if (url) { sessionStorage.removeItem(ML_COMPOSE_BG_KEY); setLibUrl(url); setBgMode("library"); }
-      if (cid) { sessionStorage.removeItem(ML_COMPOSE_CLIENT_KEY); if (!clientIdProp) setClientId(cid); }
-    } catch { /* ignore */ }
+    const frame = requestAnimationFrame(() => {
+      try {
+        const url = sessionStorage.getItem(ML_COMPOSE_BG_KEY);
+        const cid = sessionStorage.getItem(ML_COMPOSE_CLIENT_KEY);
+        if (url) { sessionStorage.removeItem(ML_COMPOSE_BG_KEY); setLibUrl(url); setBgMode("library"); }
+        if (cid) { sessionStorage.removeItem(ML_COMPOSE_CLIENT_KEY); if (!clientIdProp) setClientId(cid); }
+      } catch { /* ignore */ }
+    });
+    return () => cancelAnimationFrame(frame);
   }, [clientIdProp]);
 
   // 首頁「自由排版」帶 ?blank=1 → 跳過表單，直接開一張空白畫布進編輯器。
@@ -96,14 +101,24 @@ export function ComposeView({ clientId: clientIdProp }: { clientId?: string }) {
       try {
         const raw = sessionStorage.getItem(ML_WIZARD_SEED_KEY);
         if (!raw) return;
-        const seed = JSON.parse(raw) as {
-          layers: LayerData[]; docW: number; docH: number;
-          clientId?: string; title?: string; subtitle?: string;
-        };
+        const seed = parseMagicLayersSeed(raw);
+        if (!seed) return;
+        let seedLayers = seed.layers;
+        if (seed.assetKit) {
+          const seedClientId = seed.clientId ?? clientIdProp;
+          if (!seedClientId) return;
+          const response = await fetch(`/api/products/${encodeURIComponent(seed.assetKit.productId)}/image-set/${encodeURIComponent(seed.assetKit.batchId)}?clientId=${encodeURIComponent(seedClientId)}`);
+          const kit = await response.json().catch(() => ({})) as { productId?: unknown; batchId?: unknown; assets?: HandoffKitAsset[] };
+          if (!response.ok || kit.productId !== seed.assetKit.productId || kit.batchId !== seed.assetKit.batchId || !Array.isArray(kit.assets)) return;
+          const allowed = new Set(seed.assetKit.assetIds);
+          const assets = kit.assets.filter((asset) => allowed.has(asset.id) && asset.status === "DONE" && !!asset.imageUrl);
+          seedLayers = buildAssetKitSeedLayers(assets, seed.docW, seed.docH);
+          setKitLibrary(assets.map((asset) => ({ url: asset.imageUrl, label: asset.assetSubtype ?? "視覺套組素材" })));
+        }
         const im = await blankImage(seed.docW, seed.docH);
         if (cancelled) return;
         setImg(im);
-        setLayers(seed.layers);
+        setLayers(seedLayers);
         setFromHandoff(true);
         if (seed.clientId && !clientIdProp) setClientId(seed.clientId);
         if (seed.title) { setTitle(seed.title); setDocName(seed.title); }
@@ -189,6 +204,7 @@ export function ComposeView({ clientId: clientIdProp }: { clientId?: string }) {
 
   // 送出時用的背景（素材庫/上傳給 URL，AI 給 prompt）。
   const activeBg = bgMode === "library" ? libUrl : bgMode === "upload" ? uploadUrl : "";
+  const availableBackgrounds = [...kitLibrary, ...bgLibrary.filter((item) => !kitLibrary.some(({ url }) => url === item.url))];
 
   const compose = useCallback(async () => {
     if (busy) return;
@@ -227,7 +243,7 @@ export function ComposeView({ clientId: clientIdProp }: { clientId?: string }) {
   if (layers && img) {
     return (
       <div style={S.editorPanel}>
-        <MagicLayersEditor image={img} layers={layers} backgrounds={bgLibrary} logos={logos}
+        <MagicLayersEditor image={img} layers={layers} backgrounds={availableBackgrounds} logos={logos}
           name={docName ?? title} clientId={clientId} onRename={setDocName}
           onBack={() => {
             // handoff（精靈/空白/續編）進來 → 返回離開編輯器（回上一頁）；表單流程 → 返回回表單。
@@ -259,9 +275,9 @@ export function ComposeView({ clientId: clientIdProp }: { clientId?: string }) {
 
         {bgMode === "library" && (
           <div style={{ margin: "0 0 14px" }}>
-            {bgLibrary.length > 0 ? (
+            {availableBackgrounds.length > 0 ? (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, maxHeight: 220, overflowY: "auto", padding: 2 }}>
-                {bgLibrary.map((b, i) => (
+                {availableBackgrounds.map((b, i) => (
                   <img key={i} src={b.url} alt={b.label ?? ""} title={b.label ?? ""} onClick={() => setLibUrl(b.url)}
                     style={{ width: "100%", aspectRatio: "1", objectFit: "cover", borderRadius: 10, cursor: "pointer",
                       border: libUrl === b.url ? "2px solid #7c3aed" : "1px solid #e5e7eb",

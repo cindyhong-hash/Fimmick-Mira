@@ -8,6 +8,9 @@ import { validateAdLayoutSpec, type AdLayoutQualityCheck } from "./ad-layout-qua
 import { polishAdLayoutSpec } from "./ad-layout-polish.ts";
 import { planProductIntegration, type ProductIntegrationPlan } from "./ad-layout-product-integration.ts";
 import type { AdLayoutCompositionAdvice } from "./ad-layout-vision-policy.ts";
+import { resolveCompositionPlan, type CompositionPlan } from "./ad-layout-composition-plan.ts";
+import type { BackgroundAnalysis } from "./ad-layout-background-analysis.ts";
+import { evaluateAdLayout, repairAdLayoutSpec } from "./ad-layout-scoring.ts";
 
 export type AdLayoutPurpose = "product" | "benefit" | "scene" | "promo";
 export type AdLayoutDirection = "product-focus" | "editorial" | "scene-led";
@@ -41,6 +44,9 @@ export interface AdLayoutDesignInput {
   productAspectRatio?: number;
   planning?: { brief: CreativeBrief; recipe: DesignRecipe; assetPlan: AdLayoutAssetPlan; gapPlan: GapPlanEntry[] };
   compositionAdvice?: AdLayoutCompositionAdvice;
+  compositionPlan?: CompositionPlan;
+  compositionPlans?: Partial<Record<AdLayoutDirection, CompositionPlan>>;
+  backgroundAnalysis?: BackgroundAnalysis;
 }
 export interface AdLayoutDesignSpec {
   benefits?: BenefitInput[];
@@ -55,6 +61,7 @@ export interface AdLayoutDesignSpec {
   assetPlan?: AdLayoutAssetPlan;
   gapPlan?: GapPlanEntry[];
   compositionAdvice?: AdLayoutCompositionAdvice;
+  compositionPlan?: CompositionPlan;
   rationale: string[];
   canvas: { width: number; height: number; ratio: string };
   assets: { background?: AssetSelection; product?: AssetSelection; support?: AssetSelection; decorations: AssetSelection[] };
@@ -114,25 +121,32 @@ export function validateAndRepairDesignSpec(spec: AdLayoutDesignSpec, available:
   const integrated = assets.product
     ? { ...repaired, productIntegration: planProductIntegration(repaired) }
     : { ...repaired, productIntegration: undefined };
-  const checks = validateAdLayoutSpec(integrated);
-  const failed = checks.filter((check) => !check.passed);
-  return { ...integrated, quality: { score: Math.max(0, 100 - warnings.length * 8 - failed.length * 15), warnings: [...warnings, ...failed.map((check) => check.message)], checks } };
+  const repairedForHierarchy = repairAdLayoutSpec(integrated);
+  const evaluation = evaluateAdLayout(repairedForHierarchy);
+  const failed = evaluation.checks.filter((check) => !check.passed);
+  return { ...repairedForHierarchy, quality: { score: Math.max(0, evaluation.score - warnings.length * 8), warnings: [...warnings, ...failed.map((check) => check.message)], checks: evaluation.checks } };
 }
 
 export function resolveAdLayoutDesignSpecs(input: AdLayoutDesignInput): AdLayoutDesignSpec[] {
   const directions: AdLayoutDirection[] = ["product-focus", "editorial", "scene-led"];
   return directions.map((direction) => {
     const directionDecision = input.directionDecisions?.[direction];
+    const compositionPlan = input.compositionPlans?.[direction] ?? resolveCompositionPlan({
+      canvas: input.canvas,
+      purpose: input.purpose,
+      hasBenefits: Boolean(input.benefits?.length),
+      preferredTextSafeArea: input.compositionAdvice?.preferredTextSafeArea,
+    }, direction, directionDecision);
     const fallbackTemplate = templateForAdvice(direction, input.purpose, input.canvas.ratio, input.compositionAdvice?.preferredTextSafeArea);
-    const layout = input.layouts?.[direction] ?? resolveAdComposition(input, direction, directionDecision);
+    const layout = input.layouts?.[direction] ?? resolveAdComposition({ ...input, compositionPlan }, direction, directionDecision);
     const template = templateById(layout?.templateId ?? fallbackTemplate.id);
     const directionalPlan = input.planning
       ? planRecipeAssets(input.planning.recipe, input.planning.brief.inventory, direction)
       : undefined;
     const assets = directionalPlan ? selectionsFromPlan(directionalPlan) : assetPlan(direction, input.purpose, input.assets);
     if (input.benefits?.length || directionDecision?.support === "none") assets.support = undefined;
-    if (directionDecision?.support === "detail" && input.assets.detail) assets.support = selected("detail", input.assets.detail);
-    if (directionDecision?.support === "benefit" && input.assets.benefit) assets.support = selected("benefit", input.assets.benefit);
+    if (!input.benefits?.length && directionDecision?.support === "detail" && input.assets.detail) assets.support = selected("detail", input.assets.detail);
+    if (!input.benefits?.length && directionDecision?.support === "benefit" && input.assets.benefit) assets.support = selected("benefit", input.assets.benefit);
     if (directionDecision?.decoration === "none") assets.decorations = [];
     const treatment = typeof input.typography.treatment === "string"
       ? input.typography.treatment
@@ -156,6 +170,7 @@ export function resolveAdLayoutDesignSpecs(input: AdLayoutDesignInput): AdLayout
       assetPlan: directionalPlan ?? input.planning?.assetPlan,
       gapPlan: input.planning?.gapPlan,
       compositionAdvice: input.compositionAdvice,
+      compositionPlan,
       rationale: rationaleFor(direction, assets),
       canvas: input.canvas,
       assets,

@@ -104,6 +104,8 @@ model LibraryImage {
   productId    String?                     // [PRODUCT] 所屬產品（null＝一般素材）
   product      Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
   assetRole    String?                     // [PRODUCT] 積木角色：hero｜product｜texture｜ingredient｜background｜decoration｜finished
+  assetSubtype String?                     // [VISUAL ASSET KIT] 同角色內的素材變化，例如 clean-cutout、macro-texture
+  hasTransparentBackground Boolean?        // [VISUAL ASSET KIT] null＝未知；供畫布與排版選擇透明素材
   generationLeaseId        String?         // [PRODUCT] 付費生成工作擁有權；CAS 防止重複與晚到結果覆寫
   generationLeaseExpiresAt DateTime?       // [PRODUCT] process death 後由 stale reconciliation 回收
 
@@ -154,9 +156,26 @@ model Product {
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
   assets               LibraryImage[]               // 這支產品擁有的資產（套圖積木＋回存成品）
+  imageSets            ProductImageSet[]             // [VISUAL ASSET KIT] 已規劃及確認的素材套組 metadata
 
   @@index([clientId, updatedAt])
   @@index([paidOperationLeaseExpiresAt])
+}
+
+model ProductImageSet {
+  id               String   @id
+  productId        String
+  themeKey         String?
+  themeLabel       String?
+  artDirectionJson String
+  planJson         String
+  status           String   @default("DRAFT")
+  confirmedAt      DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  product          Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, createdAt])
 }
 
 // ── AI 月度企劃（Monthly Marketing Planner）────────────────────────────────────

@@ -5,7 +5,7 @@ import type { DirectionDecision } from "./ad-layout-art-direction.ts";
 
 const productFocus: DirectionDecision = {
   direction: "product-focus", composition: "copy-left", typography: "bold", density: "minimal",
-  support: "benefit", decoration: "one", accent: "secondary", graphics: "benefit-group", backdrop: "light-fade", confidence: 0.9,
+  support: "benefit", decoration: "one", accent: "secondary", backdrop: "light-fade", confidence: 0.9,
 };
 
 test("keeps only trusted decisions and never restores a missing unsafe asset", () => {
@@ -18,17 +18,6 @@ test("keeps only trusted decisions and never restores a missing unsafe asset", (
 
   assert.equal(policy["product-focus"]?.support, "none");
   assert.equal(policy["product-focus"]?.accent, "primary");
-  assert.equal(policy["product-focus"]?.graphics, "benefit-group");
   assert.equal(policy.editorial, undefined);
   assert.equal(policy["scene-led"]?.support, "none");
-});
-
-test("does not plan benefit graphics when no user-confirmed benefit exists", () => {
-  const policy = applyArtDirectionPolicy({
-    decision: { version: 1, directions: [productFocus, { ...productFocus, direction: "editorial" }, { ...productFocus, direction: "scene-led" }] },
-    hasSecondaryAccent: true,
-    assets: { hero: true, detail: true, benefit: true, decoration: true },
-    benefits: [],
-  });
-  assert.equal(policy["product-focus"]?.graphics, "none");
 });

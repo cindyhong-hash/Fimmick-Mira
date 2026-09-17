@@ -6,9 +6,12 @@ import {
   IMAGE_SET_BATCH_DEADLINE_MS,
   analyzeImageSetProduct,
   cleanupImageSetOrphanAsset,
+  confirmAndScheduleProductImageSet,
   createAndScheduleImageSetBatch,
   createImageSetExecution,
   prepareImageSetRegenerationFromRow,
+  planProductImageSet,
+  prepareKitAssetRegenerationFromRecords,
   reconcileImageSetCleanupJobs,
   reconcileStaleImageSetWork,
   requestImageSetAnalysis,
@@ -22,8 +25,10 @@ import {
 } from "./image-set-orchestrator.ts";
 import { ImageSetFallbackBudgetError } from "./image-set-model-router.ts";
 import type { ProductVisualProfile } from "./product-visual-profile.ts";
+import { computeProductVisualSourceHash } from "./product-visual-profile.ts";
 import type { ImageSetArtDirection } from "./product-visual-analysis.ts";
 import { planImageSetRoles, type ImageSetRoleSpec } from "./image-set-roles.ts";
+import { imageSetThemeCatalog } from "./image-set-roles.ts";
 
 const profile: ProductVisualProfile = {
   version: 1,
@@ -46,6 +51,8 @@ const artDirection: ImageSetArtDirection = {
   backgroundLanguage: "明亮浴室",
   cameraLanguage: "清晰攝影",
   consistencyRules: [],
+  mood: [],
+  decorationStyle: [],
 };
 
 const roles: ImageSetRoleSpec[] = [
@@ -91,9 +98,194 @@ function fakeDeps(options: { events?: string[]; failRole?: string } = {}): Image
       return `/uploads/${prefix}.png`;
     },
     loadAsDataUri: async (url) => `data:image/png;base64,${Buffer.from(url).toString("base64")}`,
+    inspectTransparency: async () => false,
     logError: () => {},
   };
 }
+
+test("free kit planning uses the cached analysis, builds one direction, and persists a new DRAFT", async () => {
+  const imageProduct = input().product;
+  const storedProduct = {
+    ...imageProduct,
+    rawImageUrls: JSON.stringify(imageProduct.rawImageUrls),
+    visualProfileJson: JSON.stringify(profile),
+    visualProfileSourceHash: computeProductVisualSourceHash(imageProduct),
+  };
+  const theme = imageSetThemeCatalog().find(({ kind }) => kind === "PROMO")!;
+  const drafts: unknown[] = [];
+  let directionBuilds = 0;
+
+  const result = await planProductImageSet({
+    product: storedProduct,
+    client: { primaryColor: "#ffffff", toneLabels: "[]" },
+    themeKey: theme.key,
+    themeKind: theme.kind,
+  }, {
+    createBatchId: () => "kit-draft-1",
+    buildArtDirection: (cached, brand, selectedTheme) => {
+      directionBuilds += 1;
+      assert.deepEqual(cached, profile);
+      return { ...artDirection, concept: `${selectedTheme?.label}素材包` };
+    },
+    createDraft: async (data) => { drafts.push(data); },
+  });
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(directionBuilds, 1);
+  assert.equal(result.value.batchId, "kit-draft-1");
+  assert.equal(result.value.theme?.key, theme.key);
+  assert.equal(result.value.items.filter(({ defaultSelected }) => defaultSelected).length, 5);
+  assert.equal(drafts.length, 1);
+  assert.deepEqual(drafts[0], {
+    id: "kit-draft-1",
+    productId: "product-1",
+    themeKey: theme.key,
+    themeLabel: theme.label,
+    artDirectionJson: JSON.stringify(result.value.artDirection),
+    planJson: JSON.stringify(result.value.items),
+    status: "DRAFT",
+  });
+});
+
+test("free kit planning rejects stale analysis and unknown themes before creating a DRAFT", async () => {
+  const imageProduct = input().product;
+  const storedProduct = {
+    ...imageProduct,
+    rawImageUrls: JSON.stringify(imageProduct.rawImageUrls),
+    visualProfileJson: JSON.stringify(profile),
+    visualProfileSourceHash: "stale",
+  };
+  let drafts = 0;
+  const dependencies = {
+    createBatchId: () => "unused",
+    createDraft: async () => { drafts += 1; },
+  };
+
+  assert.deepEqual(await planProductImageSet({ product: storedProduct, client: null }, dependencies), {
+    ok: false,
+    status: 409,
+    error: "商品資料或圖片已更新，請先重新分析產品後再規劃套圖。",
+  });
+  assert.deepEqual(await planProductImageSet({
+    product: { ...storedProduct, visualProfileSourceHash: computeProductVisualSourceHash(imageProduct) },
+    client: null,
+    themeKey: "missing",
+    themeKind: "PROMO",
+  }, dependencies), { ok: false, status: 400, error: "找不到指定的套圖主題" });
+  assert.equal(drafts, 0);
+});
+
+test("confirmed kit generation persists only selected server plan items before scheduling", async () => {
+  const imageProduct = input().product;
+  const storedProduct = {
+    ...imageProduct,
+    rawImageUrls: JSON.stringify(imageProduct.rawImageUrls),
+    visualProfileJson: JSON.stringify(profile),
+    visualProfileSourceHash: computeProductVisualSourceHash(imageProduct),
+  };
+  const planned = planImageSetRoles({ profile, artDirection });
+  const selected = planned.slice(0, 2);
+  const events: string[] = [];
+  const callbacks: Array<() => Promise<unknown>> = [];
+  let persisted: Record<string, unknown> | undefined;
+  const result = await confirmAndScheduleProductImageSet({
+    product: storedProduct,
+    client: null,
+    batchId: "kit-draft-1",
+    selectedItemIds: selected.map(({ id }) => id),
+    artDirection: { ...artDirection, consistencyRules: ["client must not replace this field"] },
+    execution: createImageSetExecution(10_000, "kit-lease"),
+  }, {
+    loadDraft: async () => ({
+      id: "kit-draft-1", productId: "product-1", status: "DRAFT", themeKey: null, themeLabel: null,
+      artDirectionJson: JSON.stringify(artDirection), planJson: JSON.stringify(planned),
+    }),
+    claimProductLease: async () => { events.push("LEASE"); return true; },
+    releaseProductLease: async () => true,
+    persistConfirmedBatch: async (data) => {
+      persisted = data as unknown as Record<string, unknown>;
+      events.push("CONFIRMED", "GENERATING");
+      return [{ id: "row-1" }, { id: "row-2" }];
+    },
+    scheduleAfter: (callback) => { callbacks.push(callback); },
+    runBatch: async () => ({ statuses: {}, params: {} }),
+    readBatchStatuses: async () => ["DONE", "FAILED"],
+    updateKitStatus: async (_id, status) => { events.push(status); },
+    now: () => new Date("2026-09-15T08:00:00.000Z"),
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(events, ["LEASE", "CONFIRMED", "GENERATING"]);
+  assert.equal(callbacks.length, 1);
+  const rows = persisted?.rows as Array<Record<string, unknown>>;
+  assert.deepEqual(rows.map(({ batchId, productId, assetRole, assetSubtype }) => ({ batchId, productId, assetRole, assetSubtype })), selected.map((item) => ({
+    batchId: "kit-draft-1", productId: "product-1", assetRole: item.assetRole, assetSubtype: item.assetSubtype,
+  })));
+  assert.ok(rows.every(({ prompt }) => typeof prompt === "string" && prompt.length > 0));
+  assert.deepEqual(JSON.parse(String(persisted?.artDirectionJson)), artDirection);
+  assert.deepEqual(JSON.parse(String(persisted?.planJson)).map(({ id }: { id: string }) => id), selected.map(({ id }) => id));
+  await callbacks[0]();
+  assert.deepEqual(events, ["LEASE", "CONFIRMED", "GENERATING", "PARTIAL"]);
+});
+
+test("invalid confirmation snapshots are rejected before claiming the paid lease", async () => {
+  const imageProduct = input().product;
+  const storedProduct = {
+    ...imageProduct,
+    rawImageUrls: JSON.stringify(imageProduct.rawImageUrls),
+    visualProfileJson: JSON.stringify(profile),
+    visualProfileSourceHash: computeProductVisualSourceHash(imageProduct),
+  };
+  const planned = planImageSetRoles({ profile, artDirection });
+  let claims = 0;
+  const baseDependencies = {
+    loadDraft: async () => ({
+      id: "kit-draft-1", productId: "product-1", status: "DRAFT", themeKey: null, themeLabel: null,
+      artDirectionJson: JSON.stringify(artDirection), planJson: JSON.stringify(planned),
+    }),
+    claimProductLease: async () => { claims += 1; return true; },
+    releaseProductLease: async () => true,
+    persistConfirmedBatch: async () => [],
+    scheduleAfter: () => {},
+    runBatch: async () => ({ statuses: {}, params: {} }),
+    readBatchStatuses: async () => [],
+    updateKitStatus: async () => {},
+  };
+  const request = {
+    product: storedProduct,
+    client: null,
+    batchId: "kit-draft-1",
+    artDirection,
+    execution: createImageSetExecution(10_000, "kit-lease"),
+  };
+
+  for (const selectedItemIds of [[], [planned[0].id, planned[0].id], ["unknown"]]) {
+    const result = await confirmAndScheduleProductImageSet({ ...request, selectedItemIds }, baseDependencies);
+    assert.equal(result.ok, false);
+  }
+  assert.equal((await confirmAndScheduleProductImageSet({
+    ...request,
+    selectedItemIds: Array.from({ length: 21 }, (_, index) => `asset-${index}`),
+  }, baseDependencies)).ok, false);
+  assert.equal((await confirmAndScheduleProductImageSet({ ...request, selectedItemIds: [planned[0].id], artDirection: {} }, baseDependencies)).ok, false);
+  assert.equal((await confirmAndScheduleProductImageSet({ ...request, selectedItemIds: [planned[0].id] }, {
+    ...baseDependencies,
+    loadDraft: async () => ({ ...(await baseDependencies.loadDraft()), status: "CONFIRMED" }),
+  })).ok, false);
+  assert.equal((await confirmAndScheduleProductImageSet({ ...request, selectedItemIds: [planned[0].id] }, {
+    ...baseDependencies,
+    loadDraft: async () => null,
+  })).ok, false);
+  assert.equal((await confirmAndScheduleProductImageSet({ ...request, selectedItemIds: [planned[0].id] }, {
+    ...baseDependencies,
+    loadDraft: async () => ({
+      ...(await baseDependencies.loadDraft()),
+      planJson: JSON.stringify([{ ...planned[0], assetRole: "background" }]),
+    }),
+  })).ok, false);
+  assert.equal(claims, 0);
+});
 
 test("starts hero before dependent roles and uses its saved URL as their style anchor", async () => {
   const events: string[] = [];
@@ -104,7 +296,30 @@ test("starts hero before dependent roles and uses its saved URL as their style a
   assert.ok(events.includes("lifestyle:start:anchored"));
 });
 
-test("new ad-asset roles load an original only for the cutout and keep text assets product-free", async () => {
+test("records transparency from the generated PNG pixels", async () => {
+  const transparentPng = await sharp({
+    create: { width: 2, height: 2, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 0 } },
+  }).png().toBuffer();
+  const captured: boolean[] = [];
+  const batch = { ...input(), rows: [{ id: "row-decoration", role: roles[4] }] };
+
+  const result = await runImageSetBatch(batch, {
+    transitionRow: async () => true,
+    completeRow: async (_id, completion) => {
+      captured.push(completion.hasTransparentBackground);
+      return true;
+    },
+    generateRole: async () => ({ buffer: transparentPng, contentType: "image/png", provider: "test:png" }),
+    saveBuffer: async () => "/uploads/transparent.png",
+    loadAsDataUri: async (url) => `data:image/png;base64,${Buffer.from(url).toString("base64")}`,
+    logError: () => {},
+  });
+
+  assert.deepEqual(captured, [true]);
+  assert.equal(result.statuses.decoration, "DONE");
+});
+
+test("physical detail loads product references while conceptual assets stay product-free", async () => {
   const batch = input();
   batch.rows = planImageSetRoles(profile).map((role) => ({ id: `ad-${role.role}`, role }));
   const requests: Array<{ role: string; path: string | undefined; hasProductReference: boolean }> = [];
@@ -121,9 +336,33 @@ test("new ad-asset roles load an original only for the cutout and keep text asse
   });
 
   assert.deepEqual(requests.find(({ role }) => role === "hero"), { role: "hero", path: "cutout", hasProductReference: true });
-  for (const role of ["detail", "background", "benefit", "decoration"]) {
+  assert.deepEqual(requests.find(({ role }) => role === "detail"), { role: "detail", path: "crop", hasProductReference: true });
+  for (const role of ["background", "benefit", "decoration"]) {
     assert.deepEqual(requests.find((request) => request.role === role), { role, path: "text", hasProductReference: false });
   }
+});
+
+test("batch execution upgrades a stale physical detail text path to a deterministic crop", async () => {
+  const detail = planImageSetRoles(profile).find(({ role }) => role === "detail")!;
+  const staleDetail = {
+    ...detail,
+    path: "text" as const,
+    mustNotShow: [...detail.mustNotShow, "Logo", "文字"],
+  };
+  const batch = { ...input(), rows: [{ id: "legacy-detail", role: staleDetail }] };
+  let request: Parameters<NonNullable<ImageSetBatchDependencies["generateRole"]>>[0] | undefined;
+
+  await runImageSetBatch(batch, {
+    ...fakeDeps(),
+    generateRole: async (value) => {
+      request = value;
+      return { buffer: Buffer.from("detail"), contentType: "image/png", provider: "provider:detail" };
+    },
+  });
+
+  assert.equal(request?.generationPath, "crop");
+  assert.ok(request?.rawImageUrls?.length);
+  assert.match(request?.prompt ?? "", /reference images are the sole source of truth/i);
 });
 
 test("continues the remaining roles when hero fails", async () => {
@@ -219,6 +458,7 @@ test("normalizes direct data URI references through the 1600px pipeline", async 
       return { buffer: Buffer.from("hero"), contentType: "image/png", provider: "provider:hero" };
     },
     saveBuffer: async () => "/saved.png",
+    inspectTransparency: async () => false,
   });
   const decoded = Buffer.from(normalized.split(",")[1], "base64");
   const metadata = await sharp(decoded).metadata();
@@ -1185,6 +1425,50 @@ test("stale retry returns 409 Traditional Chinese guidance and mutates no row", 
   assert.match(response.error, /請先重新分析產品/);
   assert.equal(updates, 0);
   assert.equal(schedules, 0);
+});
+
+test("kit retry keeps the persisted art direction and rejects cross-batch or changed subtype rows", () => {
+  const product = storedProduct();
+  const sourceHash = computeProductVisualSourceHash({ ...product, rawImageUrls: JSON.parse(product.rawImageUrls) });
+  product.visualProfileSourceHash = sourceHash;
+  const planned = planImageSetRoles({ profile, artDirection });
+  const role = planned[1];
+  const legacyTextRole = { ...role, path: "text" as const, mustNotShow: [...role.mustNotShow, "Logo", "文字"] };
+  const row = {
+    id: "row-detail",
+    productId: product.id,
+    batchId: "batch-kit",
+    assetRole: role.assetRole,
+    assetSubtype: role.assetSubtype,
+    paramsJson: JSON.stringify({
+      imageSet: true,
+      profileVersion: 1,
+      sourceHash,
+      artDirection: { ...artDirection, concept: "obsolete row direction" },
+      roleSpec: legacyTextRole,
+    }),
+    product,
+  };
+  const kitDirection = { ...artDirection, concept: "confirmed kit direction" };
+  const kit = {
+    id: "batch-kit",
+    productId: product.id,
+    artDirectionJson: JSON.stringify(kitDirection),
+    planJson: JSON.stringify([planned[0], role]),
+  };
+
+  const prepared = prepareKitAssetRegenerationFromRecords(row, kit);
+  assert.equal(prepared.ok, true);
+  if (prepared.ok) {
+    assert.equal(prepared.value.input.artDirection.concept, "confirmed kit direction");
+    assert.equal(prepared.value.input.rows.length, 1);
+    assert.equal(prepared.value.input.rows[0].id, "row-detail");
+    assert.equal(prepared.value.input.rows[0].role.path, "crop");
+    assert.doesNotMatch(prepared.value.input.rows[0].role.mustNotShow.join("\n"), /^Logo$|^文字$/m);
+  }
+  assert.equal(prepareKitAssetRegenerationFromRecords({ ...row, batchId: "another-batch" }, kit).ok, false);
+  assert.equal(prepareKitAssetRegenerationFromRecords({ ...row, assetSubtype: "unsupported" }, kit).ok, false);
+  assert.equal(prepareKitAssetRegenerationFromRecords({ ...row, assetRole: "background" }, kit).ok, false);
 });
 
 test("retry preparation accepts a legacy lifestyle row and preserves its saved edit role spec", async () => {

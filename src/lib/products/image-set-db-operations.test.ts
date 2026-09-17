@@ -112,7 +112,8 @@ test("a cleanup tombstone atomically blocks DONE adoption until cleanup resolves
         "paramsJson" TEXT NOT NULL,
         "errorMessage" TEXT,
         "generationLeaseId" TEXT,
-        "generationLeaseExpiresAt" DATETIME
+        "generationLeaseExpiresAt" DATETIME,
+        "hasTransparentBackground" BOOLEAN
       )
     `);
     await client.$executeRaw(Prisma.sql`
@@ -141,15 +142,16 @@ test("a cleanup tombstone atomically blocks DONE adoption until cleanup resolves
       imageUrl: "https://blob.example/race.png",
       prompt: "safe prompt",
       paramsJson: "{}",
+      hasTransparentBackground: true,
     };
 
     assert.equal(await completeGeneratedImageSetRowWithLease(completion, execute), false);
     await client.$executeRaw(Prisma.sql`DELETE FROM "ImageAssetCleanupJob" WHERE "id" = ${"cleanup-1"}`);
     assert.equal(await completeGeneratedImageSetRowWithLease(completion, execute), true);
-    const rows = await client.$queryRaw<Array<{ status: string; imageUrl: string }>>(Prisma.sql`
-      SELECT "status", "imageUrl" FROM "LibraryImage" WHERE "id" = ${"row-1"}
+    const rows = await client.$queryRaw<Array<{ status: string; imageUrl: string; hasTransparentBackground: boolean }>>(Prisma.sql`
+      SELECT "status", "imageUrl", "hasTransparentBackground" FROM "LibraryImage" WHERE "id" = ${"row-1"}
     `);
-    assert.deepEqual(rows, [{ status: "DONE", imageUrl: "https://blob.example/race.png" }]);
+    assert.deepEqual(rows, [{ status: "DONE", imageUrl: "https://blob.example/race.png", hasTransparentBackground: true }]);
   } finally {
     await client.$disconnect();
   }

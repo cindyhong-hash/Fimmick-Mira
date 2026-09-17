@@ -1,12 +1,21 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type MouseEvent } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Sparkles, Trash2, Loader2, ImageOff, RefreshCw, PenLine } from "lucide-react";
+import { ArrowLeft, Sparkles, Trash2, Loader2, ImageOff, RefreshCw, PenLine, Layers3, ChevronRight, MoreHorizontal } from "lucide-react";
 import { ASSET_ROLE_LABELS, CORE_SET_ROLES as CORE_ROLES, imageSetCompleteness, type Product } from "@/lib/productMeta";
 import { ImageSetModal } from "@/components/products/ImageSetModal";
 import { ACTIVITY_HANDOFF_KEY } from "@/components/activities/RolePickerModal";
 import { AdLayoutModal } from "@/components/adcreation/AdLayoutModal";
 import { useAdLayoutEnabled } from "@/lib/feature-flags";
+import type { VisualAssetKitHistoryItem } from "@/lib/products/visual-asset-board";
+
+const KIT_STATUS_LABELS: Record<string, string> = {
+  CONFIRMED: "準備中",
+  GENERATING: "生成中",
+  COMPLETE: "已完成",
+  PARTIAL: "部分完成",
+  FAILED: "生成失敗",
+};
 
 export default function ProductDetailPage({
   params,
@@ -24,19 +33,31 @@ export default function ProductDetailPage({
   const [showAdLayout, setShowAdLayout] = useState(false);
   // 旗標關著時點按鈕不開排版流程，改顯示「籌備中」說明。
   const [showAdLayoutSoon, setShowAdLayoutSoon] = useState(false);
+  const [kits, setKits] = useState<VisualAssetKitHistoryItem[]>([]);
+  const [deletingKitId, setDeletingKitId] = useState<string | null>(null);
+  const [openKitActionsId, setOpenKitActionsId] = useState<string | null>(null);
   const adLayoutOn = useAdLayoutEnabled();
 
   useEffect(() => {
     params.then(({ clientId, productId }) => { setClientId(clientId); setProductId(productId); });
   }, [params]);
 
-  const load = useCallback(() => {
-    if (!productId) return;
-    fetch(`/api/products/${productId}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => setProduct(data))
-      .finally(() => setLoading(false));
-  }, [productId]);
+  const load = useCallback(async () => {
+    if (!productId || !clientId) return;
+    try {
+      const [productResponse, kitsResponse] = await Promise.all([
+        fetch(`/api/products/${productId}`),
+        fetch(`/api/products/${productId}/image-sets?clientId=${encodeURIComponent(clientId)}`),
+      ]);
+      setProduct(productResponse.ok ? await productResponse.json() : null);
+      const kitPayload = kitsResponse.ok
+        ? await kitsResponse.json() as { kits?: VisualAssetKitHistoryItem[] }
+        : { kits: [] };
+      setKits(kitPayload.kits ?? []);
+    } finally {
+      setLoading(false);
+    }
+  }, [clientId, productId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -59,6 +80,26 @@ export default function ProductDetailPage({
     await fetch(`/api/products/${productId}`, { method: "DELETE" });
     router.push(`/clients/${clientId}/components`);
   }, [productId, clientId, router]);
+
+  const removeKit = useCallback(async (event: MouseEvent<HTMLButtonElement>, kit: VisualAssetKitHistoryItem) => {
+    event.stopPropagation();
+    setOpenKitActionsId(null);
+    if (kit.status === "CONFIRMED" || kit.status === "GENERATING") return;
+    if (!confirm(`確定刪除「${kit.theme?.label ?? "常態品牌素材"}」整組？這會永久刪除組內 ${kit.counts.total} 張素材，無法復原。`)) return;
+    setDeletingKitId(kit.id);
+    setNote(null);
+    try {
+      const response = await fetch(`/api/products/${productId}/image-set/${kit.id}?clientId=${encodeURIComponent(clientId)}`, { method: "DELETE" });
+      const payload = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "刪除整組失敗");
+      setKits((current) => current.filter(({ id }) => id !== kit.id));
+      await load();
+    } catch (error) {
+      setNote(error instanceof Error ? error.message : "刪除整組失敗");
+    } finally {
+      setDeletingKitId(null);
+    }
+  }, [clientId, load, productId]);
 
   if (loading) return <div className="text-gray-400 py-12 text-center">載入中…</div>;
   if (!product) return <div className="text-gray-400 py-12 text-center">找不到這支產品</div>;
@@ -219,9 +260,70 @@ export default function ProductDetailPage({
         </div>
       </div>
 
-      {/* 資產分區 */}
+      {/* 視覺套組歷史：每次生成獨立成組，避免不同批次按角色混在一起。 */}
+      <section className="mt-6">
+        <div className="mb-3 flex items-end justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-bold text-gray-900">產品視覺套組</h2>
+            <p className="mt-1 text-xs text-gray-400">每次生成都會保留成一組，可隨時回來查看與管理。</p>
+          </div>
+          <span className="text-xs text-gray-400">{kits.length} 組</span>
+        </div>
+        {kits.length === 0 ? (
+          <div className="rounded-2xl border-[1.5px] border-dashed border-[#ebeff5] bg-white py-10 text-center text-sm text-gray-400">
+            還沒有已生成的視覺套組
+          </div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {kits.map((kit) => {
+              const active = kit.status === "CONFIRMED" || kit.status === "GENERATING";
+              return <article key={kit.id} className="group relative overflow-hidden rounded-2xl border border-[#e5e9f0] bg-white shadow-sm transition hover:border-violet-200 hover:shadow-md">
+              <button type="button" onClick={() => router.push(`/clients/${clientId}/products/${productId}/image-sets/${kit.id}`)} className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500">
+                <div className="grid aspect-[2/1] grid-cols-2 gap-px bg-gray-100">
+                  {Array.from({ length: 4 }, (_, index) => {
+                    const url = kit.previewUrls[index];
+                    return <div key={index} className="flex items-center justify-center overflow-hidden bg-gray-50">
+                      {url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={url} alt="" className="h-full w-full object-contain" />
+                      ) : <Layers3 className="h-5 w-5 text-gray-200" />}
+                    </div>;
+                  })}
+                </div>
+                <div className="flex items-center justify-between gap-3 p-4 pr-28">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="truncate text-sm font-bold text-gray-900">{kit.theme?.label ?? "常態品牌素材"}</h3>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${kit.status === "COMPLETE" ? "bg-emerald-50 text-emerald-700" : kit.status === "FAILED" ? "bg-red-50 text-red-700" : "bg-violet-50 text-violet-700"}`}>
+                        {KIT_STATUS_LABELS[kit.status] ?? kit.status}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-gray-400">
+                      {new Intl.DateTimeFormat("zh-TW", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(kit.createdAt))}
+                      {` · ${kit.counts.done}/${kit.counts.total} 張完成`}
+                      {kit.counts.failed > 0 ? ` · ${kit.counts.failed} 張失敗` : ""}
+                    </p>
+                  </div>
+                </div>
+              </button>
+              <div className="absolute bottom-3 right-3 flex items-center gap-1">
+                <div className="relative">
+                  <button type="button" aria-label="管理這組素材" aria-haspopup="menu" aria-expanded={openKitActionsId === kit.id} onClick={(event) => { event.stopPropagation(); setOpenKitActionsId((current) => current === kit.id ? null : kit.id); }} className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><MoreHorizontal className="h-4 w-4" /></button>
+                  {openKitActionsId === kit.id && <div role="menu" className="absolute bottom-full right-0 z-10 mb-2 w-36 rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg">
+                    <button type="button" role="menuitem" onClick={(event) => void removeKit(event, kit)} disabled={active || deletingKitId === kit.id} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-bold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-gray-300"><Trash2 className="h-3.5 w-3.5" />{deletingKitId === kit.id ? "刪除中…" : active ? "生成中不可刪除" : "刪除整組"}</button>
+                  </div>}
+                </div>
+                <ChevronRight className="h-5 w-5 shrink-0 text-gray-300 transition group-hover:translate-x-0.5 group-hover:text-violet-500" />
+              </div>
+            </article>})}
+          </div>
+        )}
+      </section>
+
+      {/* 所有資產分區 */}
       <div className="mt-6">
-        <h2 className="text-sm font-bold text-gray-900 mb-3">產品素材</h2>
+        <h2 className="text-sm font-bold text-gray-900 mb-1">所有產品素材</h2>
+        <p className="mb-3 text-xs text-gray-400">依用途彙整所有套組的素材；要管理特定一組，請從上方進入。</p>
         {assets.length === 0 ? (
           <div className="rounded-2xl border-[1.5px] border-dashed border-[#ebeff5] bg-white py-12 text-center text-sm text-gray-400">
             還沒有素材，用上方「AI 建立商品套圖」生成一組可疊積木
@@ -247,6 +349,7 @@ export default function ProductDetailPage({
 
       {showSet && (
         <ImageSetModal
+          clientId={clientId}
           productId={productId}
           onClose={() => setShowSet(false)}
           onFinished={load}

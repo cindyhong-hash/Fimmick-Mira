@@ -1,0 +1,207 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { AlertCircle, ArrowLeft, Check, Download, Loader2, MoreHorizontal, PencilRuler, RefreshCw, Sparkles, Trash2, X, ZoomIn } from "lucide-react";
+import { AdLayoutModal } from "@/components/adcreation/AdLayoutModal";
+import { ML_WIZARD_SEED_KEY } from "@/components/activities/RolePickerModal";
+import { useAdLayoutEnabled } from "@/lib/feature-flags";
+import type { ImageSetArtDirection } from "@/lib/products/product-visual-analysis";
+import type { ImageSetCategory, ImageSetPlanItem } from "@/lib/products/image-set-kit";
+import { buildAssetKitSelection, groupVisualAssetBoardAssets, visualAssetBoardCounts } from "@/lib/products/visual-asset-board";
+import { buildMagicLayersKitHandoff } from "@/lib/products/asset-kit-handoff";
+
+type BoardAsset = {
+  id: string;
+  category: ImageSetCategory | null;
+  assetRole: string | null;
+  assetSubtype: string | null;
+  subject?: string | null;
+  status: "PENDING" | "GENERATING" | "DONE" | "FAILED";
+  imageUrl: string;
+  errorMessage: string | null;
+  hasTransparentBackground: boolean | null;
+};
+
+type BoardData = {
+  batchId: string;
+  productId: string;
+  status: string;
+  theme: { key: string; label: string | null } | null;
+  artDirection: ImageSetArtDirection;
+  plan: ImageSetPlanItem[];
+  assets: BoardAsset[];
+};
+
+const CATEGORY_LABELS: Record<ImageSetCategory, string> = {
+  product: "商品主體",
+  texture: "質地與細節",
+  background: "背景",
+  benefit: "賣點視覺",
+  decoration: "裝飾與版型元素",
+};
+
+export function VisualAssetBoard({ clientId, productId, batchId, productName }: {
+  clientId: string;
+  productId: string;
+  batchId: string;
+  productName: string;
+}) {
+  const router = useRouter();
+  const adLayoutEnabled = useAdLayoutEnabled();
+  const [data, setData] = useState<BoardData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [deletingKit, setDeletingKit] = useState(false);
+  const [showKitActions, setShowKitActions] = useState(false);
+  const [showAdLayout, setShowAdLayout] = useState(false);
+  const [selectedAsset, setSelectedAsset] = useState<BoardAsset | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/products/${productId}/image-set/${batchId}?clientId=${encodeURIComponent(clientId)}`);
+      const payload = await response.json().catch(() => ({})) as BoardData & { error?: string };
+      if (!response.ok) throw new Error(payload.error || "無法載入視覺套組");
+      setData(payload);
+      setError(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "無法載入視覺套組");
+    } finally {
+      setLoading(false);
+    }
+  }, [batchId, clientId, productId]);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => { void load(); });
+    return () => cancelAnimationFrame(frame);
+  }, [load]);
+  useEffect(() => {
+    if (!data?.assets.some(({ status }) => status === "PENDING" || status === "GENERATING")) return;
+    const timer = setInterval(() => { void load(); }, 2_000);
+    return () => clearInterval(timer);
+  }, [data, load]);
+  useEffect(() => {
+    if (!selectedAsset) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSelectedAsset(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [selectedAsset]);
+
+  const groups = useMemo(() => groupVisualAssetBoardAssets(data?.assets ?? []), [data]);
+  const counts = visualAssetBoardCounts(data?.assets ?? []);
+  const selection = buildAssetKitSelection({ clientId, productId, batchId, assets: data?.assets ?? [] });
+  const previewAssets = (data?.assets ?? []).filter(({ status, imageUrl }) => status === "DONE" && imageUrl).slice(0, 5);
+
+  const openInEditor = () => {
+    sessionStorage.setItem(ML_WIZARD_SEED_KEY, JSON.stringify(buildMagicLayersKitHandoff({
+      clientId,
+      productId,
+      batchId,
+      assetIds: selection.assetIds,
+      title: `${productName} 視覺套組`,
+    })));
+    router.push(`/clients/${clientId}/magic-layers/compose?seed=1`);
+  };
+
+  const retry = async (asset: BoardAsset) => {
+    setBusyId(asset.id);
+    setError(null);
+    try {
+      const response = await fetch(`/api/products/${productId}/image-set/${batchId}/assets/${asset.id}/retry`, { method: "POST" });
+      const payload = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "無法重新產生素材");
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "無法重新產生素材");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const remove = async (asset: BoardAsset) => {
+    if (!window.confirm(`確定刪除「${asset.assetSubtype ?? asset.subject ?? "這張素材"}」？`)) return;
+    setBusyId(asset.id);
+    try {
+      const response = await fetch(`/api/library/images/${asset.id}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("刪除失敗");
+      if (selectedAsset?.id === asset.id) setSelectedAsset(null);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "刪除失敗");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const removeKit = async () => {
+    if (counts.active > 0) return;
+    if (!window.confirm(`確定刪除「${data?.theme?.label ?? "常態品牌素材"}」整組？這會永久刪除組內 ${counts.total} 張素材，無法復原。`)) return;
+    setDeletingKit(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/products/${productId}/image-set/${batchId}?clientId=${encodeURIComponent(clientId)}`, { method: "DELETE" });
+      const payload = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "刪除整組失敗");
+      router.push(`/clients/${clientId}/products/${productId}`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "刪除整組失敗");
+      setDeletingKit(false);
+    }
+  };
+
+  if (loading) return <div className="flex min-h-72 items-center justify-center text-sm text-gray-500"><Loader2 className="mr-2 h-4 w-4 animate-spin" />載入視覺套組…</div>;
+
+  return <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-9">
+    <button type="button" onClick={() => router.push(`/clients/${clientId}/products/${productId}`)} className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-900"><ArrowLeft className="h-4 w-4" />返回產品</button>
+    <header className="mt-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div><p className="text-xs font-bold uppercase tracking-[0.14em] text-violet-600">Visual Asset Kit</p><h1 className="mt-1 text-2xl font-bold text-gray-950 sm:text-3xl">{productName} 視覺套組</h1><p className="mt-2 text-sm text-gray-500">{data?.theme?.label ?? "常態品牌素材"} · {counts.done}/{counts.total} 張完成</p></div>
+      <div className="flex flex-wrap items-center gap-2 text-xs font-bold"><span className="rounded-full bg-emerald-50 px-3 py-1.5 text-emerald-700">完成 {counts.done}</span>{counts.active > 0 && <span className="rounded-full bg-violet-50 px-3 py-1.5 text-violet-700">處理中 {counts.active}</span>}{counts.failed > 0 && <span className="rounded-full bg-red-50 px-3 py-1.5 text-red-700">失敗 {counts.failed}</span>}{selection.assetIds.length > 0 && <button type="button" onClick={openInEditor} className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-white px-4 py-2 text-violet-700 hover:bg-violet-50"><PencilRuler className="h-3.5 w-3.5" />加入自由畫布</button>}{adLayoutEnabled && selection.assetIds.length > 0 && <button type="button" onClick={() => setShowAdLayout(true)} className="inline-flex items-center gap-1.5 rounded-full bg-violet-600 px-4 py-2 text-white hover:bg-violet-700"><Sparkles className="h-3.5 w-3.5" />AI 幫我排版</button>}<div className="relative"><button type="button" aria-label="管理這組素材" aria-haspopup="menu" aria-expanded={showKitActions} onClick={() => setShowKitActions((open) => !open)} className="rounded-full border border-gray-200 bg-white p-2 text-gray-500 hover:bg-gray-50 hover:text-gray-800"><MoreHorizontal className="h-4 w-4" /></button>{showKitActions && <div role="menu" className="absolute right-0 top-full z-20 mt-2 w-36 rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg"><button type="button" role="menuitem" onClick={() => { setShowKitActions(false); void removeKit(); }} disabled={counts.active > 0 || deletingKit} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-bold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-gray-300"><Trash2 className="h-3.5 w-3.5" />{deletingKit ? "刪除中…" : counts.active > 0 ? "生成中不可刪除" : "刪除整組"}</button></div>}</div></div>
+    </header>
+    {error && <div role="alert" className="mt-5 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+
+    <section className="mt-7 overflow-hidden rounded-3xl border border-[#e7ebf1] bg-[#f7f7fb] p-4 sm:p-6">
+      <div className="mb-4 flex items-center justify-between"><div><h2 className="text-sm font-bold text-gray-900">套組預覽</h2><p className="mt-1 text-xs text-gray-500">此處由現有縮圖即時組合，不會另存成素材。</p></div><span className="text-xs text-gray-400">{selection.assetIds.length} 張可用</span></div>
+      {previewAssets.length ? <div className="grid min-h-64 grid-cols-2 gap-3 sm:grid-cols-4 sm:grid-rows-2">{previewAssets.map((asset, index) => <button type="button" onClick={() => setSelectedAsset(asset)} key={asset.id} aria-label={`放大檢視 ${asset.subject ?? asset.assetSubtype ?? "視覺素材"}`} className={`group relative overflow-hidden rounded-2xl border border-white bg-white shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 ${index === 0 ? "col-span-2 row-span-2" : ""}`}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={asset.imageUrl} alt={asset.subject ?? asset.assetSubtype ?? "視覺素材"} className="h-full w-full object-contain transition group-hover:scale-[1.02]" />
+        <span className="absolute bottom-3 right-3 inline-flex items-center gap-1 rounded-full bg-gray-950/70 px-2.5 py-1 text-[10px] font-bold text-white opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100"><ZoomIn className="h-3 w-3" />放大</span>
+      </button>)}</div> : <div className="flex min-h-52 items-center justify-center rounded-2xl border border-dashed border-gray-300 bg-white text-sm text-gray-400">尚無完成素材</div>}
+    </section>
+
+    <div className="mt-8 space-y-8">{(Object.keys(CATEGORY_LABELS) as ImageSetCategory[]).map((category) => {
+      const assets = groups[category] ?? [];
+      if (!assets.length) return null;
+      return <section key={category}><div className="mb-3 flex items-center justify-between"><h2 className="text-base font-bold text-gray-900">{CATEGORY_LABELS[category]}</h2><span className="text-xs text-gray-400">{assets.length} 項</span></div><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{assets.map((asset) => <article key={asset.id} className="overflow-hidden rounded-2xl border border-[#e7ebf1] bg-white shadow-sm">
+        <div className="relative aspect-square bg-gray-50">{asset.status === "DONE" && asset.imageUrl ? <button type="button" onClick={() => setSelectedAsset(asset)} aria-label={`放大檢視 ${asset.subject ?? asset.assetSubtype ?? CATEGORY_LABELS[category]}`} className="group h-full w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={asset.imageUrl} alt={asset.subject ?? asset.assetSubtype ?? CATEGORY_LABELS[category]} className="h-full w-full object-contain transition group-hover:scale-[1.02]" />
+          {asset.hasTransparentBackground && <span className="absolute left-3 top-3 rounded-full bg-white/90 px-2.5 py-1 text-[10px] font-bold text-gray-600 shadow-sm">透明背景</span>}
+          <span className="absolute bottom-3 right-3 inline-flex items-center gap-1 rounded-full bg-gray-950/70 px-2.5 py-1 text-[10px] font-bold text-white opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100"><ZoomIn className="h-3 w-3" />放大</span>
+        </button> : <div className="flex h-full flex-col items-center justify-center gap-2 text-xs text-gray-500">{asset.status === "FAILED" ? <AlertCircle className="h-6 w-6 text-red-400" /> : <Loader2 className="h-6 w-6 animate-spin text-violet-500" />}{asset.status === "FAILED" ? "生成失敗" : "正在生成"}</div>}</div>
+        <div className="p-4"><div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-bold text-gray-900">{asset.assetSubtype?.replaceAll("-", " ") ?? asset.subject ?? CATEGORY_LABELS[category]}</h3><p className="mt-1 text-xs text-gray-500">{data?.plan.find((item) => item.assetRole === asset.assetRole && item.assetSubtype === asset.assetSubtype)?.purpose ?? asset.errorMessage ?? "視覺套組素材"}</p></div>{asset.status === "DONE" && <Check className="h-4 w-4 shrink-0 text-emerald-500" />}</div>
+          <div className="mt-4 flex flex-wrap gap-2">{asset.status === "DONE" && asset.imageUrl && <a href={asset.imageUrl} download className="inline-flex items-center gap-1 rounded-lg border border-[#e5e9f0] px-3 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50"><Download className="h-3.5 w-3.5" />下載</a>}{asset.status === "FAILED" && <button type="button" onClick={() => void retry(asset)} disabled={busyId === asset.id} className="inline-flex items-center gap-1 rounded-lg bg-violet-600 px-3 py-2 text-xs font-bold text-white hover:bg-violet-700 disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${busyId === asset.id ? "animate-spin" : ""}`} />重新產生</button>}<button type="button" onClick={() => void remove(asset)} disabled={busyId === asset.id} className="inline-flex items-center gap-1 rounded-lg border border-red-100 px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50 disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" />刪除</button></div>
+        </div>
+      </article>)}</div></section>;
+    })}</div>
+    {selectedAsset && <div role="dialog" aria-modal="true" aria-label="素材放大檢視" className="fixed inset-0 z-[90] flex items-center justify-center bg-gray-950/80 p-4 sm:p-8" onClick={() => setSelectedAsset(null)}>
+      <div className="relative flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-center justify-between gap-4 border-b border-gray-100 px-4 py-3 sm:px-5">
+          <div className="min-w-0"><h2 className="truncate text-sm font-bold text-gray-900">{selectedAsset.assetSubtype?.replaceAll("-", " ") ?? selectedAsset.subject ?? "視覺素材"}</h2><p className="mt-0.5 text-xs text-gray-400">點擊外側或按 Esc 關閉</p></div>
+          <button type="button" onClick={() => setSelectedAsset(null)} aria-label="關閉放大檢視" className="rounded-full p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-900"><X className="h-5 w-5" /></button>
+        </div>
+        <div className="flex min-h-0 flex-1 items-center justify-center bg-[#f5f6f8] p-4 sm:p-8">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={selectedAsset.imageUrl} alt={selectedAsset.subject ?? selectedAsset.assetSubtype ?? "視覺素材"} className="max-h-[72vh] max-w-full object-contain" />
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-gray-100 px-4 py-3 sm:px-5">
+          <a href={selectedAsset.imageUrl} download className="inline-flex items-center gap-1.5 rounded-lg border border-[#e5e9f0] px-4 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50"><Download className="h-3.5 w-3.5" />下載</a>
+          <button type="button" onClick={() => void remove(selectedAsset)} disabled={busyId === selectedAsset.id} className="inline-flex items-center gap-1.5 rounded-lg border border-red-100 px-4 py-2 text-xs font-bold text-red-600 hover:bg-red-50 disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" />刪除這張</button>
+        </div>
+      </div>
+    </div>}
+    {showAdLayout && <AdLayoutModal clientId={clientId} productId={productId} productName={productName} assetKit={{ batchId, assetIds: selection.assetIds }} onClose={() => setShowAdLayout(false)} />}
+  </div>;
+}

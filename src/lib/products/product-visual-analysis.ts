@@ -25,7 +25,45 @@ export type ImageSetArtDirection = {
   backgroundLanguage: string;
   cameraLanguage: string;
   consistencyRules: string[];
+  mood: string[];
+  decorationStyle: string[];
 };
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+export function parseImageSetArtDirection(raw: unknown): ImageSetArtDirection | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const value = raw as Record<string, unknown>;
+  const palette = value.palette;
+  if (!palette || typeof palette !== "object" || Array.isArray(palette)) return null;
+  const colors = palette as Record<string, unknown>;
+  if (
+    typeof value.concept !== "string"
+    || !isStringArray(colors.dominant)
+    || !isStringArray(colors.accent)
+    || typeof value.lighting !== "string"
+    || !isStringArray(value.materials)
+    || typeof value.backgroundLanguage !== "string"
+    || typeof value.cameraLanguage !== "string"
+    || !isStringArray(value.consistencyRules)
+    || (value.mood !== undefined && !isStringArray(value.mood))
+    || (value.decorationStyle !== undefined && !isStringArray(value.decorationStyle))
+  ) return null;
+
+  return {
+    concept: value.concept,
+    palette: { dominant: colors.dominant, accent: colors.accent },
+    lighting: value.lighting,
+    materials: value.materials,
+    backgroundLanguage: value.backgroundLanguage,
+    cameraLanguage: value.cameraLanguage,
+    consistencyRules: value.consistencyRules,
+    mood: value.mood ?? [],
+    decorationStyle: value.decorationStyle ?? [],
+  };
+}
 
 export type VisionRequest = {
   imageDataUrls: string[];
@@ -176,13 +214,14 @@ export async function analyzeProductVisualProfile(
 export function buildImageSetArtDirection(
   profile: ProductVisualProfile,
   brand: ProductBrandFacts,
+  theme?: { label: string; kind: "PROMO" | "SEASONAL" } | null,
 ): ImageSetArtDirection {
   const dominant = profile.appearance.colors;
   const accent = brand.primaryColor?.trim() ? [brand.primaryColor.trim()] : [];
   const productDescription = profile.productType.trim();
 
   return {
-    concept: productDescription ? `${productDescription} 的可合成廣告素材包` : "可合成廣告素材包",
+    concept: `${productDescription ? `${productDescription} 的` : ""}${theme ? `${theme.label}主題` : ""}可合成廣告素材包`,
     palette: { dominant, accent },
     lighting: "柔和、乾淨且跨素材一致的高級廣告光線",
     materials: profile.appearance.materials,
@@ -193,6 +232,15 @@ export function buildImageSetArtDirection(
       "維持產品的外型、比例、顏色、結構與可見 Logo／文字。",
       ...profile.prohibitedChanges,
       ...(brand.toneLabels?.filter(Boolean).map((tone) => `品牌調性：${tone}`) ?? []),
+      ...(theme ? [`整批素材一致呼應「${theme.label}」，但不可自行生成主題文字、日期或促銷字樣。`] : []),
     ],
+    mood: [...new Set([
+      ...(brand.toneLabels?.map((tone) => tone.trim()).filter(Boolean) ?? []),
+      ...(theme ? [theme.label] : []),
+    ])],
+    decorationStyle: [...new Set([
+      ...profile.visualMotifs.map((motif) => motif.trim()).filter(Boolean),
+      ...(theme ? [`呼應${theme.label}的非文字裝飾語彙`] : []),
+    ])],
   };
 }

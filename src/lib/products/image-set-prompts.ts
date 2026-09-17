@@ -107,12 +107,30 @@ export function compileImageSetPrompt({ product, profile, artDirection, role }: 
     `dominant palette: ${paletteText(artDirection.palette.dominant, "product-visible colors only")}`,
     `accent palette: ${paletteText(artDirection.palette.accent, "none")}; accent only, never dominant.`,
   ].join("\n");
+  const sharedDirection = [
+    `Mood: ${list(artDirection.mood, "clean and consistent")}`,
+    ...(role.role === "decoration" ? [`Decoration style: ${list(artDirection.decorationStyle, "minimal non-typographic accents")}`] : []),
+    `Campaign consistency rules: ${list(artDirection.consistencyRules, "use the confirmed shared art direction")}`,
+  ].join("\n");
+  const textSafety = [
+    "Do not render new words, letters, numbers, captions, badges with text, or typographic marks.",
+    "Preserve genuine logo and packaging label details visible on the supplied product reference.",
+  ];
   const exclusions = [
     ...role.mustNotShow,
     ...profile.prohibitedChanges,
     "未提供的成分、功效、認證、安全或醫療宣稱",
     "不得加入任何額外文字、色碼（hex）、數字、標籤或浮水印（產品本身既有的品牌字樣除外）",
+    ...textSafety,
   ];
+  const physicalDetailGrounding = role.role === "detail" && role.path === "crop"
+    ? [
+        "The supplied product reference images are the sole source of truth. If metadata or art direction conflicts with visible pixels, follow the reference pixels.",
+        "Create a tight macro crop of one genuinely visible existing feature from the supplied product. Show only part of the product; never show the entire product or invent an alternate angle.",
+        "Do not redraw, redesign, recolor, replace, enlarge, simplify, or change the finish of the product body, head, controls, seams, logo, or label.",
+        "Apply the campaign palette only to the surroundings and background. Never apply campaign colors or materials to the product itself.",
+      ]
+    : [];
 
   // Only legacy edit rows use a generated product photograph. New ad-asset roles
   // intentionally receive context without the product identity that would make
@@ -123,13 +141,17 @@ export function compileImageSetPrompt({ product, profile, artDirection, role }: 
       `Supplied use cases: ${list(profile.useCases, "none supplied")}`,
       `Suitable scenes: ${list(profile.suitableScenes, "none supplied")}`,
     ].join("\n");
+    const formulaTexture = "assetSubtype" in role && role.assetSubtype === "formula-texture";
     const textExclusions = [
       ...role.mustNotShow,
       role.role === "detail"
-        ? "不得出現完整商品、完整瓶罐、包裝、Logo 或文字；僅可出現緊裁切、無品牌的按壓頭作為出料動作"
+        ? formulaTexture
+          ? "不得出現完整商品、完整瓶罐、包裝、Logo 或文字；僅可出現緊裁切、無品牌的按壓頭作為出料動作"
+          : "不得出現完整商品、完整包裝、Logo 或文字；只呈現已提供資訊支持的材質與表面質地"
         : "不得出現任何商品、瓶罐、包裝、Logo 或文字",
       "不得加入未提供的成分、功效、認證、安全或醫療宣稱",
       "不得加入任何色碼（hex）、數字、標籤或浮水印",
+      ...textSafety,
     ];
     return [
       "[ROLE OBJECTIVE]",
@@ -140,6 +162,7 @@ export function compileImageSetPrompt({ product, profile, artDirection, role }: 
       palette,
       `Lighting: ${artDirection.lighting}`,
       `Background language: ${artDirection.backgroundLanguage}`,
+      sharedDirection,
       "[COMPOSITION]",
       role.composition,
       `Role scene: ${role.sceneCn}`,
@@ -155,12 +178,14 @@ export function compileImageSetPrompt({ product, profile, artDirection, role }: 
     productFacts,
     "[MUST PRESERVE]",
     identityLocks,
+    ...physicalDetailGrounding,
     "[SHARED ART DIRECTION]",
     `Concept: ${artDirection.concept}`,
     palette,
     `Lighting: ${artDirection.lighting}`,
     `Materials language: ${list(artDirection.materials, "visible product materials only")}`,
     `Background language: ${artDirection.backgroundLanguage}`,
+    sharedDirection,
     "[COMPOSITION AND CAMERA]",
     role.composition,
     `Camera: ${artDirection.cameraLanguage}`,

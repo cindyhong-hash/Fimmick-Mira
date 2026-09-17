@@ -56,6 +56,7 @@ export type GeneratedImageSetRowCompletion = {
   imageUrl: string;
   prompt: string;
   paramsJson: string;
+  hasTransparentBackground: boolean;
 };
 
 /** A cleanup tombstone is an adoption barrier for its exact blob URL. */
@@ -70,6 +71,7 @@ export async function completeGeneratedImageSetRowWithLease(
       "imageUrl" = ${input.imageUrl},
       "prompt" = ${input.prompt},
       "paramsJson" = ${input.paramsJson},
+      "hasTransparentBackground" = ${input.hasTransparentBackground},
       "errorMessage" = ${null},
       "generationLeaseId" = ${null},
       "generationLeaseExpiresAt" = ${null}

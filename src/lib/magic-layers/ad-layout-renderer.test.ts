@@ -145,7 +145,7 @@ test("renders semantic benefit graphics as editable grouped badges, dividers and
   assert.ok(hydrationGroup.some((layer) => layer.id === "benefit_badge_hydration" && layer.image === null && layer.editable));
   assert.ok(hydrationGroup.some((layer) => layer.id === "graphic_hydration" && (layer.meta.shape as { icon?: string }).icon === "water-drop"));
   assert.equal((hydrationGroup.find((layer) => layer.id === "benefit_number_hydration")?.meta.style as { text?: string }).text, "24小時");
-  assert.equal((hydrationGroup.find((layer) => layer.id === "benefit_text_hydration")?.meta.style as { text?: string }).text, "24小時長效保濕");
+  assert.equal((hydrationGroup.find((layer) => layer.id === "benefit_text_hydration")?.meta.style as { text?: string }).text, "長效保濕");
 
   const repairIcon = layers.find((layer) => layer.id === "graphic_repair");
   assert.equal((repairIcon?.meta.shape as { icon?: string }).icon, "repair");

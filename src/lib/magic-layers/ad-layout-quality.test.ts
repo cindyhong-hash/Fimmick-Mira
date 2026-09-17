@@ -64,3 +64,14 @@ test("flags product and headline overlap in resolved geometry", () => {
 
   assert.equal(checks.find((check) => check.id === "product-copy-overlap")?.passed, false);
 });
+
+test("flags an undersized product and a support image competing with three typed benefits", () => {
+  const [base] = resolveAdLayoutDesignSpecs({ ...input, benefits: ["保濕", "柔嫩", "舒緩"] as never });
+  const checks = validateAdLayoutSpec({
+    ...base,
+    assets: { ...base.assets, support: { role: "detail", imageUrl: "detail" } },
+    layout: { ...base.layout!, product: { x: 500, y: 400, w: 40, h: 40 } },
+  });
+  assert.equal(checks.find((check) => check.id === "product-footprint")?.passed, false);
+  assert.equal(checks.find((check) => check.id === "support-benefit-conflict")?.passed, false);
+});

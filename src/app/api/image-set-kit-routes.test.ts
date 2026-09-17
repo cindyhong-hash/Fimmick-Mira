@@ -36,6 +36,18 @@ test("kit reader scopes metadata and assets to the requested product and batch",
   assert.match(source, /normalizeImageSetKitAssets/);
 });
 
+test("kit deletion verifies ownership, rejects active work, removes rows transactionally, and cleans stored assets", async () => {
+  const source = await readFile(new URL("./products/[productId]/image-set/[batchId]/route.ts", import.meta.url), "utf8");
+
+  assert.match(source, /export async function DELETE/);
+  assert.match(source, /productImageSet\.findFirst\(\{ where: \{ id: batchId, productId, product: \{ clientId \} \} \}\)/);
+  assert.match(source, /status === "PENDING" \|\| status === "GENERATING"/);
+  assert.match(source, /db\.\$transaction/);
+  assert.match(source, /libraryImage\.deleteMany\(\{ where: \{ productId, batchId \} \}\)/);
+  assert.match(source, /productImageSet\.deleteMany/);
+  assert.match(source, /deleteStoredAsset/);
+});
+
 test("kit history lists only confirmed sets owned by the requested client and product", async () => {
   const source = await readFile(new URL("./products/[productId]/image-sets/route.ts", import.meta.url), "utf8");
 

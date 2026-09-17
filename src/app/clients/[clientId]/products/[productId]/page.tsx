@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type MouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Sparkles, Trash2, Loader2, ImageOff, RefreshCw, PenLine, Layers3, ChevronRight } from "lucide-react";
 import { ASSET_ROLE_LABELS, CORE_SET_ROLES as CORE_ROLES, imageSetCompleteness, type Product } from "@/lib/productMeta";
@@ -34,6 +34,7 @@ export default function ProductDetailPage({
   // 旗標關著時點按鈕不開排版流程，改顯示「籌備中」說明。
   const [showAdLayoutSoon, setShowAdLayoutSoon] = useState(false);
   const [kits, setKits] = useState<VisualAssetKitHistoryItem[]>([]);
+  const [deletingKitId, setDeletingKitId] = useState<string | null>(null);
   const adLayoutOn = useAdLayoutEnabled();
 
   useEffect(() => {
@@ -78,6 +79,25 @@ export default function ProductDetailPage({
     await fetch(`/api/products/${productId}`, { method: "DELETE" });
     router.push(`/clients/${clientId}/components`);
   }, [productId, clientId, router]);
+
+  const removeKit = useCallback(async (event: MouseEvent<HTMLButtonElement>, kit: VisualAssetKitHistoryItem) => {
+    event.stopPropagation();
+    if (kit.status === "CONFIRMED" || kit.status === "GENERATING") return;
+    if (!confirm(`確定刪除「${kit.theme?.label ?? "常態品牌素材"}」整組？這會永久刪除組內 ${kit.counts.total} 張素材，無法復原。`)) return;
+    setDeletingKitId(kit.id);
+    setNote(null);
+    try {
+      const response = await fetch(`/api/products/${productId}/image-set/${kit.id}?clientId=${encodeURIComponent(clientId)}`, { method: "DELETE" });
+      const payload = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "刪除整組失敗");
+      setKits((current) => current.filter(({ id }) => id !== kit.id));
+      await load();
+    } catch (error) {
+      setNote(error instanceof Error ? error.message : "刪除整組失敗");
+    } finally {
+      setDeletingKitId(null);
+    }
+  }, [clientId, load, productId]);
 
   if (loading) return <div className="text-gray-400 py-12 text-center">載入中…</div>;
   if (!product) return <div className="text-gray-400 py-12 text-center">找不到這支產品</div>;
@@ -253,13 +273,10 @@ export default function ProductDetailPage({
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
-            {kits.map((kit) => (
-              <button
-                key={kit.id}
-                type="button"
-                onClick={() => router.push(`/clients/${clientId}/products/${productId}/image-sets/${kit.id}`)}
-                className="group overflow-hidden rounded-2xl border border-[#e5e9f0] bg-white text-left shadow-sm transition hover:border-violet-200 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
-              >
+            {kits.map((kit) => {
+              const active = kit.status === "CONFIRMED" || kit.status === "GENERATING";
+              return <article key={kit.id} className="group relative overflow-hidden rounded-2xl border border-[#e5e9f0] bg-white shadow-sm transition hover:border-violet-200 hover:shadow-md">
+              <button type="button" onClick={() => router.push(`/clients/${clientId}/products/${productId}/image-sets/${kit.id}`)} className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500">
                 <div className="grid aspect-[2/1] grid-cols-2 gap-px bg-gray-100">
                   {Array.from({ length: 4 }, (_, index) => {
                     const url = kit.previewUrls[index];
@@ -271,7 +288,7 @@ export default function ProductDetailPage({
                     </div>;
                   })}
                 </div>
-                <div className="flex items-center justify-between gap-3 p-4">
+                <div className="flex items-center justify-between gap-3 p-4 pr-28">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="truncate text-sm font-bold text-gray-900">{kit.theme?.label ?? "常態品牌素材"}</h3>
@@ -285,10 +302,13 @@ export default function ProductDetailPage({
                       {kit.counts.failed > 0 ? ` · ${kit.counts.failed} 張失敗` : ""}
                     </p>
                   </div>
-                  <ChevronRight className="h-5 w-5 shrink-0 text-gray-300 transition group-hover:translate-x-0.5 group-hover:text-violet-500" />
                 </div>
               </button>
-            ))}
+              <div className="absolute bottom-3 right-3 flex items-center gap-1">
+                <button type="button" onClick={(event) => void removeKit(event, kit)} disabled={active || deletingKitId === kit.id} title={active ? "套組完成後才能刪除" : "刪除整組"} className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-bold text-red-500 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-gray-300"><Trash2 className="h-3.5 w-3.5" />{deletingKitId === kit.id ? "刪除中…" : "刪除整組"}</button>
+                <ChevronRight className="h-5 w-5 shrink-0 text-gray-300 transition group-hover:translate-x-0.5 group-hover:text-violet-500" />
+              </div>
+            </article>})}
           </div>
         )}
       </section>

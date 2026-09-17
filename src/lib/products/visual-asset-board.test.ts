@@ -64,6 +64,16 @@ test("product page exposes persistent kit history and routes back into each boar
   assert.match(source, /image-sets\/\$\{kit\.id\}/);
 });
 
+test("product page can delete a whole kit without opening its history card", async () => {
+  const source = await readFile(new URL("../../app/clients/[clientId]/products/[productId]/page.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /removeKit/);
+  assert.match(source, /stopPropagation\(\)/);
+  assert.match(source, /image-set\/\$\{kit\.id\}\?clientId=/);
+  assert.match(source, /method: "DELETE"/);
+  assert.match(source, /刪除整組/);
+});
+
 test("visual asset board exposes zoom, download, and per-image deletion", async () => {
   const source = await readFile(new URL("../../components/products/VisualAssetBoard.tsx", import.meta.url), "utf8");
 
@@ -72,4 +82,14 @@ test("visual asset board exposes zoom, download, and per-image deletion", async 
   assert.match(source, /href=\{selectedAsset\.imageUrl\} download/);
   assert.match(source, /remove\(selectedAsset\)/);
   assert.match(source, /method: "DELETE"/);
+});
+
+test("visual asset board can delete the whole kit and return to the product", async () => {
+  const source = await readFile(new URL("../../components/products/VisualAssetBoard.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /removeKit/);
+  assert.match(source, /image-set\/\$\{batchId\}\?clientId=/);
+  assert.match(source, /method: "DELETE"/);
+  assert.match(source, /router\.push\(`\/clients\/\$\{clientId\}\/products\/\$\{productId\}`\)/);
+  assert.match(source, /刪除整組/);
 });

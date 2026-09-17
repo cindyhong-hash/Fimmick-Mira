@@ -53,6 +53,7 @@ export function VisualAssetBoard({ clientId, productId, batchId, productName }: 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [deletingKit, setDeletingKit] = useState(false);
   const [showAdLayout, setShowAdLayout] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<BoardAsset | null>(null);
 
@@ -134,13 +135,29 @@ export function VisualAssetBoard({ clientId, productId, batchId, productName }: 
     }
   };
 
+  const removeKit = async () => {
+    if (counts.active > 0) return;
+    if (!window.confirm(`確定刪除「${data?.theme?.label ?? "常態品牌素材"}」整組？這會永久刪除組內 ${counts.total} 張素材，無法復原。`)) return;
+    setDeletingKit(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/products/${productId}/image-set/${batchId}?clientId=${encodeURIComponent(clientId)}`, { method: "DELETE" });
+      const payload = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "刪除整組失敗");
+      router.push(`/clients/${clientId}/products/${productId}`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "刪除整組失敗");
+      setDeletingKit(false);
+    }
+  };
+
   if (loading) return <div className="flex min-h-72 items-center justify-center text-sm text-gray-500"><Loader2 className="mr-2 h-4 w-4 animate-spin" />載入視覺套組…</div>;
 
   return <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-9">
     <button type="button" onClick={() => router.push(`/clients/${clientId}/products/${productId}`)} className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-900"><ArrowLeft className="h-4 w-4" />返回產品</button>
     <header className="mt-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div><p className="text-xs font-bold uppercase tracking-[0.14em] text-violet-600">Visual Asset Kit</p><h1 className="mt-1 text-2xl font-bold text-gray-950 sm:text-3xl">{productName} 視覺套組</h1><p className="mt-2 text-sm text-gray-500">{data?.theme?.label ?? "常態品牌素材"} · {counts.done}/{counts.total} 張完成</p></div>
-      <div className="flex flex-wrap items-center gap-2 text-xs font-bold"><span className="rounded-full bg-emerald-50 px-3 py-1.5 text-emerald-700">完成 {counts.done}</span>{counts.active > 0 && <span className="rounded-full bg-violet-50 px-3 py-1.5 text-violet-700">處理中 {counts.active}</span>}{counts.failed > 0 && <span className="rounded-full bg-red-50 px-3 py-1.5 text-red-700">失敗 {counts.failed}</span>}{selection.assetIds.length > 0 && <button type="button" onClick={openInEditor} className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-white px-4 py-2 text-violet-700 hover:bg-violet-50"><PencilRuler className="h-3.5 w-3.5" />加入自由畫布</button>}{adLayoutEnabled && selection.assetIds.length > 0 && <button type="button" onClick={() => setShowAdLayout(true)} className="inline-flex items-center gap-1.5 rounded-full bg-violet-600 px-4 py-2 text-white hover:bg-violet-700"><Sparkles className="h-3.5 w-3.5" />AI 幫我排版</button>}</div>
+      <div className="flex flex-wrap items-center gap-2 text-xs font-bold"><span className="rounded-full bg-emerald-50 px-3 py-1.5 text-emerald-700">完成 {counts.done}</span>{counts.active > 0 && <span className="rounded-full bg-violet-50 px-3 py-1.5 text-violet-700">處理中 {counts.active}</span>}{counts.failed > 0 && <span className="rounded-full bg-red-50 px-3 py-1.5 text-red-700">失敗 {counts.failed}</span>}{selection.assetIds.length > 0 && <button type="button" onClick={openInEditor} className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-white px-4 py-2 text-violet-700 hover:bg-violet-50"><PencilRuler className="h-3.5 w-3.5" />加入自由畫布</button>}{adLayoutEnabled && selection.assetIds.length > 0 && <button type="button" onClick={() => setShowAdLayout(true)} className="inline-flex items-center gap-1.5 rounded-full bg-violet-600 px-4 py-2 text-white hover:bg-violet-700"><Sparkles className="h-3.5 w-3.5" />AI 幫我排版</button>}<button type="button" onClick={() => void removeKit()} disabled={counts.active > 0 || deletingKit} title={counts.active > 0 ? "套組完成後才能刪除" : "刪除整組"} className="inline-flex items-center gap-1.5 rounded-full border border-red-100 bg-white px-4 py-2 text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-gray-300"><Trash2 className="h-3.5 w-3.5" />{deletingKit ? "刪除中…" : "刪除整組"}</button></div>
     </header>
     {error && <div role="alert" className="mt-5 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 

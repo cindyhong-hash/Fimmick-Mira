@@ -12,6 +12,15 @@ test("incomplete resume recovery offers a discard-and-restart path", async () =>
   assert.match(source, /void loadInitial\(\)/);
 });
 
+test("closing a terminal image-set modal clears its resume record before the next opening", async () => {
+  const source = await readFile(new URL("./ImageSetModal.tsx", import.meta.url), "utf8");
+
+  assert.match(
+    source,
+    /const requestClose = \(\) => \{[\s\S]*if \(creatingRows\) return;[\s\S]*if \(phase === "done"\) clearSavedImageSetBatch\(window\.localStorage, productId\);[\s\S]*onClose\(\)/,
+  );
+});
+
 test("a saved batch that references a missing LibraryImage row keeps the surviving progress", async () => {
   const source = await readFile(new URL("./ImageSetModal.tsx", import.meta.url), "utf8");
   const reconciled = reconcileImageSetResumeRows(

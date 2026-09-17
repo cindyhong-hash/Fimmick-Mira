@@ -1,4 +1,5 @@
 import type { LayerData, LayerType, SemanticId } from "../magic-layers/types.ts";
+import { imageSetSubtypeLabel } from "./image-set-subtype-labels";
 import type { ImageSetCategory } from "./image-set-kit.ts";
 
 export type AssetKitHandoff = { productId: string; batchId: string; assetIds: string[] };
@@ -85,7 +86,7 @@ export function buildAssetKitSeedLayers(assets: HandoffKitAsset[], docW: number,
       id: `asset-kit-${asset.id}`,
       type: kind.type,
       semanticId: kind.semanticId,
-      name: asset.assetSubtype?.replaceAll("-", " ") || "視覺套組素材",
+      name: asset.assetSubtype ? imageSetSubtypeLabel(asset.assetSubtype).zh : "視覺套組素材",
       instanceId: `asset-kit-${index + 1}`,
       parentId: null,
       bbox: { x, y, w: width, h: height },

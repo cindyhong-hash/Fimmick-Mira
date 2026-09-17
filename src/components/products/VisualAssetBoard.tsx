@@ -7,6 +7,7 @@ import { AdLayoutModal } from "@/components/adcreation/AdLayoutModal";
 import { ML_WIZARD_SEED_KEY } from "@/components/activities/RolePickerModal";
 import { useAdLayoutEnabled } from "@/lib/feature-flags";
 import type { ImageSetArtDirection } from "@/lib/products/product-visual-analysis";
+import { imageSetSubtypeLabel } from "@/lib/products/image-set-subtype-labels";
 import type { ImageSetCategory, ImageSetPlanItem } from "@/lib/products/image-set-kit";
 import { buildAssetKitSelection, groupVisualAssetBoardAssets, visualAssetBoardCounts } from "@/lib/products/visual-asset-board";
 import { buildMagicLayersKitHandoff } from "@/lib/products/asset-kit-handoff";
@@ -122,7 +123,7 @@ export function VisualAssetBoard({ clientId, productId, batchId, productName }: 
   };
 
   const remove = async (asset: BoardAsset) => {
-    if (!window.confirm(`確定刪除「${asset.assetSubtype ?? asset.subject ?? "這張素材"}」？`)) return;
+    if (!window.confirm(`確定刪除「${asset.assetSubtype ? imageSetSubtypeLabel(asset.assetSubtype).zh : asset.subject ?? "這張素材"}」？`)) return;
     setBusyId(asset.id);
     try {
       const response = await fetch(`/api/library/images/${asset.id}`, { method: "DELETE" });
@@ -164,9 +165,9 @@ export function VisualAssetBoard({ clientId, productId, batchId, productName }: 
 
     <section className="mt-7 overflow-hidden rounded-3xl border border-[#e7ebf1] bg-[#f7f7fb] p-4 sm:p-6">
       <div className="mb-4 flex items-center justify-between"><div><h2 className="text-sm font-bold text-gray-900">套組預覽</h2><p className="mt-1 text-xs text-gray-500">此處由現有縮圖即時組合，不會另存成素材。</p></div><span className="text-xs text-gray-400">{selection.assetIds.length} 張可用</span></div>
-      {previewAssets.length ? <div className="grid auto-rows-[110px] grid-cols-2 gap-3 sm:auto-rows-[150px] sm:grid-cols-4">{previewAssets.map((asset, index) => <button type="button" onClick={() => setSelectedAsset(asset)} key={asset.id} aria-label={`放大檢視 ${asset.subject ?? asset.assetSubtype ?? "視覺素材"}`} className={`group relative overflow-hidden rounded-2xl border border-white bg-white shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 ${index === 0 ? "col-span-2 row-span-2" : ""}`}>
+      {previewAssets.length ? <div className="grid auto-rows-[110px] grid-cols-2 gap-3 sm:auto-rows-[150px] sm:grid-cols-4">{previewAssets.map((asset, index) => <button type="button" onClick={() => setSelectedAsset(asset)} key={asset.id} aria-label={`放大檢視 ${asset.subject ?? (asset.assetSubtype ? imageSetSubtypeLabel(asset.assetSubtype).zh : "視覺素材")}`} className={`group relative overflow-hidden rounded-2xl border border-white bg-white shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 ${index === 0 ? "col-span-2 row-span-2" : ""}`}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={asset.imageUrl} alt={asset.subject ?? asset.assetSubtype ?? "視覺素材"} className="h-full w-full object-contain transition group-hover:scale-[1.02]" />
+        <img src={asset.imageUrl} alt={asset.subject ?? (asset.assetSubtype ? imageSetSubtypeLabel(asset.assetSubtype).zh : "視覺素材")} className="h-full w-full object-contain transition group-hover:scale-[1.02]" />
         <span className="absolute bottom-3 right-3 inline-flex items-center gap-1 rounded-full bg-gray-950/70 px-2.5 py-1 text-[10px] font-bold text-white opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100"><ZoomIn className="h-3 w-3" />放大</span>
       </button>)}</div> : <div className="flex min-h-52 items-center justify-center rounded-2xl border border-dashed border-gray-300 bg-white text-sm text-gray-400">尚無完成素材</div>}
     </section>
@@ -175,13 +176,13 @@ export function VisualAssetBoard({ clientId, productId, batchId, productName }: 
       const assets = groups[category] ?? [];
       if (!assets.length) return null;
       return <section key={category}><div className="mb-3 flex items-center justify-between"><h2 className="text-base font-bold text-gray-900">{CATEGORY_LABELS[category]}</h2><span className="text-xs text-gray-400">{assets.length} 項</span></div><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{assets.map((asset) => <article key={asset.id} className="overflow-hidden rounded-2xl border border-[#e7ebf1] bg-white shadow-sm">
-        <div className="relative aspect-square bg-gray-50">{asset.status === "DONE" && asset.imageUrl ? <button type="button" onClick={() => setSelectedAsset(asset)} aria-label={`放大檢視 ${asset.subject ?? asset.assetSubtype ?? CATEGORY_LABELS[category]}`} className="group h-full w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500">
+        <div className="relative aspect-square bg-gray-50">{asset.status === "DONE" && asset.imageUrl ? <button type="button" onClick={() => setSelectedAsset(asset)} aria-label={`放大檢視 ${asset.subject ?? (asset.assetSubtype ? imageSetSubtypeLabel(asset.assetSubtype).zh : CATEGORY_LABELS[category])}`} className="group h-full w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={asset.imageUrl} alt={asset.subject ?? asset.assetSubtype ?? CATEGORY_LABELS[category]} className="h-full w-full object-contain transition group-hover:scale-[1.02]" />
+          <img src={asset.imageUrl} alt={asset.subject ?? (asset.assetSubtype ? imageSetSubtypeLabel(asset.assetSubtype).zh : CATEGORY_LABELS[category])} className="h-full w-full object-contain transition group-hover:scale-[1.02]" />
           {asset.hasTransparentBackground && <span className="absolute left-3 top-3 rounded-full bg-white/90 px-2.5 py-1 text-[10px] font-bold text-gray-600 shadow-sm">透明背景</span>}
           <span className="absolute bottom-3 right-3 inline-flex items-center gap-1 rounded-full bg-gray-950/70 px-2.5 py-1 text-[10px] font-bold text-white opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100"><ZoomIn className="h-3 w-3" />放大</span>
         </button> : <div className="flex h-full flex-col items-center justify-center gap-2 text-xs text-gray-500">{asset.status === "FAILED" ? <AlertCircle className="h-6 w-6 text-red-400" /> : <Loader2 className="h-6 w-6 animate-spin text-violet-500" />}{asset.status === "FAILED" ? "生成失敗" : "正在生成"}</div>}</div>
-        <div className="p-4"><div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-bold text-gray-900">{asset.assetSubtype?.replaceAll("-", " ") ?? asset.subject ?? CATEGORY_LABELS[category]}</h3><p className="mt-1 text-xs text-gray-500">{data?.plan.find((item) => item.assetRole === asset.assetRole && item.assetSubtype === asset.assetSubtype)?.purpose ?? asset.errorMessage ?? "視覺套組素材"}</p></div>{asset.status === "DONE" && <Check className="h-4 w-4 shrink-0 text-emerald-500" />}</div>
+        <div className="p-4"><div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-bold text-gray-900">{asset.assetSubtype ? imageSetSubtypeLabel(asset.assetSubtype).zh : asset.subject ?? CATEGORY_LABELS[category]}</h3>{asset.assetSubtype && imageSetSubtypeLabel(asset.assetSubtype).en && <p className="mt-0.5 text-[11px] leading-4 text-gray-400">{imageSetSubtypeLabel(asset.assetSubtype).en}</p>}<p className="mt-1 text-xs text-gray-500">{imageSetSubtypeLabel(asset.assetSubtype).description || data?.plan.find((item) => item.assetRole === asset.assetRole && item.assetSubtype === asset.assetSubtype)?.purpose || asset.errorMessage || "視覺套組素材"}</p></div>{asset.status === "DONE" && <Check className="h-4 w-4 shrink-0 text-emerald-500" />}</div>
           <div className="mt-4 flex flex-wrap gap-2">{asset.status === "DONE" && asset.imageUrl && <a href={asset.imageUrl} download className="inline-flex items-center gap-1 rounded-lg border border-[#e5e9f0] px-3 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50"><Download className="h-3.5 w-3.5" />下載</a>}{asset.status === "FAILED" && <button type="button" onClick={() => void retry(asset)} disabled={busyId === asset.id} className="inline-flex items-center gap-1 rounded-lg bg-violet-600 px-3 py-2 text-xs font-bold text-white hover:bg-violet-700 disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${busyId === asset.id ? "animate-spin" : ""}`} />重新產生</button>}<button type="button" onClick={() => void remove(asset)} disabled={busyId === asset.id} className="inline-flex items-center gap-1 rounded-lg border border-red-100 px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50 disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" />刪除</button></div>
         </div>
       </article>)}</div></section>;
@@ -189,12 +190,12 @@ export function VisualAssetBoard({ clientId, productId, batchId, productName }: 
     {selectedAsset && <div role="dialog" aria-modal="true" aria-label="素材放大檢視" className="fixed inset-0 z-[90] flex items-center justify-center bg-gray-950/80 p-4 sm:p-8" onClick={() => setSelectedAsset(null)}>
       <div className="relative flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between gap-4 border-b border-gray-100 px-4 py-3 sm:px-5">
-          <div className="min-w-0"><h2 className="truncate text-sm font-bold text-gray-900">{selectedAsset.assetSubtype?.replaceAll("-", " ") ?? selectedAsset.subject ?? "視覺素材"}</h2><p className="mt-0.5 text-xs text-gray-400">點擊外側或按 Esc 關閉</p></div>
+          <div className="min-w-0"><h2 className="truncate text-sm font-bold text-gray-900">{selectedAsset.assetSubtype ? imageSetSubtypeLabel(selectedAsset.assetSubtype).zh : selectedAsset.subject ?? "視覺素材"}</h2><p className="mt-0.5 text-xs text-gray-400">點擊外側或按 Esc 關閉</p></div>
           <button type="button" onClick={() => setSelectedAsset(null)} aria-label="關閉放大檢視" className="rounded-full p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-900"><X className="h-5 w-5" /></button>
         </div>
         <div className="flex min-h-0 flex-1 items-center justify-center bg-[#f5f6f8] p-4 sm:p-8">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={selectedAsset.imageUrl} alt={selectedAsset.subject ?? selectedAsset.assetSubtype ?? "視覺素材"} className="max-h-[72vh] max-w-full object-contain" />
+          <img src={selectedAsset.imageUrl} alt={selectedAsset.subject ?? (selectedAsset.assetSubtype ? imageSetSubtypeLabel(selectedAsset.assetSubtype).zh : "視覺素材")} className="max-h-[72vh] max-w-full object-contain" />
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2 border-t border-gray-100 px-4 py-3 sm:px-5">
           <a href={selectedAsset.imageUrl} download className="inline-flex items-center gap-1.5 rounded-lg border border-[#e5e9f0] px-4 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50"><Download className="h-3.5 w-3.5" />下載</a>

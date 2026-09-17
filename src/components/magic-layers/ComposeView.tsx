@@ -16,6 +16,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { MagicLayersEditor, type SavedLayer } from "@/components/magic-layers/MagicLayersEditor.tsx";
 import { savedToLayerData } from "@/lib/magic-layers/saved-layer.ts";
+import { imageSetSubtypeLabel } from "@/lib/products/image-set-subtype-labels";
 import type { LayerData } from "@/lib/magic-layers/types.ts";
 import { ML_COMPOSE_BG_KEY, ML_COMPOSE_CLIENT_KEY, ML_WIZARD_SEED_KEY } from "@/components/activities/RolePickerModal";
 import { buildAssetKitSeedLayers, parseMagicLayersSeed, type HandoffKitAsset } from "@/lib/products/asset-kit-handoff";
@@ -113,7 +114,7 @@ export function ComposeView({ clientId: clientIdProp }: { clientId?: string }) {
           const allowed = new Set(seed.assetKit.assetIds);
           const assets = kit.assets.filter((asset) => allowed.has(asset.id) && asset.status === "DONE" && !!asset.imageUrl);
           seedLayers = buildAssetKitSeedLayers(assets, seed.docW, seed.docH);
-          setKitLibrary(assets.map((asset) => ({ url: asset.imageUrl, label: asset.assetSubtype ?? "視覺套組素材" })));
+          setKitLibrary(assets.map((asset) => ({ url: asset.imageUrl, label: asset.assetSubtype ? imageSetSubtypeLabel(asset.assetSubtype).zh : "視覺套組素材" })));
         }
         const im = await blankImage(seed.docW, seed.docH);
         if (cancelled) return;

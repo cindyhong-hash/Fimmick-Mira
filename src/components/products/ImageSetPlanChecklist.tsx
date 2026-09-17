@@ -25,7 +25,7 @@ export function ImageSetPlanChecklist({ items, maxAssets, onToggle }: {
 
   return <div>
     <div className="mb-3 flex items-end justify-between gap-3">
-      <div><h3 className="text-sm font-bold text-gray-900">選擇這組要建立的素材</h3><p className="mt-1 text-xs text-gray-500">每張都會沿用上方選定的風格與商品原貌；核心素材已預選。</p></div>
+      <div><h3 className="text-sm font-bold text-gray-900">確認要生成的素材</h3><p className="mt-1 text-xs text-gray-500">核心 5 項已預選；額外變化由你決定是否加入。</p></div>
       <span className="shrink-0 rounded-full bg-violet-50 px-3 py-1 text-xs font-bold text-violet-700">已選 {selectedCount}/{maxAssets}</span>
     </div>
     <div className="space-y-4">{groups.map((group) => <section key={group.category} aria-labelledby={`kit-${group.category}`}>

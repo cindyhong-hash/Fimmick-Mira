@@ -293,7 +293,11 @@ export function ImageSetModal({ clientId, productId, onClose, onFinished }: {
   const preparingAnnouncement = imageSetGenerationAnnouncement({ creatingRows, itemCount: gen.length });
   const recoveryAction = recoveryKind ? imageSetRecoveryAction(recoveryKind) : null;
   const terminalSummary = gen.length ? imageSetTerminalSummary(gen) : null;
-  const requestClose = () => { if (!creatingRows) onClose(); };
+  const requestClose = () => {
+    if (creatingRows) return;
+    if (phase === "done") clearSavedImageSetBatch(window.localStorage, productId);
+    onClose();
+  };
 
   const retryRecovery = () => {
     setError(null);

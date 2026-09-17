@@ -53,17 +53,17 @@ const LABELS: Record<string, ImageSetSubtypeLabel> = {
     description: "提供符合品牌風格的裝飾與視覺元素，建立一致的品牌識別。",
   },
 
-  // 以下三個是程式裡存在、但這次命名清單沒有列到的變化。
-  // 先給同樣風格的中文，避免畫面上一部分中文一部分英文。
+  // 非保養／彩妝類商品走的質地變化。文案沿用同一套句型：
+  // 先說「提供什麼」，再說「AI 可以拿它做什麼」。
   "material-detail": {
     zh: "材質細節",
     en: "Material Detail",
-    description: "近距離呈現商品本身的材質與表面質感，凸顯做工與用料。",
+    description: "提供商品材質與表面質感的特寫，讓 AI 可以凸顯做工與用料。",
   },
   "fabric-detail": {
     zh: "布料細節",
     en: "Fabric Detail",
-    description: "近距離呈現布料織紋與表面細節，凸顯質料與觸感。",
+    description: "提供布料織紋與表面細節的特寫，讓 AI 可以呈現質料與觸感。",
   },
   "layout-frame": {
     zh: "版面邊框",

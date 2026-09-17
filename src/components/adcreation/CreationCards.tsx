@@ -24,7 +24,7 @@ export function CreationCards({
   const check = "h-3.5 w-3.5 shrink-0 text-violet-500";
 
   return (
-    <div className="mb-8 grid grid-cols-3 gap-4">
+    <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {/* 卡1 全新生成 → 生成類型 popup（淡紫底） */}
       <button
         type="button"

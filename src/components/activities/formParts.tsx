@@ -163,7 +163,7 @@ export function AssetUploadCards({
   const analyzing = analyzeState === "analyzing";
   const done = analyzeState === "done";
   return (
-    <div className="grid grid-cols-3 gap-4 items-stretch">
+    <div className="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-3">
       {/* 卡 1：產品圖片 */}
       <div className="rounded-xl border-[1.5px] border-[#ebeff5] bg-white flex flex-col overflow-hidden min-h-[190px]">
         <div className="flex-1 p-5 flex flex-col gap-3.5">

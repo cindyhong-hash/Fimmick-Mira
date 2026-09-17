@@ -132,11 +132,12 @@ export default function NewActivityPage({ params }: { params: Promise<{ clientId
   return (
     <div className="max-w-3xl">
       {dialog}
-      <div className="flex items-center gap-2 mb-8">
+      {/* 窄螢幕讓版型下拉換到第二行，否則標題被擠成兩行單字 */}
+      <div className="mb-8 flex flex-wrap items-center gap-2">
         <button onClick={() => guard(() => router.push(backHref))} className="text-gray-400 hover:text-gray-700">
           <ChevronLeft className="h-5 w-5" />
         </button>
-        <h1 className="text-xl font-semibold flex-1">{initial.handoff?.fromProduct ? `使用「${initial.handoff.fromProduct.name}」建立圖文` : "新增活動"}</h1>
+        <h1 className="min-w-0 basis-full text-xl font-semibold sm:basis-auto sm:flex-1">{initial.handoff?.fromProduct ? `使用「${initial.handoff.fromProduct.name}」建立圖文` : "新增活動"}</h1>
         {/* [MULTI] 版型下拉：可從單圖切換到多圖版型（底圖模式唔支援，隱藏） */}
         {!isBaseMode && (
           <button

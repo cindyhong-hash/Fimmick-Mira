@@ -11,7 +11,7 @@ export function QuickStartCards({ clientId }: { clientId: string }) {
   return (
     <section data-tour="home-quickstart">
       <h2 className="mb-4 text-base font-semibold text-gray-900">開始創作</h2>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {cards.map((c) => (
           <Link key={c.title} href={c.href}
             className="group flex flex-col gap-3 overflow-hidden rounded-2xl border border-[#ebebeb] bg-white px-5 pb-3 pt-4 transition-all hover:border-violet-300 hover:shadow-sm">

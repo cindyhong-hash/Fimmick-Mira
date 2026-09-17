@@ -200,13 +200,16 @@ export default function DashboardPage({ params }: { params: Promise<{ clientId: 
   });
 
   return (
-    <div className="flex gap-6">
+    /* 手機／平板單欄堆疊；≥1024px 才回到左右兩欄（桌機維持原樣）。
+       原本在所有寬度都是 flex-row，手機上右欄 w-64 就吃掉 256px，
+       主欄只剩約 46px，標題與按鈕被壓成一行一個字。 */
+    <div className="flex flex-col gap-6 lg:flex-row">
       <div className="min-w-0 flex-1 space-y-8">
         <HomeHero submitting={quickCreating} onQuickCreate={handleQuickCreate} onOpenFullSettings={openFullSettings} />
         <QuickStartCards clientId={client.id} />
         <RecentWorks clientId={client.id} activities={client.activities ?? []} />
       </div>
-      <div className="w-64 shrink-0 space-y-4">
+      <div className="w-full space-y-4 lg:w-64 lg:shrink-0">
         <TodayInspirationCard clientId={client.id} />
         <BrandMemoryPanel
           clientId={client.id}

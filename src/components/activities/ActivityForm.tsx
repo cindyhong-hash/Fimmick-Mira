@@ -485,7 +485,7 @@ export function ActivityForm({
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-1.5">
-              <span className="text-sm font-bold text-gray-900">畫面描述 Prompt</span>
+              <span className="shrink-0 text-sm font-bold text-gray-900">畫面描述 Prompt</span>
               <span className="text-xs text-gray-400 font-normal">用日常語言描述想要的場景、主體與氛圍</span>
             </div>
             <div className="flex items-center gap-2">
@@ -623,8 +623,8 @@ export function ActivityForm({
         </div>
 
         <div className="space-y-2">
-          <div className="flex items-center gap-1.5">
-            <span className="text-sm font-bold text-gray-900">必放文字</span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="shrink-0 text-sm font-bold text-gray-900">必放文字</span>
             <span className="text-xs text-gray-400 font-normal">（選填）— 確保 AI 文案或圖中準確包含這些文字</span>
           </div>
           <div className="relative">

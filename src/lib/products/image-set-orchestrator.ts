@@ -853,7 +853,7 @@ export async function runImageSetBatch(
         result.params[role.role] = initialParams;
         return undefined;
       }
-      const references = role.path === "edit" || role.path === "cutout"
+      const references = role.path === "edit" || role.path === "crop" || role.path === "cutout"
         ? await loadReferenceDataUris(input.product, batchHeroImageUrl, loadAsDataUri, abortController.signal)
         : { rawImageUrls: [] as string[] };
       const prompt = compileImageSetPrompt({
@@ -1135,7 +1135,7 @@ export async function createAndScheduleImageSetBatch(
   if (roles.some((role) => role.path === "cutout") && !imageProduct.rawImageUrls.some(Boolean)) {
     return { ok: false, status: 400, error: "需要至少一張原始商品照，才能建立商品主體去背 PNG。" };
   }
-  if (roles.some((role) => role.path === "edit") && ![...imageProduct.rawImageUrls, imageProduct.heroImageUrl].some(Boolean)) {
+  if (roles.some((role) => role.path === "edit" || role.path === "crop") && ![...imageProduct.rawImageUrls, imageProduct.heroImageUrl].some(Boolean)) {
     return { ok: false, status: 400, error: "需要至少一張商品照，才能建立產品參考素材。" };
   }
 
@@ -1301,7 +1301,7 @@ export async function confirmAndScheduleProductImageSet(
   if (roles.some(({ path }) => path === "cutout") && !imageProduct.rawImageUrls.some(Boolean)) {
     return { ok: false, status: 400, error: "需要至少一張原始商品照，才能建立商品主體去背 PNG。" };
   }
-  if (roles.some(({ path }) => path === "edit") && ![...imageProduct.rawImageUrls, imageProduct.heroImageUrl].some(Boolean)) {
+  if (roles.some(({ path }) => path === "edit" || path === "crop") && ![...imageProduct.rawImageUrls, imageProduct.heroImageUrl].some(Boolean)) {
     return { ok: false, status: 400, error: "需要至少一張商品照，才能建立產品參考素材。" };
   }
 
@@ -1425,7 +1425,7 @@ function isValidSavedRoleSpec(role: unknown): role is ImageSetRoleSpec {
   return (
     typeof value.role === "string" &&
     typeof value.label === "string" &&
-    (value.path === "cutout" || value.path === "edit" || value.path === "text") &&
+    (value.path === "cutout" || value.path === "crop" || value.path === "edit" || value.path === "text") &&
     typeof value.cutout === "boolean" &&
     typeof value.sceneCn === "string" &&
     typeof value.objective === "string" &&
@@ -1436,10 +1436,10 @@ function isValidSavedRoleSpec(role: unknown): role is ImageSetRoleSpec {
 
 function normalizePhysicalDetailRoleSpec(role: ImageSetRoleSpec): ImageSetRoleSpec {
   const saved = role as ImageSetRoleSpec & { assetSubtype?: string };
-  if (saved.role !== "detail" || saved.assetSubtype === "formula-texture" || saved.path !== "text") return role;
+  if (saved.role !== "detail" || saved.assetSubtype === "formula-texture" || saved.path === "crop") return role;
   return {
     ...saved,
-    path: "edit",
+    path: "crop",
     mustNotShow: saved.mustNotShow.filter((item) => item !== "Logo" && item !== "文字"),
   };
 }

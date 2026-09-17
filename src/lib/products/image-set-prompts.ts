@@ -123,7 +123,7 @@ export function compileImageSetPrompt({ product, profile, artDirection, role }: 
     "不得加入任何額外文字、色碼（hex）、數字、標籤或浮水印（產品本身既有的品牌字樣除外）",
     ...textSafety,
   ];
-  const physicalDetailGrounding = role.role === "detail" && role.path === "edit"
+  const physicalDetailGrounding = role.role === "detail" && role.path === "crop"
     ? [
         "The supplied product reference images are the sole source of truth. If metadata or art direction conflicts with visible pixels, follow the reference pixels.",
         "Create a tight macro crop of one genuinely visible existing feature from the supplied product. Show only part of the product; never show the entire product or invent an alternate angle.",

@@ -5,7 +5,7 @@ import type { ProductVisualProfile } from "./product-visual-profile.ts";
 
 // lifestyle stays accepted for rows created by previous versions. New batches use benefit instead.
 export type ImageSetRole = "hero" | "detail" | "lifestyle" | "background" | "benefit" | "decoration";
-export type ImageSetGenerationPath = "cutout" | "edit" | "text";
+export type ImageSetGenerationPath = "cutout" | "crop" | "edit" | "text";
 
 export type ImageSetRoleSpec = {
   role: ImageSetRole;
@@ -97,7 +97,7 @@ function detailSpec(profile: ProductVisualProfile, context: string): ImageSetRol
     : hasAppearanceEvidence && profile.productArchetype === "food_beverage" ? "食品或飲品本身可見的表面質地"
       : "商品材質與表面質地細節";
   return {
-    role: "detail", label: "質地細節", usageDescription: `呈現${detail}`, path: "edit", cutout: false,
+    role: "detail", label: "質地細節", usageDescription: `呈現${detail}`, path: "crop", cutout: false,
     sceneCn: `真實攝影微距的${detail}；只依已提供的外觀資料呈現，不加入不存在的材料或功能；${context}`,
     objective: `Create a real photographic macro study of the supplied ${detail}. Do not invent materials, ingredients, controls, or functions.`,
     composition: "Photographic macro close-up with authentic surface detail, natural highlights, and shallow depth of field.",

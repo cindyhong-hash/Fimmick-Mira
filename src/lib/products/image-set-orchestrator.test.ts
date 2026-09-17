@@ -336,13 +336,13 @@ test("physical detail loads product references while conceptual assets stay prod
   });
 
   assert.deepEqual(requests.find(({ role }) => role === "hero"), { role: "hero", path: "cutout", hasProductReference: true });
-  assert.deepEqual(requests.find(({ role }) => role === "detail"), { role: "detail", path: "edit", hasProductReference: true });
+  assert.deepEqual(requests.find(({ role }) => role === "detail"), { role: "detail", path: "crop", hasProductReference: true });
   for (const role of ["background", "benefit", "decoration"]) {
     assert.deepEqual(requests.find((request) => request.role === role), { role, path: "text", hasProductReference: false });
   }
 });
 
-test("batch execution upgrades a stale physical detail text path before generation", async () => {
+test("batch execution upgrades a stale physical detail text path to a deterministic crop", async () => {
   const detail = planImageSetRoles(profile).find(({ role }) => role === "detail")!;
   const staleDetail = {
     ...detail,
@@ -360,7 +360,7 @@ test("batch execution upgrades a stale physical detail text path before generati
     },
   });
 
-  assert.equal(request?.generationPath, "edit");
+  assert.equal(request?.generationPath, "crop");
   assert.ok(request?.rawImageUrls?.length);
   assert.match(request?.prompt ?? "", /reference images are the sole source of truth/i);
 });
@@ -1463,7 +1463,7 @@ test("kit retry keeps the persisted art direction and rejects cross-batch or cha
     assert.equal(prepared.value.input.artDirection.concept, "confirmed kit direction");
     assert.equal(prepared.value.input.rows.length, 1);
     assert.equal(prepared.value.input.rows[0].id, "row-detail");
-    assert.equal(prepared.value.input.rows[0].role.path, "edit");
+    assert.equal(prepared.value.input.rows[0].role.path, "crop");
     assert.doesNotMatch(prepared.value.input.rows[0].role.mustNotShow.join("\n"), /^Logo$|^文字$/m);
   }
   assert.equal(prepareKitAssetRegenerationFromRecords({ ...row, batchId: "another-batch" }, kit).ok, false);

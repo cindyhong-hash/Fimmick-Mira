@@ -136,11 +136,17 @@ export function compileImageSetPrompt({ product, profile, artDirection, role }: 
   // intentionally receive context without the product identity that would make
   // the model place a bottle into every background, texture, and benefit visual.
   if (role.path === "text") {
-    const context = [
-      `Product positioning (context only; never depict the product): ${profile.productType || product.category || "unspecified"}`,
-      `Supplied use cases: ${list(profile.useCases, "none supplied")}`,
-      `Suitable scenes: ${list(profile.suitableScenes, "none supplied")}`,
-    ].join("\n");
+    // 背景板刻意不接收任何商品名詞。實測發現送進 "Product positioning: 身體除毛乳液"
+    // 之後，模型不但畫出一支乳液軟管，還把欄位標籤本身(«Supplied use cases;»)
+    // 當成畫面文字描上去。對圖像模型而言，句中出現的名詞就是要畫的東西，
+    // 後面補一句「never depict」沒有作用。背景只需要知道場景。
+    const context = role.role === "background"
+      ? `Setting: ${list(profile.suitableScenes, "a plain, quiet interior")}`
+      : [
+          `Product positioning (context only; never depict the product): ${profile.productType || product.category || "unspecified"}`,
+          `Supplied use cases: ${list(profile.useCases, "none supplied")}`,
+          `Suitable scenes: ${list(profile.suitableScenes, "none supplied")}`,
+        ].join("\n");
     const formulaTexture = "assetSubtype" in role && role.assetSubtype === "formula-texture";
     const textExclusions = [
       ...role.mustNotShow,

@@ -103,6 +103,19 @@ test("background forbids the product and reserves layout space", () => {
   assert.doesNotMatch(prompt, /一致產品攝影/);
 });
 
+test("background prompt never names the product", () => {
+  const role = planImageSetRoles(beautyDeviceProfile).find(({ role }) => role === "background")!;
+  const prompt = compileImageSetPrompt({ product, profile: beautyDeviceProfile, artDirection, role });
+
+  // 實測：把商品名詞送進背景提示詞，模型會照著畫出那個商品，並且把欄位標籤
+  // 本身（«Supplied use cases;»）當成畫面文字描上去。名詞就是模型要畫的東西，
+  // 補一句「never depict」沒有用。背景板只收場景，不收任何商品資訊。
+  assert.doesNotMatch(prompt, /女性電動除毛刀/);
+  assert.doesNotMatch(prompt, /Supplied use cases/);
+  assert.doesNotMatch(prompt, /Product positioning/);
+  assert.match(prompt, /Setting:/);
+});
+
 test("brand yellow remains an accent rather than the dominant palette", () => {
   const role = planImageSetRoles(beautyDeviceProfile)[0];
   const prompt = compileImageSetPrompt({ product, profile: beautyDeviceProfile, artDirection, role });

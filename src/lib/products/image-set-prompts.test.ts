@@ -93,10 +93,12 @@ test("background forbids the product and reserves layout space", () => {
   const role = planImageSetRoles(beautyDeviceProfile).find(({ role }) => role === "background")!;
   const prompt = compileImageSetPrompt({ product, profile: beautyDeviceProfile, artDirection, role });
 
-  assert.match(prompt, /不出現任何產品/);
+  // 背景改用「肯定描述」表達「畫面不能有商品」——純文字生圖對否定指令遵循度差，
+  // 說「空的檯面上什麼都沒放」比說「不要有產品」有效。斷言跟著改成驗肯定文案。
+  assert.match(prompt, /完全淨空|什麼都沒有放/);
   assert.match(prompt, /留白/);
-  assert.match(prompt, /product-free/i);
-  assert.match(prompt, /do not depict any product/i);
+  assert.match(prompt, /empty set|nothing resting on it/i);
+  assert.match(prompt, /composited in later/i);
   assert.doesNotMatch(prompt, /Product name: 女性電動除毛刀/);
   assert.doesNotMatch(prompt, /一致產品攝影/);
 });

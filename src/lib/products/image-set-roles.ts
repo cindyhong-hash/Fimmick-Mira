@@ -84,10 +84,10 @@ function detailSpec(profile: ProductVisualProfile, context: string): ImageSetRol
   if (profile.productArchetype === "skincare" || profile.productArchetype === "cosmetics") {
     return {
       role: "detail", label: "質地細節", usageDescription: "呈現產品使用感與質地", path: "text", cutout: false,
-      sceneCn: `真實攝影微距的乳液／凝露／泡沫質地；可拍出無品牌按壓頭正在出料，或質地抹在肌膚上的近景；${context}`,
-      objective: "Create a real photographic macro texture study of dispensed lotion, gel, foam, or product spread on skin. Show only visibly supported texture characteristics.",
+      sceneCn: `真實攝影微距的乳液／凝露／泡沫質地：質地抹在肌膚上、或落在乾淨表面的近景。畫面中只有質地本身與承載它的肌膚或表面；${context}`,
+      objective: "Create a real photographic macro texture study of lotion, gel, or foam resting on skin or a clean surface. The frame contains only the formula and the skin or surface holding it. Show only visibly supported texture characteristics.",
       composition: "Photographic macro close-up with visible real texture, natural highlights, and shallow depth of field.",
-      mustNotShow: ["抽象液體波浪", "漂浮微粒", "功效意象圖", "完整商品", "完整瓶罐或包裝", "Logo", "文字", "未提供的成分或功效宣稱"],
+      mustNotShow: ["抽象液體波浪", "漂浮微粒", "功效意象圖", "任何容器、瓶罐、軟管、按壓頭或出料口", "任何器具或工具", "完整商品", "包裝", "Logo", "文字", "未提供的成分或功效宣稱"],
       subtype: "formula-texture", purpose: "呈現已提供資訊支持的配方質地與使用觸感",
     };
   }
@@ -123,8 +123,8 @@ function coreRoles(profile: ProductVisualProfile, themeKey: string, theme?: Imag
     withPlanMetadata(detail, { category: "texture", assetSubtype: detail.subtype, purpose: detail.purpose, core: true, themeKey }),
     withPlanMetadata({
       role: "background", label: "情境背景", usageDescription: "後續合成用純背景", path: "text", cutout: false,
-      sceneCn: `單一連續的純情境背景，不出現任何產品；保留連續文字留白與清楚可放置商品的檯面或平面；${context}`,
-      objective: "Create one coherent product-free advertising background plate with contiguous quiet copy space and a clearly visible product placement plane. Do not depict any product.",
+      sceneCn: `一個空景：可放置商品的檯面或平面完全淨空，表面上什麼都沒有放，是刻意留空等後製再放入商品的。畫面保留連續文字留白——大片素面牆面或背景，沒有圖案也沒有字樣；${context}`,
+      objective: "Photograph an empty set: a bare, completely clear tabletop or surface with nothing resting on it, and a large uninterrupted plain wall or backdrop behind it. The surface is deliberately vacant because a product will be composited in later. Every object in frame is plain and unmarked.",
       composition: "保留連續文案區與清楚商品擺放平面；畫面有乾淨留白與平穩重心，供後續廣告合成。",
       mustNotShow: ["任何商品", "瓶罐", "產品包裝", "Logo", "文字", "人物手持產品", "左右切半畫面", "搶戲的鏡子、水槽或道具"],
     }, { category: "background", assetSubtype: "primary-scene", purpose: `提供主版面合成與文案留白${themePurpose}`, core: true, themeKey }),

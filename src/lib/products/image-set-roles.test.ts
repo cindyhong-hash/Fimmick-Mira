@@ -113,7 +113,7 @@ test("unknown products still receive five safe generic roles", () => {
   assert.equal(roles.length, 5);
   assert.deepEqual(roles.map((role) => role.role), ["hero", "detail", "background", "benefit", "decoration"]);
   assert.equal(roles[2].role, "background");
-  assert.match(roles[2].sceneCn, /不出現任何產品/);
+  assert.match(roles[2].sceneCn, /完全淨空|什麼都沒有放/);
 });
 
 test("configurable plans select exactly one core asset in each category", () => {

@@ -1491,6 +1491,8 @@ export function prepareImageSetRegenerationFromRow(row: ImageSetRegenerationRow)
 export function prepareKitAssetRegenerationFromRecords(
   row: ImageSetRegenerationRow,
   kit: ProductImageSetRetrySnapshot,
+  /** 使用者輸入的「希望怎麼改」。角色、變化與商品識別規則都不受影響，只補一段修改指示。 */
+  revisionNote?: string,
 ): ImageSetRegenerationPreparation {
   if (
     row.batchId !== kit.id
@@ -1518,12 +1520,23 @@ export function prepareKitAssetRegenerationFromRecords(
     || savedRole.assetSubtype !== planned.assetSubtype
   ) return { ok: false, status: 400, error: "這張素材的角色或變化資料不一致" };
 
+  // 修改指示只附加在場景描述後面，不覆寫 objective／mustNotShow／商品識別規則——
+  // 那些是這個角色的安全邊界（例如背景不得出現商品、質地不得出現容器），
+  // 不能讓使用者一句話把它們解除。
+  const note = revisionNote?.trim().slice(0, 300);
+  const rows = note
+    ? prepared.value.input.rows.map((entry, index) => index === 0
+      ? { ...entry, role: { ...entry.role, sceneCn: `${entry.role.sceneCn}\n【本次重新生成的修改指示】${note}` } }
+      : entry)
+    : prepared.value.input.rows;
+
   return {
     ok: true,
     value: {
       ...prepared.value,
       input: {
         ...prepared.value.input,
+        rows,
         batchId: kit.id,
         artDirection: kitDirection,
       },

@@ -63,8 +63,16 @@ test("kit retry rejects metadata changes and rebuilds from the persisted kit sna
 
   assert.match(source, /protectPaidRoute/);
   assert.match(source, /where: \{ id: assetId, productId, batchId \}/);
-  assert.match(source, /prepareKitAssetRegenerationFromRecords\(target, kit\)/);
+  assert.match(source, /prepareKitAssetRegenerationFromRecords\(target, kit, revisionNote\)/);
   assert.match(source, /body\.assetRole !== target\.assetRole/);
   assert.match(source, /body\.assetSubtype !== target\.assetSubtype/);
   assert.doesNotMatch(source, /analyzeProductVisualProfile|buildImageSetArtDirection/);
+
+  // 已完成的素材也能重生（使用者要逐張調整），但進行中的不可被搶佔。
+  assert.match(source, /status: \{ in: \["FAILED", "DONE"\] \}/);
+  assert.doesNotMatch(source, /status: \{ in: \[[^\]]*"GENERATING"[^\]]*\] \}/);
+  // 啟動失敗要還原成原本的狀態，本來是 DONE 的不該被標成 FAILED。
+  assert.match(source, /status: previousStatus/);
+  // 修改指示要有長度上限，避免整段提示詞被使用者輸入淹沒。
+  assert.match(source, /slice\(0, 300\)/);
 });

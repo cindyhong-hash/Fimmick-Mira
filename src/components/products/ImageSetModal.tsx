@@ -412,11 +412,15 @@ export function ImageSetModal({ clientId, productId, onClose, onFinished }: {
     }
   }
 
-  async function retry(item: GenState) {
+  async function retry(item: GenState, revisionNote = "") {
     setError(null);
     setPollingTimedOut(false);
     try {
-      const response = await fetch(`/api/products/${productId}/image-set/${draftBatchId}/assets/${item.id}/retry`, { method: "POST" });
+      const response = await fetch(`/api/products/${productId}/image-set/${draftBatchId}/assets/${item.id}/retry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(revisionNote.trim() ? { revisionNote: revisionNote.trim() } : {}),
+      });
       const data = await response.json().catch(() => ({})) as { error?: string };
       if (!response.ok) throw new Error(data.error || `${item.label}目前無法重新產生`);
       setGen((current) => current.map((row) => row.id === item.id ? { ...row, status: "GENERATING", errorMessage: null } : row));
@@ -516,7 +520,7 @@ export function ImageSetModal({ clientId, productId, onClose, onFinished }: {
                 <div className="flex items-center gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white">{phase === "done" ? <Check className="h-5 w-5 text-emerald-500" /> : <Loader2 className="h-5 w-5 animate-spin text-violet-600" />}</span><div className="min-w-0"><p className="text-sm font-bold text-gray-900">{phase === "done" ? (missingResumeCount ? `已恢復套圖進度，${missingResumeCount} 張待重新生成` : terminalSummary?.status === "PARTIAL" ? `完成 ${terminalSummary.completed} 張，${terminalSummary.failed} 張失敗` : terminalSummary?.status === "FAILED" ? `本批 ${terminalSummary.failed} 張皆未完成` : `套圖已完成 ${terminalSummary?.completed ?? progress.completed}/${progress.total}`) : progressLabel}</p><p className="mt-1 text-xs leading-5 text-gray-500">{phase === "done" ? (missingResumeCount ? "這批有素材已被刪除；其餘素材已保留，請丟棄舊批次後重新開始。" : terminalSummary?.status === "PARTIAL" ? "成功素材已保留，可查看套組或單獨重試失敗項目。" : terminalSummary?.status === "FAILED" ? "可單獨重新產生失敗項目，或建立另一組。" : "完成的素材已存回產品，可以前往視覺套組查看。") : "建立完成後會自動更新；現在可以關閉視窗，生成仍會繼續。"}</p></div></div>
                 <div role="progressbar" aria-label="商品套圖建立進度" aria-valuemin={0} aria-valuemax={Math.max(progress.total, 1)} aria-valuenow={progress.completed} aria-valuetext={`完成 ${progress.completed}/${progress.total}`} className="mt-3 h-1.5 overflow-hidden rounded-full bg-white"><div className="h-full rounded-full bg-violet-600 transition-[width] duration-500" style={{ width: `${progress.total ? (progress.completed / progress.total) * 100 : 0}%` }} /></div>
               </div>}
-              {!preparingRows && <div className="space-y-2.5">{gen.map((item) => <RoleRow key={item.id} item={item} onRetry={() => void retry(item)} />)}</div>}
+              {!preparingRows && <div className="space-y-2.5">{gen.map((item) => <RoleRow key={item.id} item={item} onRetry={(note) => void retry(item, note)} />)}</div>}
               {pollingTimedOut && phase !== "done" && <HelpPopover label="等待時間較長">已暫停更新畫面，但生成仍在背景進行。關閉後重新開啟即可繼續查看，不會改動後端狀態。</HelpPopover>}
               {error && <ErrorMessage>{error}</ErrorMessage>}
               <div className="flex flex-col-reverse items-stretch justify-center gap-2 pt-1 sm:flex-row">
@@ -550,8 +554,14 @@ function ErrorMessage({ children }: { children: ReactNode }) {
   return <p role="alert" aria-live="assertive" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{children}</p>;
 }
 
-function RoleRow({ item, onRetry }: { item: GenState; onRetry: () => void }) {
-  return <div className="flex items-center gap-3 rounded-xl border border-[#ebeff5] bg-white p-3">
+function RoleRow({ item, onRetry }: { item: GenState; onRetry: (revisionNote: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState("");
+  // 已完成的也能重生（使用者要逐張調整），但生成中／等待中不給動，避免搶佔進行中的工作。
+  const canRegenerate = (item.status === "DONE" || item.status === "FAILED") && !item.missing;
+  const submit = () => { setOpen(false); onRetry(note); setNote(""); };
+  return <div className="rounded-xl border border-[#ebeff5] bg-white p-3">
+  <div className="flex items-center gap-3">
     <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-[#ebeff5] bg-gray-50">
       {item.status === "DONE" && item.imageUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -559,6 +569,21 @@ function RoleRow({ item, onRetry }: { item: GenState; onRetry: () => void }) {
       ) : item.status === "GENERATING" ? <Loader2 className="h-4 w-4 animate-spin text-violet-500" /> : item.status === "FAILED" ? <AlertCircle className="h-4 w-4 text-red-400" /> : <Clock3 className="h-4 w-4 text-gray-400" />}
     </div>
     <div className="min-w-0 flex-1"><div className="text-sm font-bold text-gray-900">{item.label}</div><div role="status" aria-live="polite" className={`mt-0.5 text-xs leading-5 ${item.status === "FAILED" ? "text-red-500" : "text-gray-400"}`}>{item.status === "PENDING" ? "等待生成" : item.status === "GENERATING" ? "正在生成…" : item.status === "DONE" ? "已完成" : (item.errorMessage || `${item.label}生成失敗，可單獨重新產生。`)}</div></div>
-    {item.status === "FAILED" && !item.missing ? <button type="button" onClick={onRetry} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[#ebe4f9] bg-[#f9f6ff] px-3 py-2 text-xs font-bold text-violet-600 hover:bg-violet-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"><RefreshCw className="h-3.5 w-3.5" />重新產生</button> : item.status === "DONE" ? <Check className="h-4 w-4 shrink-0 text-emerald-500" /> : null}
+    {item.status === "DONE" && <Check className="h-4 w-4 shrink-0 text-emerald-500" />}
+    {canRegenerate && <button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[#ebe4f9] bg-[#f9f6ff] px-3 py-2 text-xs font-bold text-violet-600 hover:bg-violet-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"><RefreshCw className="h-3.5 w-3.5" />重新生成</button>}
+  </div>
+  {open && <div className="mt-3 rounded-lg border border-[#ebe4f9] bg-[#faf8ff] p-3">
+    <label className="block text-xs font-bold text-gray-700" htmlFor={`revise-${item.id}`}>希望怎麼改？（選填）</label>
+    <textarea id={`revise-${item.id}`} value={note} onChange={(event) => setNote(event.target.value)} rows={2} maxLength={300}
+      placeholder="例如：背景再亮一點、去掉檯面上的毛巾、換成木質桌面"
+      className="mt-2 w-full resize-none rounded-lg border border-[#e5e9f0] bg-white px-3 py-2 text-xs leading-5 text-gray-800 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" />
+    <div className="mt-2 flex items-center justify-between gap-2">
+      <span className="text-[11px] leading-4 text-amber-700">重新生成會建立 1 張付費圖片素材，並取代這一張。</span>
+      <div className="flex shrink-0 gap-2">
+        <button type="button" onClick={() => { setOpen(false); setNote(""); }} className="rounded-lg px-3 py-2 text-xs font-bold text-gray-500 hover:bg-gray-50">取消</button>
+        <button type="button" onClick={submit} className="rounded-lg bg-violet-600 px-3 py-2 text-xs font-bold text-white hover:bg-violet-700">確認重新生成</button>
+      </div>
+    </div>
+  </div>}
   </div>;
 }

@@ -47,10 +47,10 @@ export function Sidebar() {
     );
   }
 
+  // 合併 main 的固定側欄（sticky/h-screen/self-start）＋ MIRA logo，
+  // 與 codex 的手機版窄欄（w-16 → sm:w-[220px]）。
+  // 手機版扣掉內距只剩 32px，放不下 logo 與收合鈕，沿用 codex 對文字的做法：小螢幕隱藏 logo。
   return (
-    {/* 合併：main 的固定側欄（sticky/h-screen/self-start）＋ MIRA logo，
-        與 codex 的手機版窄欄（w-16 → sm:w-[220px]）。
-        手機版扣掉內距只剩 32px，放不下 logo 與收合鈕，沿用 codex 對文字的做法：小螢幕隱藏 logo。 */}
     <aside className="sticky top-0 flex h-screen w-16 shrink-0 flex-col items-center self-start overflow-y-auto border-r border-gray-200 bg-white p-4 sm:w-[220px] sm:items-stretch">
       <div className="mb-6 flex items-center justify-between px-1">
         <Image

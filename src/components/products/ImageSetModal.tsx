@@ -3,7 +3,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { AlertCircle, CalendarDays, Check, Clock3, HelpCircle, Loader2, RefreshCw, Sparkles, X } from "lucide-react";
+import { AlertCircle, CalendarDays, Check, ChevronLeft, Clock3, HelpCircle, Loader2, LockKeyhole, Palette, RefreshCw, Sparkles, X } from "lucide-react";
 import type { ImageSetArtDirection, ProductVisualProfile, SetItem } from "@/lib/imageSet";
 import type { ImageSetPlanItem } from "@/lib/products/image-set-kit";
 import type { ImageSetTheme } from "@/lib/products/image-set-roles";
@@ -48,9 +48,8 @@ type ImageSetPayload = {
 };
 type ResumeRecovery = { payload: ImageSetPayload; saved: SavedImageSetBatch };
 type LoadedRows = { rows: GenState[]; missingCount: number };
-type PlannedKit = {
-  themes: ImageSetTheme[];
-  maxAssets: number;
+type PlanOptions = { themes: ImageSetTheme[]; maxAssets: number };
+type PlannedKit = PlanOptions & {
   batchId: string;
   productId: string;
   theme: ImageSetTheme | null;
@@ -95,6 +94,7 @@ export function ImageSetModal({ clientId, productId, onClose, onFinished }: {
   const [phase, setPhase] = useState<ModalPhase>("analyzing");
   const [profile, setProfile] = useState<ProductVisualProfile | null>(null);
   const [artDirection, setArtDirection] = useState<ImageSetArtDirection | null>(null);
+  const [sourceHash, setSourceHash] = useState("");
   const [sourceImageCount, setSourceImageCount] = useState(0);
   const [needsAnalysis, setNeedsAnalysis] = useState(true);
   const [themes, setThemes] = useState<ImageSetTheme[]>([]);
@@ -103,7 +103,6 @@ export function ImageSetModal({ clientId, productId, onClose, onFinished }: {
   const [draftBatchId, setDraftBatchId] = useState("");
   const [gen, setGen] = useState<GenState[]>([]);
   const [creatingRows, setCreatingRows] = useState(false);
-  const [updatingPlan, setUpdatingPlan] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [pollingTimedOut, setPollingTimedOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -114,7 +113,6 @@ export function ImageSetModal({ clientId, productId, onClose, onFinished }: {
   const onFinishedRef = useRef(onFinished);
   const dialogRef = useRef<HTMLElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const planRevision = useRef(0);
   const batchItemsKey = gen.map(({ id }) => id).join(",");
 
   useEffect(() => { genRef.current = gen; }, [gen]);
@@ -131,14 +129,29 @@ export function ImageSetModal({ clientId, productId, onClose, onFinished }: {
   const showPicker = (payload: ImageSetPayload) => {
     setProfile(payload.profile);
     setArtDirection(payload.artDirection);
+    setSourceHash(payload.sourceHash);
     setSourceImageCount(payload.profile?.sourceImageCount ?? 0);
     setNeedsAnalysis(false);
     setRecoveryKind(null);
     setResumeRecovery(null);
     setItems([]);
     setDraftBatchId("");
-    if (payload.profile) void createPlanForProfile(payload.profile, null);
-    else setPhase("pick");
+    setPhase("pick");
+    void loadPlanOptions();
+  };
+
+  async function loadPlanOptions() {
+    try {
+      const response = await fetch(`/api/products/${productId}/image-set/plan`);
+      const data = await response.json().catch(() => ({})) as Partial<PlanOptions> & { error?: string };
+      if (!response.ok || !Array.isArray(data.themes) || typeof data.maxAssets !== "number") {
+        throw new Error(data.error || "無法載入套圖主題");
+      }
+      setThemes(data.themes);
+      setMaxAssets(data.maxAssets);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "無法載入套圖主題");
+    }
   }
 
   const analyzeProduct = async (force: boolean, fallback?: ImageSetPayload) => {
@@ -178,6 +191,7 @@ export function ImageSetModal({ clientId, productId, onClose, onFinished }: {
       setResumeRecovery(null);
       setProfile(payload.profile);
       setArtDirection(payload.artDirection);
+      setSourceHash(payload.sourceHash);
       setDraftBatchId(saved.batchId);
       setItems([]);
       setGen(persisted);
@@ -332,13 +346,12 @@ export function ImageSetModal({ clientId, productId, onClose, onFinished }: {
     }
   };
 
-  async function createPlanForProfile(inputProfile: ProductVisualProfile, theme: ImageSetTheme | null) {
-    const revision = ++planRevision.current;
-    const keepReviewVisible = phase === "review" && !!artDirection;
-    if (keepReviewVisible) setUpdatingPlan(true);
-    else setPhase("planning");
+  async function createPlan() {
+    if (!profile || phase === "planning") return;
+    setPhase("planning");
     setError(null);
     try {
+      const theme = themes.find(({ key }) => key === selectedThemeKey);
       const response = await fetch(`/api/products/${productId}/image-set/plan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -348,21 +361,15 @@ export function ImageSetModal({ clientId, productId, onClose, onFinished }: {
       if (!response.ok || !data.batchId || !data.artDirection || !Array.isArray(data.items) || !Array.isArray(data.themes)) {
         throw new Error(data.error || "無法建立套圖規劃");
       }
-      if (revision !== planRevision.current) return;
       setDraftBatchId(data.batchId);
-      setProfile(inputProfile);
       setArtDirection(data.artDirection);
       setThemes(data.themes);
-      setSelectedThemeKey(theme?.key ?? "");
       setMaxAssets(typeof data.maxAssets === "number" ? data.maxAssets : maxAssets);
       setItems(initializeImageSetPlanSelection(data.items));
-      setUpdatingPlan(false);
       setPhase("review");
     } catch (reason) {
-      if (revision !== planRevision.current) return;
       setError(reason instanceof Error ? reason.message : "無法建立套圖規劃");
-      setUpdatingPlan(false);
-      setPhase(keepReviewVisible ? "review" : "pick");
+      setPhase("pick");
     }
   }
 
@@ -428,7 +435,10 @@ export function ImageSetModal({ clientId, productId, onClose, onFinished }: {
     setItems([]);
     setDraftBatchId("");
     if (needsAnalysis || !profile) void analyzeProduct(true);
-    else void createPlanForProfile(profile, null);
+    else {
+      setPhase("pick");
+      void loadPlanOptions();
+    }
   };
 
   return (
@@ -460,28 +470,41 @@ export function ImageSetModal({ clientId, productId, onClose, onFinished }: {
               <p className="mt-2 max-w-md text-xs leading-5 text-gray-500">這一步只建立方向與建議清單，不會開始付費生成。</p>
             </div>
           ) : phase === "pick" ? (
-            <div className="flex min-h-64 flex-col items-center justify-center text-center">
-              <AlertCircle className="h-6 w-6 text-red-500" />
-              <p className="mt-4 text-sm font-bold text-gray-800">目前無法建立商品套圖建議</p>
-              {error && <ErrorMessage>{error}</ErrorMessage>}
-              <button type="button" onClick={() => void loadInitial()} className="mt-4 rounded-full bg-violet-600 px-5 py-2.5 text-xs font-bold text-white">重新載入</button>
-            </div>
-          ) : phase === "review" && artDirection ? (
             <div className="space-y-5">
+              {profile && (
+                <div className="rounded-2xl border border-[#ebe4f9] bg-[#f9f6ff] p-4 sm:p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-bold text-violet-600">AI 產品視覺分析</p>
+                      {profile.confidence > 0 ? <p className="mt-1 text-base font-bold text-gray-900">{profile.productType}<span className="ml-2 text-xs font-medium text-gray-400">信心度 {Math.round(profile.confidence * 100)}%</span></p> : <p className="mt-1 text-sm font-medium text-gray-600">使用基本產品資料規劃套圖</p>}
+                    </div>
+                    <button type="button" onClick={() => void analyzeProduct(true, { profile, artDirection, suggestions: [], sourceHash })} disabled={analyzing} className="inline-flex items-center gap-1.5 rounded-lg border border-[#ebe4f9] bg-white px-3 py-2 text-xs font-bold text-violet-600 hover:bg-violet-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${analyzing ? "animate-spin" : ""}`} />重新分析產品</button>
+                  </div>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <InfoCard icon={<Palette className="h-3.5 w-3.5 text-violet-500" />} title="產品主色" text={artDirection?.palette.dominant.length ? artDirection.palette.dominant.join("、") : "依商品原貌保留"} />
+                    <InfoCard icon={<Sparkles className="h-3.5 w-3.5 text-violet-500" />} title="品牌點綴色" text={artDirection?.palette.accent.length ? artDirection.palette.accent.join("、") : "未設定，維持產品色彩"} />
+                  </div>
+                  {!!profile.prohibitedChanges.length && <div className="mt-4"><div className="flex items-center gap-1.5 text-xs font-bold text-gray-700"><LockKeyhole className="h-3.5 w-3.5 text-violet-500" />商品識別鎖定</div><div className="mt-2 flex flex-wrap gap-2">{profile.prohibitedChanges.slice(0, 3).map((lock) => <span key={lock} className="rounded-full border border-[#ebe4f9] bg-white px-2.5 py-1 text-[11px] leading-4 text-gray-600">{lock}</span>)}</div></div>}
+                </div>
+              )}
+
+              {(profile?.sourceImageCount ?? 0) === 0 && <HelpPopover label="需要商品參考照">目前沒有可用的商品參考照，包含商品主體的規劃將無法送出生成。</HelpPopover>}
               <div className="rounded-2xl border border-[#e7ebf1] bg-white p-4 sm:p-5">
-                <div className="flex items-center gap-2"><CalendarDays className="h-4 w-4 text-violet-600" /><h3 className="text-sm font-bold text-gray-900">選擇這組素材的主題</h3>{updatingPlan && <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-600" aria-label="正在更新建議" />}</div>
-                <p className="mt-1 text-xs leading-5 text-gray-500">主題會影響背景、氛圍與裝飾；商品原貌會固定保留。</p>
-                <select value={selectedThemeKey} onChange={(event) => {
-                  const nextKey = event.target.value;
-                  const nextTheme = themes.find(({ key }) => key === nextKey) ?? null;
-                  if (profile) void createPlanForProfile(profile, nextTheme);
-                }} disabled={updatingPlan} className="mt-4 w-full rounded-xl border border-[#e5e9f0] bg-white px-3 py-3 text-sm font-bold text-gray-800 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 disabled:cursor-wait disabled:opacity-60">
+                <div className="flex items-center gap-2"><CalendarDays className="h-4 w-4 text-violet-600" /><h3 className="text-sm font-bold text-gray-900">選擇檔期或季節主題</h3></div>
+                <p className="mt-1 text-xs leading-5 text-gray-500">主題會影響氛圍、背景與無文字裝飾。也可以保留常態品牌方向。</p>
+                <select value={selectedThemeKey} onChange={(event) => setSelectedThemeKey(event.target.value)} className="mt-4 w-full rounded-xl border border-[#e5e9f0] bg-white px-3 py-3 text-sm font-bold text-gray-800 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100">
                   <option value="">常態品牌素材</option>
                   <optgroup label="促銷檔期">{themes.filter(({ kind }) => kind === "PROMO").map((theme) => <option key={theme.key} value={theme.key}>{theme.label}</option>)}</optgroup>
                   <optgroup label="季節主題">{themes.filter(({ kind }) => kind === "SEASONAL").map((theme) => <option key={theme.key} value={theme.key}>{theme.label}</option>)}</optgroup>
                 </select>
               </div>
-              <ImageSetDirectionEditor value={artDirection} productColors={profile?.appearance.colors ?? []} productMaterials={profile?.appearance.materials ?? []} onChange={setArtDirection} />
+              {error && <ErrorMessage>{error}</ErrorMessage>}
+              <div className="flex flex-col items-center pt-1"><button type="button" onClick={() => void createPlan()} disabled={!profile || !themes.length} className="inline-flex items-center justify-center gap-2 rounded-full bg-violet-600 px-10 py-3.5 text-sm font-bold text-white shadow-[0_8px_8px_rgba(124,58,237,0.15)] hover:bg-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-[#F8F9FB] disabled:text-[#868D99] disabled:shadow-none sm:px-14"><Sparkles className="h-[18px] w-[18px]" />建立建議清單</button></div>
+            </div>
+          ) : phase === "review" && artDirection ? (
+            <div className="space-y-5">
+              <button type="button" onClick={() => { setError(null); setPhase("pick"); }} className="inline-flex items-center gap-1 text-xs font-bold text-gray-500 hover:text-violet-600"><ChevronLeft className="h-4 w-4" />重新選擇主題</button>
+              <ImageSetDirectionEditor value={artDirection} onChange={setArtDirection} />
               <ImageSetPlanChecklist items={items} maxAssets={maxAssets} onToggle={(id) => setItems((current) => toggleImageSetPlanItem(current, id, maxAssets))} />
               {error && <ErrorMessage>{error}</ErrorMessage>}
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900">確認後才會開始生成。本批會建立 <strong>{chosen.length} 張</strong>付費圖片素材。</div>
@@ -507,6 +530,10 @@ export function ImageSetModal({ clientId, productId, onClose, onFinished }: {
       </section>
     </div>
   );
+}
+
+function InfoCard({ icon, title, text }: { icon: ReactNode; title: string; text: string }) {
+  return <div className="rounded-xl border border-white/80 bg-white/80 p-3"><div className="flex items-center gap-1.5 text-xs font-bold text-gray-700">{icon}{title}</div><p className="mt-1.5 text-xs leading-5 text-gray-500">{text}</p></div>;
 }
 
 function HelpPopover({ label, children }: { label: string; children: ReactNode }) {

@@ -10,7 +10,7 @@ export type StoredAssetRole = "hero" | "detail" | "background" | "benefit" | "de
  *
  * `plain`  極簡線稿：單色細線，沒有外框（預設）
  * `framed` 圓框線稿：線稿外加一圈細圓框，適合排成功效四格
- * `soft`   柔和色塊：面狀填色圖形，視覺重量比線稿重
+ * `soft`   柔和色塊：柔和填色圖示，保留品牌藍黃與插畫感，但細節壓到最少
  */
 export type BenefitIconStyle = "plain" | "framed" | "soft";
 export const BENEFIT_ICON_STYLES: readonly BenefitIconStyle[] = ["plain", "framed", "soft"];

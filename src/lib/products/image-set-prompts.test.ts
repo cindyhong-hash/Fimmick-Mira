@@ -314,16 +314,23 @@ test("the soft icon style swaps the visual language but keeps every benefit-icon
   assert.equal(icons.length, points.length);
 
   const prompt = compileImageSetPrompt({ product, profile: skincareProfile, artDirection, role: icons[0] });
-  // 面狀填色取代線條輪廓，但一樣靠寫死的佔比撐起成組感。
-  assert.match(prompt, /soft filled colour shapes/i);
+  // 幾何填色取代線條輪廓，但一樣靠寫死的佔比撐起成組感。
+  assert.match(prompt, /soft flat colour-block icon/i);
+  // 決策：柔和插畫感可以留，但要簡化到一眼看得懂——細節與拼貼是被擋掉的那一半。
+  assert.match(prompt, /simplify it hard until the meaning is obvious/i);
+  assert.match(prompt, /do not add interior lines, seams or texture/i);
+  assert.match(prompt, /插畫感的切面拼貼/);
   assert.match(prompt, /45% of the canvas/i);
   assert.doesNotMatch(prompt, /circular frame/i);
   // 三種風格都必須是中性可換色的——顏色寫死在圖裡的話，換個品牌就整組報廢。
-  assert.match(prompt, /drawn from the brand colours/i);
+  // 藍黃配色保留，但是平塗單色，不是拼貼。
+  assert.match(prompt, /brand blue/i);
+  assert.match(prompt, /a single solid fill/i);
   // 換風格不能換掉任何一條底線：不含文字、元素數量有上限、不出現商品。
   assert.match(prompt, /No lettering of any kind/i);
   assert.match(prompt, /任何文字、字母、數字/);
-  assert.match(prompt, /at most two (elements|rounded geometric shapes)/i);
+  // 元素上限現在由共用規則統一講：整張只畫主體＋一個輔助元素。
+  assert.match(prompt, /Draw exactly two things/i);
   assert.match(prompt, /實際商品、瓶罐、包裝、Logo/);
 });
 

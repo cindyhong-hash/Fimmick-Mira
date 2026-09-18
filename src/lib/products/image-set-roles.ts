@@ -226,14 +226,14 @@ const BENEFIT_ICON_SPECS: Record<BenefitIconStyle, (concept: string) => Pick<Ima
     ],
   }),
   soft: (concept) => ({
-    sceneCn: `一張扁平向量圖示，純白底，不是照片、不是 3D、不是渲染圖。畫面正中央是一個描繪 ${concept} 的極簡圖形，用柔和的面狀色塊畫成（不是線條輪廓），色塊邊緣是圓潤的幾何形狀。圖形高度佔畫布的 45%，正置中。只能有 1 到 2 個色塊元素，寧可太簡單也不要複雜。整組只用同一組柔和色調，取自品牌點綴色或商品主色，深淺層次最多兩階。畫面上沒有文字、沒有商品、沒有情境、沒有陰影、沒有漸層光澤。`,
-    objective: `Draw one minimal flat vector icon of ${concept} built from soft filled colour shapes rather than outlines. One pictogram centred on a pure white background, its height about 45% of the canvas, made of at most two rounded geometric shapes. Use a single soft palette drawn from the brand colours with at most two tonal steps, identical across the set so the icons read as one family. Flat fills only — no gradients, gloss, drop shadows or 3D shading. No lettering of any kind, no product, no scene.`,
-    composition: "單一面狀色塊圖形置中，高度佔畫布 45%，四周均勻留白；整組並排時大小與色調一致。",
+sceneCn: `一張柔和色塊的扁平插畫圖示，純白底，不是照片、不是 3D。畫面正中央是一個描繪 ${concept} 的圖形，高度佔畫布的 45%，正置中。用柔和的面狀色塊畫成，輪廓圓潤——保留插畫的柔和感，但簡化到一眼就看得懂：整張只有兩個元素，主體用品牌主色的柔和藍平塗，輔助元素用品牌點綴色平塗，各自都是單一純色。形狀內部不要再切割成多塊、不要疊層、不要加內部線條或紋理。畫面上沒有文字、沒有商品、沒有情境、沒有陰影、沒有漸層、沒有裝飾造型、沒有背景色塊。`,
+    objective: `Draw one soft flat colour-block icon of ${concept}. Keep the gentle illustrated feel, but simplify it hard until the meaning is obvious at a glance. One shape centred on a pure white background, its height about 45% of the canvas, built from rounded filled shapes: the subject in a soft brand blue, the supporting element in the brand accent, each one a single solid fill. Do not slice a shape into several facets, do not overlap translucent layers, and do not add interior lines, seams or texture — one shape, one colour. No gradients, gloss, drop shadows or 3D shading. No lettering of any kind, no product, no scene.`,
+    composition: "單一柔和色塊圖形置中，高度佔畫布 45%，四周均勻留白；整組並排時簡化程度與配色一致。",
     mustNotShow: [
       "任何文字、字母、數字",
       "超過兩個色塊元素",
       "漸層、光澤、立體陰影、3D 或擬真渲染",
-      "線條輪廓風格（這一組是面狀填色）",
+      "插畫感的切面拼貼、半透明疊層、多餘的裝飾色塊",
       "Emoji、卡通角色、吉祥物",
       "只有抽象幾何、波浪色塊或膠囊形狀，看不出在講什麼",
       "商品瓶罐、軟管、包裝，或把它們當成主體",
@@ -270,7 +270,7 @@ const BENEFIT_ICON_READABILITY = [
   // 實測失敗的樣子：一瓶乳霜加刮刀放在檯面上（商品插畫）、一隻手撫過腿畫得像插畫。
   // 這是 icon，不是插畫——元素越少越好，造型平面幾何化，輪廓要清楚。
   "Draw exactly two things: the one subject, and the one supporting element. Nothing else at all.",
-  "This is an icon, not an illustration: flat and geometric, clean silhouettes, no perspective, no depth.",
+  "Keep it icon-simple: flat, clean silhouettes, no perspective and no depth. A gentle illustrated feel is welcome, but clarity comes first — never let prettiness cost recognisability.",
   "Simplify every form to its essentials — a limb is one smooth shape, a hand is a blunt mitt without slender fingers, a tool is a plain outline, and a scatter is three or four marks at most.",
   "Leave generous empty space on all four sides; the artwork should sit small and calm in the frame rather than filling it.",
   "Keep the same viewpoint, the same level of simplification and the same palette across the set so the icons read as one system.",

@@ -124,26 +124,27 @@ const MAX_DESCRIPTION_FOR_LLM = 16;
  * （result）。「溫和去角質」拆成 skin on a leg ／ gently lifting away ／
  * small dead skin particles，模型就知道要畫顆粒被帶離肌膚，而不是自由聯想。
  */
-export type BenefitIconBrief = { subject: string; action: string; result: string };
+export type BenefitIconBrief = { subject: string; hint: string };
 
 const ICON_CONCEPT_RULES = [
-  "2. 每個賣點要拆成三段，全部用英文，只能有純英文字母與空格：",
-  "   subject：畫面主體，具體看得到的東西。肌膚、腿部、毛髮、水滴、葉子、手都可以（skin on a leg / a strand of hair / a water droplet）。",
-  "   action：正在發生的動作，要畫得出來（gently lifting away / soaking into / smoothing down）。",
-  "   result：動作造成的、看得見的結果（small dead skin particles / a soft highlight / a smooth curve）。",
-  "   三段合起來必須讓人不看文字也猜得出在講什麼。只有氛圍或性質（cozy, comfort, experience,",
-  "   quality, feeling, atmosphere）不是主體，也不是結果，不要拿來填。",
-  "   每一段只放一個東西，整張 icon 最多兩個核心元素。",
+  "2. 每個賣點只拆成兩段，全部用英文，只能有純英文字母與空格：",
+  "   subject：唯一的主體，只能是身體部位或自然元素——a leg / a hand / a strand of hair / a water droplet / a leaf。",
+  "   hint：一個輔助元素，用來說明正在發生什麼。要具體、畫得出來，而且只有一個。",
+  "   例子：去角質 → subject: a leg，hint: a few small particles lifting away",
+  "        肌膚柔嫩 → subject: a leg，hint: a hand stroking it",
+  "        除毛    → subject: a leg，hint: a simple razor",
+  "   整張 icon 只會有這兩個元素，不要再多。",
+  "   subject 不可以是商品或器皿（bottle, jar, tube, tube of cream, packaging），也不可以是場景、",
+  "   平台、檯面、房間（platform, pedestal, table, counter, shelf, room, setting, scene）——那會畫成商品插畫。",
+  "   subject 與 hint 都不可以是抽象性質或表情（comfort, quality, experience, expression, feeling, mood）。",
 ].join("\n");
 
-/** 三段合成一句 icon 指示。合成放在同一個地方，規劃與重新想圖才會產出一樣的句子。 */
+/** 兩段合成一句 icon 指示。合成放在同一個地方，規劃與重新想圖才會產出一樣的句子。 */
 export function composeIconConcept(brief: BenefitIconBrief): string {
   const subject = brief.subject.trim();
-  const action = brief.action.trim();
-  const result = brief.result.trim();
+  const hint = brief.hint.trim();
   if (!subject) return "";
-  const tail = [action, result].filter(Boolean).join(" ");
-  return (tail ? `${subject}, ${tail}` : subject).slice(0, 160);
+  return (hint ? `${subject} with ${hint}` : subject).slice(0, 140);
 }
 
 /**
@@ -155,8 +156,13 @@ export function composeIconConcept(brief: BenefitIconBrief): string {
  * 而是整句話只有它們、沒有正在發生的事。
  */
 const UNDRAWABLE_WORDS = [
+  // 沒有形狀的東西
   "setting", "scene", "room", "bathroom", "background", "atmosphere", "ambience",
   "experience", "feeling", "comfort", "cozy", "quality", "essence", "vibe", "concept",
+  "expression", "mood", "emotion",
+  // 會被畫成商品插畫或情境插畫的東西
+  "bottle", "jar", "tube", "packaging", "package", "container", "pump", "label",
+  "platform", "pedestal", "podium", "table", "counter", "shelf", "tray", "stage",
 ];
 
 /** @returns 這段描述能不能畫成看得懂的 icon。 */
@@ -173,7 +179,7 @@ export function isDrawableIconConcept(concept: string): boolean {
  */
 function readIconConcept(candidate: Record<string, unknown>): string {
   const part = (key: string) => typeof candidate[key] === "string" ? (candidate[key] as string).trim() : "";
-  const concept = composeIconConcept({ subject: part("subject"), action: part("action"), result: part("result") });
+  const concept = composeIconConcept({ subject: part("subject"), hint: part("hint") });
   if (!concept || !/^[\x20-\x7E]+$/.test(concept)) return "";
   return isDrawableIconConcept(concept) ? concept : "";
 }
@@ -199,7 +205,7 @@ export function buildBenefitPointsPrompt(product: {
     "5. 只能使用商品資料裡有的資訊，不要自行發明功效或成分。",
     "6. 只輸出 JSON 陣列，不要有其他文字或 markdown 標記。",
     "",
-    '格式：[{"title":"溫和去角質","description":"酵素帶走老廢角質","subject":"skin on a leg","action":"gently lifting away","result":"small dead skin particles"}]',
+    '格式：[{"title":"溫和去角質","description":"酵素帶走老廢角質","subject":"a leg","hint":"a few small particles lifting away"}]',
   ].filter(Boolean).join("\n");
 }
 
@@ -279,7 +285,7 @@ export function buildIconConceptPrompt(titles: string[]): string {
     ICON_CONCEPT_RULES,
     "3. 只輸出 JSON 陣列，順序與上面的編號一致，不要有其他文字或 markdown 標記。",
     "",
-    '格式：[{"index":1,"subject":"a water droplet","action":"soaking into","result":"a smooth skin curve"}]',
+    '格式：[{"index":1,"subject":"a leg","hint":"a water droplet on it"}]',
   ].join("\n");
 }
 

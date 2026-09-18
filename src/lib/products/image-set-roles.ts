@@ -186,9 +186,9 @@ const BENEFIT_ICON_SPECS: Record<BenefitIconStyle, (concept: string) => Pick<Ima
   // 靠固定線寬與固定佔比成組。單色中性，排版時可以直接換成品牌色，
   // 所以同一組 icon 能套到任何產品與品牌——這是預設值的理由。
   plain: (concept) => ({
-    sceneCn: `一張扁平向量線稿，純白底，不是照片、不是 3D、不是渲染圖。畫面正中央是一個描繪 ${concept} 的極簡輪廓圖形，沒有外框。圖形高度佔畫布的 60%，正置中；線條粗細固定為畫布寬度的 3%，端點與轉角都是圓角，整張只有這一種線寬。主體只有一個圖形，最多再加一顆小小的四角星點綴，不能更多。整張圖只有一種線條顏色，中性深灰，沒有填色、沒有陰影、沒有漸層。畫面上沒有文字、沒有商品、沒有情境。`,
-    objective: `Draw one minimal flat vector outline icon of ${concept}: no frame, no container, drawn with the even stroke weight of a professional icon set. One single pictogram centred on a pure white background, its height exactly 60% of the canvas. Uniform stroke width of 3% of the canvas width with rounded caps and joins, one stroke weight throughout. At most one small four-point sparkle as an accent beyond the main shape. Monochrome dark grey strokes only — no fills, shadows or gradients, so the icon can be recoloured to any brand palette later. This is line art, never a photograph, product shot or 3D render. No lettering of any kind, no product, no scene.`,
-    composition: "單一輪廓圖形置中，高度佔畫布 60%，無外框；固定線寬，四周均勻留白。",
+    sceneCn: `一張扁平向量線稿，純白底，不是照片、不是 3D、不是渲染圖。畫面正中央是一個描繪 ${concept} 的極簡輪廓圖形，沒有外框。圖形高度佔畫布的 45%，正置中；線條粗細固定為畫布寬度的 3%，端點與轉角都是圓角，整張只有這一種線寬。主體只有一個圖形，最多再加一顆小小的四角星點綴，不能更多。整張圖只有一種線條顏色，中性深灰，沒有填色、沒有陰影、沒有漸層。畫面上沒有文字、沒有商品、沒有情境。`,
+    objective: `Draw one minimal flat vector outline icon of ${concept}: no frame, no container, drawn with the even stroke weight of a professional icon set. One single pictogram centred on a pure white background, its height about 45% of the canvas. Uniform stroke width of 3% of the canvas width with rounded caps and joins, one stroke weight throughout. At most one small four-point sparkle as an accent beyond the main shape. Monochrome dark grey strokes only — no fills, shadows or gradients, so the icon can be recoloured to any brand palette later. This is line art, never a photograph, product shot or 3D render. No lettering of any kind, no product, no scene.`,
+    composition: "單一輪廓圖形置中，高度佔畫布 45%，無外框；固定線寬，四周均勻留白。",
     mustNotShow: [
       "任何文字、字母、數字",
       "任何外框、圓框、方框或容器",
@@ -196,21 +196,29 @@ const BENEFIT_ICON_SPECS: Record<BenefitIconStyle, (concept: string) => Pick<Ima
       "填色色塊、陰影、漸層、立體光澤",
       "Emoji、卡通角色、吉祥物",
       "只有抽象幾何、波浪色塊或膠囊形狀，看不出在講什麼",
+      "商品瓶罐、軟管、包裝，或把它們當成主體",
+      "檯面、底座、平台、托盤等承載物",
+      "第三個以上的元素、背景形狀或裝飾色塊",
+      "插畫感：透視、立體感、陰影、漸層、細碎的局部細節",
       "實際商品、瓶罐、包裝、Logo",
       "情境照、背景場景、人物",
       "粗細不一的線條",
     ],
   }),
   framed: (concept) => ({
-    sceneCn: `一張扁平向量線稿，純白底，不是照片、不是 3D、不是渲染圖。畫面正中央有一個細線條畫的正圓外框，圓的直徑固定為畫布寬度的 70%、正置中——這個比例不能變，整組 icon 的圓要一樣大才能並排。圓框內放一個描繪 ${concept} 的極簡圖形，圖形高度佔圓直徑的一半，只能有 1 到 2 個元素，寧可太簡單也不要複雜，且完全在圓內、不可碰到或穿出圓框。線條粗細固定為畫布寬度的 2%，端點圓角。除了這個圓框與框內圖形之外，畫面上沒有任何東西：沒有文字、沒有商品、沒有情境、沒有散落的星點。整張只有一種線條顏色，取自品牌點綴色或商品主色。背景整張純白、沒有色塊或漸層。`,
-    objective: `Draw one minimal flat vector line icon of ${concept}: a perfect circular frame whose diameter is exactly 70% of the canvas width, centred — this ratio is fixed so every icon in the set lines up. Inside it, a simple pictogram of at most two elements, half the circle's diameter tall, fully contained within the circle and never touching or crossing it. Uniform stroke width of 2% of the canvas width with rounded caps, identical across the set. Pure white background, the exact same flat white on every icon, no tint or gradient. Monochrome line art in a single accent colour. This is line art, never a photograph, product shot or 3D render. No lettering of any kind, no product, no scene, no scattered sparkles or filler decoration.`,
-    composition: "細線正圓框置中、直徑佔畫布 70%，框內 1–2 個元素且不碰框；整組並排時圓框大小一致。",
+    sceneCn: `一張扁平向量線稿，純白底，不是照片、不是 3D、不是渲染圖。畫面正中央有一個細線條畫的正圓外框，圓的直徑固定為畫布寬度的 60%、正置中——這個比例不能變，整組 icon 的圓要一樣大才能並排。圓框內放一個描繪 ${concept} 的極簡圖形，圖形高度佔圓直徑的一半，只能有 1 到 2 個元素，寧可太簡單也不要複雜，且完全在圓內、不可碰到或穿出圓框。線條粗細固定為畫布寬度的 2%，端點圓角。除了這個圓框與框內圖形之外，畫面上沒有任何東西：沒有文字、沒有商品、沒有情境、沒有散落的星點。整張只有一種線條顏色，取自品牌點綴色或商品主色。背景整張純白、沒有色塊或漸層。`,
+    objective: `Draw one minimal flat vector line icon of ${concept}: a perfect circular frame whose diameter is exactly 60% of the canvas width, centred — this ratio is fixed so every icon in the set lines up. Inside it, a simple pictogram of at most two elements, half the circle's diameter tall, fully contained within the circle and never touching or crossing it. Uniform stroke width of 2% of the canvas width with rounded caps, identical across the set. Pure white background, the exact same flat white on every icon, no tint or gradient. Monochrome line art in a single accent colour. This is line art, never a photograph, product shot or 3D render. No lettering of any kind, no product, no scene, no scattered sparkles or filler decoration.`,
+    composition: "細線正圓框置中、直徑佔畫布 60%，框內 1–2 個元素且不碰框；整組並排時圓框大小一致。",
     mustNotShow: [
       "任何文字、字母、數字",
       "超過兩個元素、或框外散落的星點與裝飾",
       "圖形穿出或碰到圓框",
       "Emoji、卡通角色、吉祥物",
       "只有抽象幾何、波浪色塊或膠囊形狀，看不出在講什麼",
+      "商品瓶罐、軟管、包裝，或把它們當成主體",
+      "檯面、底座、平台、托盤等承載物",
+      "第三個以上的元素、背景形狀或裝飾色塊",
+      "插畫感：透視、立體感、陰影、漸層、細碎的局部細節",
       "立體光澤、陰影、漸層、3D 或擬真渲染",
       "實際商品、瓶罐、包裝、Logo",
       "情境照、背景場景、人物",
@@ -218,9 +226,9 @@ const BENEFIT_ICON_SPECS: Record<BenefitIconStyle, (concept: string) => Pick<Ima
     ],
   }),
   soft: (concept) => ({
-    sceneCn: `一張扁平向量圖示，純白底，不是照片、不是 3D、不是渲染圖。畫面正中央是一個描繪 ${concept} 的極簡圖形，用柔和的面狀色塊畫成（不是線條輪廓），色塊邊緣是圓潤的幾何形狀。圖形高度佔畫布的 60%，正置中。只能有 1 到 2 個色塊元素，寧可太簡單也不要複雜。整組只用同一組柔和色調，取自品牌點綴色或商品主色，深淺層次最多兩階。畫面上沒有文字、沒有商品、沒有情境、沒有陰影、沒有漸層光澤。`,
-    objective: `Draw one minimal flat vector icon of ${concept} built from soft filled colour shapes rather than outlines. One pictogram centred on a pure white background, its height exactly 60% of the canvas, made of at most two rounded geometric shapes. Use a single soft palette drawn from the brand colours with at most two tonal steps, identical across the set so the icons read as one family. Flat fills only — no gradients, gloss, drop shadows or 3D shading. No lettering of any kind, no product, no scene.`,
-    composition: "單一面狀色塊圖形置中，高度佔畫布 60%，四周均勻留白；整組並排時大小與色調一致。",
+    sceneCn: `一張扁平向量圖示，純白底，不是照片、不是 3D、不是渲染圖。畫面正中央是一個描繪 ${concept} 的極簡圖形，用柔和的面狀色塊畫成（不是線條輪廓），色塊邊緣是圓潤的幾何形狀。圖形高度佔畫布的 45%，正置中。只能有 1 到 2 個色塊元素，寧可太簡單也不要複雜。整組只用同一組柔和色調，取自品牌點綴色或商品主色，深淺層次最多兩階。畫面上沒有文字、沒有商品、沒有情境、沒有陰影、沒有漸層光澤。`,
+    objective: `Draw one minimal flat vector icon of ${concept} built from soft filled colour shapes rather than outlines. One pictogram centred on a pure white background, its height about 45% of the canvas, made of at most two rounded geometric shapes. Use a single soft palette drawn from the brand colours with at most two tonal steps, identical across the set so the icons read as one family. Flat fills only — no gradients, gloss, drop shadows or 3D shading. No lettering of any kind, no product, no scene.`,
+    composition: "單一面狀色塊圖形置中，高度佔畫布 45%，四周均勻留白；整組並排時大小與色調一致。",
     mustNotShow: [
       "任何文字、字母、數字",
       "超過兩個色塊元素",
@@ -228,6 +236,10 @@ const BENEFIT_ICON_SPECS: Record<BenefitIconStyle, (concept: string) => Pick<Ima
       "線條輪廓風格（這一組是面狀填色）",
       "Emoji、卡通角色、吉祥物",
       "只有抽象幾何、波浪色塊或膠囊形狀，看不出在講什麼",
+      "商品瓶罐、軟管、包裝，或把它們當成主體",
+      "檯面、底座、平台、托盤等承載物",
+      "第三個以上的元素、背景形狀或裝飾色塊",
+      "插畫感：透視、立體感、陰影、漸層、細碎的局部細節",
       "實際商品、瓶罐、包裝、Logo",
       "情境照、背景場景、人物",
       "與同組其他 icon 不同大小或不同色調的圖形",
@@ -253,7 +265,17 @@ const BENEFIT_ICON_SPECS: Record<BenefitIconStyle, (concept: string) => Pick<Ima
  * 造型辨識度優先於裝飾感。實測失敗的那幾張都很漂亮，但看不出在畫什麼——
  * 使用者不看下方文字就該猜得出這張在講什麼，這是這組素材存在的理由。
  */
-const BENEFIT_ICON_READABILITY = "The drawing must read at a glance: someone who cannot see the caption should still be able to tell what is happening. Show the action, not just a mood — if the subject is skin or hair, draw a clearly recognisable contour of it and make the effect visible on it. Never fall back on abstract geometry, wavy colour bands or capsule blobs to stand in for the idea.";
+const BENEFIT_ICON_READABILITY = [
+  "The drawing must read at a glance: someone who cannot see the caption should still be able to tell what it means.",
+  // 實測失敗的樣子：一瓶乳霜加刮刀放在檯面上（商品插畫）、一隻手撫過腿畫得像插畫。
+  // 這是 icon，不是插畫——元素越少越好，造型平面幾何化，輪廓要清楚。
+  "Draw exactly two things: the one subject, and the one supporting element. Nothing else at all.",
+  "This is an icon, not an illustration: flat and geometric, clean silhouettes, no perspective, no depth.",
+  "Simplify every form to its essentials — a limb is one smooth shape, a hand is a blunt mitt without slender fingers, a tool is a plain outline, and a scatter is three or four marks at most.",
+  "Leave generous empty space on all four sides; the artwork should sit small and calm in the frame rather than filling it.",
+  "Keep the same viewpoint, the same level of simplification and the same palette across the set so the icons read as one system.",
+  "Never fall back on abstract geometry, wavy colour bands or capsule blobs to stand in for the idea.",
+].join(" ");
 
 const BENEFIT_ICON_TEXT_BAN = "Icon only. No text, no letters, no numbers, no words, no typography, no watermark, no signature, no measurement marks. A single isolated object on a clean, empty background, suitable for dropping into an advertising layout.";
 

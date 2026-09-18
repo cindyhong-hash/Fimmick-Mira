@@ -316,7 +316,7 @@ test("the soft icon style swaps the visual language but keeps every benefit-icon
   const prompt = compileImageSetPrompt({ product, profile: skincareProfile, artDirection, role: icons[0] });
   // 面狀填色取代線條輪廓，但一樣靠寫死的佔比撐起成組感。
   assert.match(prompt, /soft filled colour shapes/i);
-  assert.match(prompt, /60% of the canvas/i);
+  assert.match(prompt, /45% of the canvas/i);
   assert.doesNotMatch(prompt, /circular frame/i);
   // 三種風格都必須是中性可換色的——顏色寫死在圖裡的話，換個品牌就整組報廢。
   assert.match(prompt, /drawn from the brand colours/i);
@@ -342,7 +342,7 @@ test("benefit icons default to the frameless plain style, which is the recoloura
   // 單色、無填色＝之後可以整組換成品牌色，所以同一組 icon 能套到任何產品。
   assert.match(prompt, /recoloured to any brand palette/i);
   // 一致性靠寫死的比例，不靠形容詞。
-  assert.match(prompt, /60% of the canvas/i);
+  assert.match(prompt, /45% of the canvas/i);
   assert.match(prompt, /3% of the canvas width/i);
 });
 

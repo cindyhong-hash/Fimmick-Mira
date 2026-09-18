@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { compileImageSetPrompt } from "./image-set-prompts.ts";
-import { planImageSetRoles } from "./image-set-roles.ts";
-import type { ImageSetArtDirection } from "./product-visual-analysis.ts";
+import { planImageSetRoles, imageSetThemeCatalog } from "./image-set-roles.ts";
+import { buildImageSetArtDirection, type ImageSetArtDirection } from "./product-visual-analysis.ts";
 import type { ProductVisualProfile } from "./product-visual-profile.ts";
 
 const product = {
@@ -205,4 +205,27 @@ test("every role receives confirmed mood, campaign consistency, and text safety 
     assert.match(prompt, /Preserve genuine logo and packaging label details visible on the supplied product reference\./);
     if (role.role === "decoration") assert.match(prompt, /Decoration style: 細緻冰藍線框、柔和光點/);
   }
+});
+
+
+test("choosing a theme changes the background prompt's setting and lighting, not just a label", () => {
+  const theme = imageSetThemeCatalog().find(({ label }) => label === "開學季")!;
+  const brand = { primaryColor: "#ffeb85", secondaryColor: null, toneLabels: ["清新"], paletteColors: [] };
+
+  const plain = buildImageSetArtDirection(beautyDeviceProfile, brand);
+  const themed = buildImageSetArtDirection(beautyDeviceProfile, brand, theme);
+
+  // 主題原本只把標籤塞進 mood，場景與光線完全沒變——所以生成結果沒有主題感。
+  assert.notEqual(themed.backgroundLanguage, plain.backgroundLanguage, "主題應該改變場景");
+  assert.notEqual(themed.lighting, plain.lighting, "主題應該改變光線");
+  assert.match(themed.backgroundLanguage, /書桌|洗手台/);
+  assert.match(themed.lighting, /秋/);
+
+  // 而且要真的進到背景板的提示詞裡（Background language / Lighting 兩行）。
+  const role = planImageSetRoles({ profile: beautyDeviceProfile, artDirection: themed, theme }).find(({ role }) => role === "background")!;
+  const prompt = compileImageSetPrompt({ product, profile: beautyDeviceProfile, artDirection: themed, role });
+  assert.match(prompt, /Background language: .*(書桌|洗手台)/);
+  assert.match(prompt, /Lighting: .*秋/);
+  // 主題不該讓背景重新開始放商品或文字。
+  assert.match(prompt, /完全淨空|什麼都沒有放/);
 });

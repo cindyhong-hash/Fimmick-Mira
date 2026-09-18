@@ -6,6 +6,7 @@ import {
   type ProductVisualProfile,
   type ProductVisualProfileInput,
 } from "./product-visual-profile.ts";
+import { imageSetThemeVisual } from "./image-set-theme-visuals.ts";
 
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 const VISION_MODEL = process.env.OPENROUTER_VISION_MODEL ?? "google/gemini-2.5-flash";
@@ -219,13 +220,19 @@ export function buildImageSetArtDirection(
   const dominant = profile.appearance.colors;
   const accent = brand.primaryColor?.trim() ? [brand.primaryColor.trim()] : [];
   const productDescription = profile.productType.trim();
+  // 主題原本只有標籤字串進到提示詞（「開學季」三個字），模型不知道它長什麼樣子。
+  // 這裡把時節、色調、道具、場景一併帶進來；比對不到主題就維持原本行為。
+  const visual = theme ? imageSetThemeVisual(theme.label) : null;
+  const scene = profile.suitableScenes[0] ?? "乾淨且保留呼吸感的背景";
 
   return {
     concept: `${productDescription ? `${productDescription} 的` : ""}${theme ? `${theme.label}主題` : ""}可合成廣告素材包`,
     palette: { dominant, accent },
-    lighting: "柔和、乾淨且跨素材一致的高級廣告光線",
+    lighting: visual ? `${visual.season}；柔和、乾淨且跨素材一致的高級廣告光線` : "柔和、乾淨且跨素材一致的高級廣告光線",
     materials: profile.appearance.materials,
-    backgroundLanguage: profile.suitableScenes[0] ?? "乾淨且保留呼吸感的背景",
+    // 背景語言只吃場景與時節，不吃道具——背景板要求檯面淨空，
+    // 主題感要表現在「場景與光線」而不是在檯面上堆東西。
+    backgroundLanguage: visual ? `${visual.setting}（${visual.season}）` : scene,
     cameraLanguage: "清晰、高級且便於後續廣告合成的視覺語言",
     consistencyRules: [
       "所有畫面視為同一產品的不同視角。",
@@ -233,14 +240,17 @@ export function buildImageSetArtDirection(
       ...profile.prohibitedChanges,
       ...(brand.toneLabels?.filter(Boolean).map((tone) => `品牌調性：${tone}`) ?? []),
       ...(theme ? [`整批素材一致呼應「${theme.label}」，但不可自行生成主題文字、日期或促銷字樣。`] : []),
+      ...(visual ? [`「${theme?.label}」的視覺語彙：${visual.season}；色調 ${visual.palette.join("、")}；可用元素 ${visual.props.join("、")}。主題只表現在場景、光線、色調與裝飾元素，不改變商品本身的顏色與材質。`] : []),
     ],
     mood: [...new Set([
       ...(brand.toneLabels?.map((tone) => tone.trim()).filter(Boolean) ?? []),
       ...(theme ? [theme.label] : []),
+      ...(visual ? [visual.season] : []),
     ])],
     decorationStyle: [...new Set([
       ...profile.visualMotifs.map((motif) => motif.trim()).filter(Boolean),
       ...(theme ? [`呼應${theme.label}的非文字裝飾語彙`] : []),
+      ...(visual ? [...visual.props, `色調 ${visual.palette.join("、")}`] : []),
     ])],
   };
 }

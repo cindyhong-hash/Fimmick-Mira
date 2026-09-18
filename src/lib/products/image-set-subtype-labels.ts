@@ -44,8 +44,8 @@ const LABELS: Record<string, ImageSetSubtypeLabel> = {
   },
   "benefit-metaphor": {
     zh: "功效視覺",
-    en: "Benefit Metaphor",
-    description: "將產品特色或功效轉化成容易理解的視覺元素，幫助強化賣點。",
+    en: "Benefit Visual",
+    description: "將產品核心功效轉化為容易理解的視覺畫面，幫助強化賣點。",
   },
   "brand-motif": {
     zh: "品牌元素",
@@ -77,9 +77,9 @@ export function imageSetSubtypeLabel(assetSubtype: string | null | undefined): I
   const key = assetSubtype?.trim() ?? "";
   const known = LABELS[key];
   if (known) return known;
-  // 賣點圖示是一組（benefit-icon-1、-2…），共用同一個顯示名稱。
-  // description 留空，讓清單與看板改顯示該筆的 purpose——那裡放的是
-  // 這個 icon 對應的賣點標題，使用者才分得出哪個是哪個。
+  // 賣點圖示是一組（benefit-icon-1、-2…）。清單上會改用該筆的 benefitTitle
+  // 當主標題——四張都叫「賣點圖示」的話分不出誰是誰。這裡留的是沒有
+  // benefitTitle 時的後備名稱（例如舊批次），description 留空讓畫面去顯示 purpose。
   if (/^benefit-icon-\d+$/.test(key)) return { zh: "賣點圖示", en: "Benefit Icon", description: "" };
   const readable = key ? key.replaceAll("-", " ") : "視覺素材";
   return { zh: readable, en: "", description: "" };

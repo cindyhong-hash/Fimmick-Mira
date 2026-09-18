@@ -38,14 +38,19 @@ export function ImageSetPlanChecklist({ items, maxAssets, onToggle, benefitIconS
         const disabled = !item.checked && selectedCount >= maxAssets;
         // 視覺層級：中文名稱 > 核心標籤 > 英文輔助名稱 > 說明。
         // 英文保留給熟悉原始類型的人對照，但不再當主要閱讀內容。
-        const label = imageSetSubtypeLabel(item.assetSubtype);
+        const subtypeLabel = imageSetSubtypeLabel(item.assetSubtype);
+        // 賣點圖示四張的子型別名稱一模一樣（都叫「賣點圖示」），得往下讀小字才分得出
+        // 誰是誰。改成主標題直接顯示賣點名稱，「Benefit Icon」降成次標。
+        const label = item.benefitTitle
+          ? { zh: item.benefitTitle, en: subtypeLabel.en, description: item.benefitDescription ?? "" }
+          : subtypeLabel;
         return <label key={item.id} className={`flex items-start gap-3 rounded-xl border p-3.5 transition ${item.checked ? "border-violet-500 bg-violet-50" : "border-[#e7ebf1] bg-white hover:border-violet-300"} ${disabled ? "cursor-not-allowed opacity-45" : "cursor-pointer"}`}>
           <input className="sr-only" type="checkbox" checked={item.checked} disabled={disabled} onChange={() => onToggle(item.id)} />
           <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${item.checked ? "border-violet-600 bg-violet-600 text-white" : "border-gray-300 bg-white"}`}>{item.checked && <Check className="h-3.5 w-3.5" />}</span>
           <span className="min-w-0 flex-1">
             <span className="flex flex-wrap items-center gap-2 text-sm font-bold text-gray-900">{label.zh}{item.core && <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-bold text-violet-600">核心</span>}</span>
             {label.en && <span className="mt-0.5 block text-[11px] leading-4 text-gray-400">{label.en}</span>}
-            <span className="mt-1 block text-xs leading-5 text-gray-500">{label.description || item.purpose}</span>
+            <span className="mt-1 block text-xs leading-5 text-gray-500">{label.description || (item.benefitTitle ? "" : item.purpose)}</span>
           </span>
         </label>;
       })}</div>

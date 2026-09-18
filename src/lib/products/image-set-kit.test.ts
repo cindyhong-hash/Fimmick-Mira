@@ -74,7 +74,7 @@ test("rejects duplicate IDs, unknown roles, and blank subtype or purpose", () =>
 test("carries the benefit icon style through planJson so confirm can restore it", () => {
   // 風格只影響提示詞，不影響 id／角色／子型別，所以確認階段的比對關卡抓不到
   // 風格不符。唯一的還原來源就是這個欄位——它必須完整存進去也讀得回來。
-  const withStyle = item({ id: "benefit-icon-1", category: "benefit", assetRole: "benefit", benefitIconStyle: "orb" });
+  const withStyle = item({ id: "benefit-icon-1", category: "benefit", assetRole: "benefit", benefitIconStyle: "soft" });
   assert.deepEqual(parseImageSetPlanJson(JSON.stringify([withStyle])), [withStyle]);
 
   // 舊批次沒有這個欄位，不能當成壞資料。

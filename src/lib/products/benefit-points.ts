@@ -7,7 +7,7 @@
  * - 純函式可以測，結果穩定——規劃階段與確認階段必須算出同一組項目，
  *   否則確認時的清單比對會失敗
  *
- * 文字不進圖：icon 由 AI 生成（無文字、透明底），標題留在資料裡，
+ * 文字不進圖：icon 由 AI 生成（無文字、純白底），標題留在資料裡，
  * 排版時用真正的字型渲染。圖像模型畫中文很容易缺筆畫或糊掉，
  * 這個專案已經踩過（背景素材出現過亂碼英文）。
  */
@@ -15,7 +15,7 @@ export type BenefitPoint = {
   /** 4–8 字短標題，例如「溫和去角質」 */
   title: string;
   /** 8–16 字補充說明，可空 */
-  note: string;
+  description: string;
 };
 
 const MIN_POINTS = 3;
@@ -42,10 +42,10 @@ type Candidate = BenefitPoint & { truncated: boolean };
 function toPoint(sentence: string): Candidate | null {
   const text = tidy(sentence);
   if (!text) return null;
-  if (text.length <= TITLE_MAX) return { title: text, note: "", truncated: false };
+  if (text.length <= TITLE_MAX) return { title: text, description: "", truncated: false };
   // 太長的句子切出來常是沒有意義的片段（「專為除毛前打造的」），
   // 所以標記起來，只有在完整句不夠 3 個時才拿來補。
-  return { title: text.slice(0, TITLE_MAX), note: text.slice(0, NOTE_MAX), truncated: true };
+  return { title: text.slice(0, TITLE_MAX), description: text.slice(0, NOTE_MAX), truncated: true };
 }
 
 /**
@@ -76,7 +76,7 @@ export function deriveBenefitPoints(
     for (const point of pool) {
       if (merged.length >= target || seen.has(point.title)) continue;
       seen.add(point.title);
-      merged.push({ title: point.title, note: point.note });
+      merged.push({ title: point.title, description: point.description });
     }
   };
 

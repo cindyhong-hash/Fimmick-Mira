@@ -496,8 +496,17 @@ export type PlanProductImageSetResult =
   | { ok: false; status: 400 | 409; error: string };
 
 function publicPlanItem(role: ReturnType<typeof planImageSetRoles>[number]): ImageSetPlanItem {
-  const { id, category, assetRole, assetSubtype, purpose, core, defaultSelected, benefitIconStyle } = role;
-  return { id, category, assetRole, assetSubtype, purpose, core, defaultSelected, ...(benefitIconStyle ? { benefitIconStyle } : {}) };
+  const {
+    id, category, assetRole, assetSubtype, purpose, core, defaultSelected,
+    benefitIconStyle, benefitTitle, benefitDescription,
+  } = role;
+  return {
+    id, category, assetRole, assetSubtype, purpose, core, defaultSelected,
+    ...(benefitIconStyle ? { benefitIconStyle } : {}),
+    // 清單用 benefitTitle 當主標題，排版階段用這兩個欄位渲染文字圖層。
+    ...(benefitTitle ? { benefitTitle } : {}),
+    ...(benefitDescription ? { benefitDescription } : {}),
+  };
 }
 
 /**

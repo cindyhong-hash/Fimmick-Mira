@@ -270,11 +270,11 @@ test("benefit / decoration / background each state what they are not, so the mod
   assert.match(promptFor("background"), /完全淨空|什麼都沒有放/);
 });
 
-test("benefit icons are one-per-point, text-free, transparent, and visually consistent", () => {
+test("benefit icons are one-per-point, text-free, flat white, and visually consistent", () => {
   const points = [
-    { title: "酵素角質護理", note: "" },
-    { title: "帶走老廢角質", note: "" },
-    { title: "肌膚更細緻", note: "" },
+    { title: "酵素角質護理", description: "" },
+    { title: "帶走老廢角質", description: "" },
+    { title: "肌膚更細緻", description: "" },
   ];
   const roles = planImageSetRoles({ profile: skincareProfile, artDirection, benefitPoints: points, benefitIconStyle: "framed" });
   const icons = roles.filter(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"));
@@ -282,8 +282,9 @@ test("benefit icons are one-per-point, text-free, transparent, and visually cons
   // 每個賣點一張，可以單獨選取與使用。
   assert.equal(icons.length, points.length);
   assert.deepEqual(icons.map(({ assetSubtype }) => assetSubtype), ["benefit-icon-1", "benefit-icon-2", "benefit-icon-3"]);
-  // 透明底，方便後續排版。
-  assert.ok(icons.every(({ cutout }) => cutout));
+  // 拿不到透明底：這條路是文字生圖、回傳 JPG，所以底色改用提示詞釘死成純白。
+  // 這個旗標曾經寫 true 卻沒有任何地方讀它，等於騙人。
+  assert.ok(icons.every(({ cutout }) => !cutout));
   // 預設不勾選——它是一整組，會一次加 3–5 張付費圖片。
   assert.ok(icons.every(({ core }) => !core));
 
@@ -303,26 +304,28 @@ test("benefit icons are one-per-point, text-free, transparent, and visually cons
   assert.match(prompt, /Emoji、卡通角色/);
 });
 
-test("the orb icon style swaps the visual language but keeps every benefit-icon guarantee", () => {
-  const points = [{ title: "酵素角質護理", note: "" }, { title: "帶走老廢角質", note: "" }, { title: "肌膚更細緻", note: "" }];
-  const roles = planImageSetRoles({ profile: skincareProfile, artDirection, benefitPoints: points, benefitIconStyle: "orb" });
+test("the soft icon style swaps the visual language but keeps every benefit-icon guarantee", () => {
+  const points = [{ title: "酵素角質護理", description: "" }, { title: "帶走老廢角質", description: "" }, { title: "肌膚更細緻", description: "" }];
+  const roles = planImageSetRoles({ profile: skincareProfile, artDirection, benefitPoints: points, benefitIconStyle: "soft" });
   const icons = roles.filter(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"));
   assert.equal(icons.length, points.length);
 
   const prompt = compileImageSetPrompt({ product, profile: skincareProfile, artDirection, role: icons[0] });
-  // 球體取代線框，但同樣是「同一個容器」在撐起成組感。
-  assert.match(prompt, /sphere/i);
-  assert.match(prompt, /this ratio is fixed/i);
+  // 面狀填色取代線條輪廓，但一樣靠寫死的佔比撐起成組感。
+  assert.match(prompt, /soft filled colour shapes/i);
+  assert.match(prompt, /60% of the canvas/i);
   assert.doesNotMatch(prompt, /circular frame/i);
+  // 三種風格都必須是中性可換色的——顏色寫死在圖裡的話，換個品牌就整組報廢。
+  assert.match(prompt, /drawn from the brand colours/i);
   // 換風格不能換掉任何一條底線：不含文字、元素數量有上限、不出現商品。
   assert.match(prompt, /No lettering of any kind/i);
   assert.match(prompt, /任何文字、字母、數字/);
-  assert.match(prompt, /at most two elements/i);
+  assert.match(prompt, /at most two (elements|rounded geometric shapes)/i);
   assert.match(prompt, /實際商品、瓶罐、包裝、Logo/);
 });
 
 test("benefit icons default to the frameless plain style, which is the recolourable one", () => {
-  const points = [{ title: "酵素角質護理", note: "" }, { title: "帶走老廢角質", note: "" }, { title: "肌膚更細緻", note: "" }];
+  const points = [{ title: "酵素角質護理", description: "" }, { title: "帶走老廢角質", description: "" }, { title: "肌膚更細緻", description: "" }];
   const roles = planImageSetRoles({ profile: skincareProfile, artDirection, benefitPoints: points });
   const icons = roles.filter(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"));
   assert.ok(icons.length);
@@ -344,8 +347,8 @@ test("no benefit icon prompt contains a raw hex colour code", () => {
   // 這個專案已經踩過：色碼送進生圖提示詞，模型會把字串本身當畫面文字描上去，
   // 而賣點圖示的整個設計前提就是「圖上不能有字」。既有的 hex 斷言只看核心角色，
   // 所以三種 icon 風格要各自再擋一次。
-  const points = [{ title: "酵素角質護理", note: "" }, { title: "帶走老廢角質", note: "" }, { title: "肌膚更細緻", note: "" }];
-  for (const style of ["plain", "framed", "orb"] as const) {
+  const points = [{ title: "酵素角質護理", description: "" }, { title: "帶走老廢角質", description: "" }, { title: "肌膚更細緻", description: "" }];
+  for (const style of ["plain", "framed", "soft"] as const) {
     const roles = planImageSetRoles({ profile: skincareProfile, artDirection, benefitPoints: points, benefitIconStyle: style });
     for (const icon of roles.filter(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"))) {
       const prompt = compileImageSetPrompt({ product, profile: skincareProfile, artDirection, role: icon });
@@ -355,14 +358,17 @@ test("no benefit icon prompt contains a raw hex colour code", () => {
 });
 
 test("every benefit icon style pins the size ratio, because 'keep it consistent' does not survive separate calls", () => {
-  const points = [{ title: "酵素角質護理", note: "" }, { title: "帶走老廢角質", note: "" }, { title: "肌膚更細緻", note: "" }];
-  for (const style of ["plain", "framed", "orb"] as const) {
+  const points = [{ title: "酵素角質護理", description: "" }, { title: "帶走老廢角質", description: "" }, { title: "肌膚更細緻", description: "" }];
+  for (const style of ["plain", "framed", "soft"] as const) {
     const roles = planImageSetRoles({ profile: skincareProfile, artDirection, benefitPoints: points, benefitIconStyle: style });
     const icons = roles.filter(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"));
     assert.ok(icons.every((icon) => icon.benefitIconStyle === style), `${style} 沒有把風格寫進計畫項目`);
     const prompt = compileImageSetPrompt({ product, profile: skincareProfile, artDirection, role: icons[0] });
     assert.match(prompt, /% of the canvas/i, `${style} 沒有釘死尺寸比例`);
     assert.match(prompt, /No lettering of any kind/i, `${style} 少了不可有文字的底線`);
+    // 圖裡不能有字是這組素材的設計前提，三種風格都要明確擋掉各種文字形式。
+    assert.match(prompt, /no letters, no numbers, no words, no typography/i, `${style} 少了共用的無文字規則`);
+    assert.match(prompt, /isolated object/i, `${style} 少了單一物件的構圖要求`);
   }
 });
 

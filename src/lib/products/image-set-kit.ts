@@ -6,16 +6,22 @@ export type StoredAssetRole = "hero" | "detail" | "background" | "benefit" | "de
  * 賣點圖示的視覺路線。定義放在這一層而不是 image-set-roles，因為它必須
  * 跟著 planJson 一起存下來——規劃時選了哪一種，確認生成時就得用同一種。
  *
- * `plain`  無框線稿：中性單色，可跟著品牌色換色，套任何產品都能用（預設）
- * `framed` 線稿加圓框：DM 上常見的「功效四格」
- * `orb`    藍色光澤圓球：顏色寫死在圖裡，換品牌就不能用，給特定案子用
+ * 三種都是中性的、可套用品牌色的，因為同一組 icon 要能用在任何產品上。
+ *
+ * `plain`  極簡線稿：單色細線，沒有外框（預設）
+ * `framed` 圓框線稿：線稿外加一圈細圓框，適合排成功效四格
+ * `soft`   柔和色塊：面狀填色圖形，視覺重量比線稿重
  */
-export type BenefitIconStyle = "plain" | "framed" | "orb";
-export const BENEFIT_ICON_STYLES: readonly BenefitIconStyle[] = ["plain", "framed", "orb"];
+export type BenefitIconStyle = "plain" | "framed" | "soft";
+export const BENEFIT_ICON_STYLES: readonly BenefitIconStyle[] = ["plain", "framed", "soft"];
 export const DEFAULT_BENEFIT_ICON_STYLE: BenefitIconStyle = "plain";
 
+/** 開發期間 `soft` 一度叫 `orb`（藍色光澤圓球）；舊草稿讀得回來就好。 */
+const LEGACY_BENEFIT_ICON_STYLES: Record<string, BenefitIconStyle> = { orb: "soft" };
+
 export function parseBenefitIconStyle(value: unknown): BenefitIconStyle | null {
-  return BENEFIT_ICON_STYLES.includes(value as BenefitIconStyle) ? (value as BenefitIconStyle) : null;
+  if (BENEFIT_ICON_STYLES.includes(value as BenefitIconStyle)) return value as BenefitIconStyle;
+  return typeof value === "string" ? LEGACY_BENEFIT_ICON_STYLES[value] ?? null : null;
 }
 
 export type ImageSetPlanItem = {
@@ -28,6 +34,12 @@ export type ImageSetPlanItem = {
   defaultSelected: boolean;
   /** 只有賣點圖示會帶；確認階段靠它還原規劃時選的風格。 */
   benefitIconStyle?: BenefitIconStyle;
+  /**
+   * 賣點圖示的文字內容。圖裡不畫任何字（影像模型畫中文會缺筆畫），
+   * 文字一律走資料，排版階段再用字型渲染。
+   */
+  benefitTitle?: string;
+  benefitDescription?: string;
 };
 
 export const IMAGE_SET_MAX_ASSETS = 20;
@@ -149,6 +161,12 @@ export function parseImageSetPlanJson(value: string): ImageSetPlanItem[] {
       benefitIconStyle = style;
     }
 
+    const optionalText = (value: unknown, field: string): string | undefined => {
+      if (value === undefined) return undefined;
+      if (typeof value !== "string") throw new Error(`套圖計畫第 ${index + 1} 項的 ${field} 格式不正確`);
+      return value.trim() || undefined;
+    };
+
     return {
       id,
       category,
@@ -158,6 +176,8 @@ export function parseImageSetPlanJson(value: string): ImageSetPlanItem[] {
       core: candidate.core,
       defaultSelected: candidate.defaultSelected,
       ...(benefitIconStyle ? { benefitIconStyle } : {}),
+      ...(optionalText(candidate.benefitTitle, "benefitTitle") ? { benefitTitle: optionalText(candidate.benefitTitle, "benefitTitle") } : {}),
+      ...(optionalText(candidate.benefitDescription, "benefitDescription") ? { benefitDescription: optionalText(candidate.benefitDescription, "benefitDescription") } : {}),
     };
   });
 }

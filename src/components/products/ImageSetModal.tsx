@@ -12,9 +12,9 @@ import { DEFAULT_BENEFIT_ICON_STYLE, type BenefitIconStyle, type ImageSetPlanIte
  * 藍色圓球把顏色畫死在圖裡，換品牌就得重生，說明文字要讓使用者看得出這個差別。
  */
 const BENEFIT_ICON_STYLE_OPTIONS: { value: BenefitIconStyle; label: string; hint: string }[] = [
-  { value: "plain", label: "線稿（無框）", hint: "單色細線圖形，可換成品牌色，任何產品都能用" },
-  { value: "framed", label: "線稿加圓框", hint: "圖形加一圈細圓框，適合排成功效四格" },
-  { value: "orb", label: "藍色圓球", hint: "立體光澤球，顏色固定為藍色系，換品牌要重生" },
+  { value: "plain", label: "極簡線稿", hint: "單色細線圖形，沒有外框" },
+  { value: "framed", label: "圓框線稿", hint: "線稿外加一圈細圓框，適合排成功效四格" },
+  { value: "soft", label: "柔和色塊", hint: "面狀填色圖形，視覺重量比線稿重" },
 ];
 import type { ImageSetTheme } from "@/lib/products/image-set-roles";
 import { ImageSetDirectionEditor } from "@/components/products/ImageSetDirectionEditor";
@@ -527,7 +527,7 @@ export function ImageSetModal({ clientId, productId, onClose, onFinished }: {
                 benefitIconStyleControl={
                   <div className="mt-2 rounded-xl border border-[#e7ebf1] bg-[#fbfcfe] p-3.5">
                     <div className="flex items-center gap-2"><Shapes className="h-3.5 w-3.5 text-violet-600" /><span className="text-xs font-bold text-gray-800">賣點圖示風格</span></div>
-                    <p className="mt-1 text-[11px] leading-4 text-gray-500">整組賣點圖示共用一種風格；沒有勾選賣點圖示時不影響任何素材。</p>
+                    <p className="mt-1 text-[11px] leading-4 text-gray-500">所有賣點將套用同一套圖示風格與品牌色。</p>
                     <div className="mt-3 grid gap-2 sm:grid-cols-3">
                       {BENEFIT_ICON_STYLE_OPTIONS.map(({ value, label, hint }) => (
                         <button

@@ -75,7 +75,16 @@ export function resolveImageSetTheme(key?: string, kind?: ImageSetTheme["kind"])
 
 function withPlanMetadata(
   spec: ImageSetRoleSpec,
-  input: { category: ImageSetCategory; assetSubtype: string; purpose: string; core: boolean; themeKey: string; benefitIconStyle?: BenefitIconStyle },
+  input: {
+    category: ImageSetCategory;
+    assetSubtype: string;
+    purpose: string;
+    core: boolean;
+    themeKey: string;
+    benefitIconStyle?: BenefitIconStyle;
+    benefitTitle?: string;
+    benefitDescription?: string;
+  },
 ): PlannedImageSetRole {
   return {
     ...spec,
@@ -86,8 +95,11 @@ function withPlanMetadata(
     purpose: input.purpose,
     core: input.core,
     defaultSelected: input.core,
-    // 只有賣點圖示帶風格；存進 planJson 後，確認階段才還原得出規劃時選的那一種。
+    // 只有賣點圖示帶風格與文字；存進 planJson 後，確認階段才還原得出規劃時選的那一種，
+    // 排版階段也才有真正的文字可以用字型渲染。
     ...(input.benefitIconStyle ? { benefitIconStyle: input.benefitIconStyle } : {}),
+    ...(input.benefitTitle ? { benefitTitle: input.benefitTitle } : {}),
+    ...(input.benefitDescription ? { benefitDescription: input.benefitDescription } : {}),
   };
 }
 
@@ -201,18 +213,19 @@ const BENEFIT_ICON_SPECS: Record<BenefitIconStyle, (title: string) => Pick<Image
       "與同組其他 icon 不同大小的外框或不同粗細的線條",
     ],
   }),
-  orb: (title) => ({
-    sceneCn: `一顆半透明的淺藍色光澤圓球，正置中，純白底。球的直徑固定為畫布寬度的 70%——這個比例不能變，整組的球要一樣大才能並排。球體內部放一個象徵「${title}」的白色簡單圖形，高度佔球直徑的一半，只能有 1 到 2 個元素，且完全在球內。光澤反白固定在左上角。球體之外的畫面完全空白：沒有文字、沒有商品、沒有情境、沒有其他裝飾、沒有落地陰影，也沒有任何其他顏色的光暈溢到球外。球體邊緣乾淨，不要爆開的光暈或水花。`,
-    objective: `Render one glossy translucent light-blue sphere, centred on a pure white background, its diameter exactly 70% of the canvas width — this ratio is fixed so every icon in the set lines up. Inside it, a simple white pictogram of at most two elements that stands for "${title}", half the sphere's diameter tall and fully contained within it. Put the specular highlight at the upper left, the same way on every icon. Clean sphere edge: no splash, burst, drop shadow, or glow of any colour spilling outside it — the area around the sphere is plain white and nothing else. No lettering of any kind, no product, no scene, nothing outside the sphere.`,
-    composition: "單一光澤圓球置中、直徑佔畫布 70%，球內 1–2 個白色元素，球外全白無陰影；整組並排時球徑一致。",
+  soft: (title) => ({
+    sceneCn: `一張扁平向量圖示，純白底，不是照片、不是 3D、不是渲染圖。畫面正中央是一個象徵「${title}」的極簡圖形，用柔和的面狀色塊畫成（不是線條輪廓），色塊邊緣是圓潤的幾何形狀。圖形高度佔畫布的 60%，正置中。只能有 1 到 2 個色塊元素，寧可太簡單也不要複雜。整組只用同一組柔和色調，取自品牌點綴色或商品主色，深淺層次最多兩階。畫面上沒有文字、沒有商品、沒有情境、沒有陰影、沒有漸層光澤。`,
+    objective: `Draw one minimal flat vector icon for "${title}" built from soft filled colour shapes rather than outlines. One pictogram centred on a pure white background, its height exactly 60% of the canvas, made of at most two rounded geometric shapes. Use a single soft palette drawn from the brand colours with at most two tonal steps, identical across the set so the icons read as one family. Flat fills only — no gradients, gloss, drop shadows or 3D shading. No lettering of any kind, no product, no scene.`,
+    composition: "單一面狀色塊圖形置中，高度佔畫布 60%，四周均勻留白；整組並排時大小與色調一致。",
     mustNotShow: [
       "任何文字、字母、數字",
-      "球體之外的任何元素",
-      "落地陰影、或溢出球外的光暈與色塊",
-      "超過兩個元素、或球內堆疊多個圖形",
+      "超過兩個色塊元素",
+      "漸層、光澤、立體陰影、3D 或擬真渲染",
+      "線條輪廓風格（這一組是面狀填色）",
+      "Emoji、卡通角色、吉祥物",
       "實際商品、瓶罐、包裝、Logo",
       "情境照、背景場景、人物",
-      "與同組其他 icon 不同大小或不同藍色的球體",
+      "與同組其他 icon 不同大小或不同色調的圖形",
     ],
   }),
 };
@@ -226,23 +239,38 @@ const BENEFIT_ICON_SPECS: Record<BenefitIconStyle, (title: string) => Pick<Image
  * ⚠️ icon 本身不含文字。短標題存在 label／purpose 裡，排版階段才用真正的
  * 字型渲染——圖像模型畫中文很容易缺筆畫或糊掉（這個專案已經踩過）。
  */
+/**
+ * 三種風格共用的底線。文字類的限制寫得這麼細，是因為賣點圖示的整個設計前提
+ * 就是「圖裡不能有字」——中文交給排版階段用字型渲染，影像模型畫中文會缺筆畫。
+ * 實測過的失敗長相：標籤上出現「元亮」「歲㤉憦栃」這種亂碼。
+ */
+const BENEFIT_ICON_TEXT_BAN = "Icon only. No text, no letters, no numbers, no words, no typography, no watermark, no signature, no measurement marks. A single isolated object on a clean, empty background, suitable for dropping into an advertising layout.";
+
 function benefitIconRoles(points: BenefitPoint[], themeKey: string, style: BenefitIconStyle): PlannedImageSetRole[] {
-  return points.map((point, index) => withPlanMetadata({
-    role: "benefit",
-    label: `賣點圖示 · ${point.title}`,
-    usageDescription: "可獨立使用的功效 Icon",
-    path: "text",
-    cutout: true,
-    ...BENEFIT_ICON_SPECS[style](point.title),
-  }, {
-    category: "benefit",
-    assetSubtype: `benefit-icon-${index + 1}`,
-    // purpose 會顯示在清單與看板上，讓使用者知道每個 icon 對應哪個賣點。
-    purpose: point.note ? `${point.title}——${point.note}` : point.title,
-    core: false,
-    themeKey,
-    benefitIconStyle: style,
-  }));
+  return points.map((point, index) => {
+    const spec = BENEFIT_ICON_SPECS[style](point.title);
+    return withPlanMetadata({
+      role: "benefit",
+      // 主標題直接是賣點名稱——四張都叫「賣點圖示」的話，要往下讀小字才分得出誰是誰。
+      label: point.title,
+      usageDescription: "可獨立使用的功效 Icon",
+      path: "text",
+      // 這條路回傳 JPG，拿不到透明底；底色靠提示詞釘死成純白。
+      cutout: false,
+      ...spec,
+      objective: `${spec.objective} ${BENEFIT_ICON_TEXT_BAN}`,
+    }, {
+      category: "benefit",
+      assetSubtype: `benefit-icon-${index + 1}`,
+      // purpose 會顯示在清單與看板上，讓使用者知道每個 icon 對應哪個賣點。
+      purpose: point.description ? `${point.title}——${point.description}` : point.title,
+      core: false,
+      themeKey,
+      benefitIconStyle: style,
+      benefitTitle: point.title,
+      benefitDescription: point.description,
+    });
+  });
 }
 
 function extraRoles(input: PlanImageSetInput, themeKey: string): PlannedImageSetRole[] {

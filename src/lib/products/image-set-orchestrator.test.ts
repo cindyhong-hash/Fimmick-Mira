@@ -255,7 +255,7 @@ test("the benefit icon style is chosen at confirm time, drives the prompt, and i
     batchId: "kit-draft-icons",
     selectedItemIds: icons.slice(0, 2).map(({ id }) => id),
     artDirection,
-    benefitIconStyle: "orb",
+    benefitIconStyle: "soft",
     execution: createImageSetExecution(10_000, "kit-lease"),
   }, {
     loadDraft: async () => ({
@@ -278,11 +278,11 @@ test("the benefit icon style is chosen at confirm time, drives the prompt, and i
   assert.equal(result.ok, true, result.ok ? "" : result.error);
   // 確認時選的風格要真的進到付費生成用的提示詞，而不是默默用預設。
   const rows = persisted?.rows as Array<Record<string, unknown>>;
-  assert.ok(rows.every(({ prompt }) => /sphere/i.test(String(prompt))), "提示詞沒有套用確認時選的風格");
+  assert.ok(rows.every(({ prompt }) => /soft filled colour shapes/i.test(String(prompt))), "提示詞沒有套用確認時選的風格");
   assert.ok(rows.every(({ prompt }) => !/no frame, no container/i.test(String(prompt))));
   // 並且記在批次上，之後看得出這組 icon 是用哪種風格生的。
   const savedPlan = JSON.parse(String(persisted?.planJson)) as Array<Record<string, unknown>>;
-  assert.ok(savedPlan.every(({ benefitIconStyle }) => benefitIconStyle === "orb"));
+  assert.ok(savedPlan.every(({ benefitIconStyle }) => benefitIconStyle === "soft"));
 });
 
 test("invalid confirmation snapshots are rejected before claiming the paid lease", async () => {

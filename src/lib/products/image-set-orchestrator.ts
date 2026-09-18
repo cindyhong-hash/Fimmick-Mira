@@ -501,7 +501,7 @@ export type PlanProductImageSetResult =
 function publicPlanItem(role: ReturnType<typeof planImageSetRoles>[number]): ImageSetPlanItem {
   const {
     id, category, assetRole, assetSubtype, purpose, core, defaultSelected,
-    benefitIconStyle, benefitTitle, benefitDescription,
+    benefitIconStyle, benefitTitle, benefitDescription, benefitIconConcept,
   } = role;
   return {
     id, category, assetRole, assetSubtype, purpose, core, defaultSelected,
@@ -509,6 +509,8 @@ function publicPlanItem(role: ReturnType<typeof planImageSetRoles>[number]): Ima
     // 清單用 benefitTitle 當主標題，排版階段用這兩個欄位渲染文字圖層。
     ...(benefitTitle ? { benefitTitle } : {}),
     ...(benefitDescription ? { benefitDescription } : {}),
+    // 少了這個，確認階段就重算不出賣點圖示（中文標題不能進提示詞），整批確認會失敗。
+    ...(benefitIconConcept ? { benefitIconConcept } : {}),
   };
 }
 

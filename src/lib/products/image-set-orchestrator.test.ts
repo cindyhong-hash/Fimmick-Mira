@@ -26,6 +26,7 @@ import {
 import { ImageSetFallbackBudgetError } from "./image-set-model-router.ts";
 import type { ProductVisualProfile } from "./product-visual-profile.ts";
 import { computeProductVisualSourceHash } from "./product-visual-profile.ts";
+import { parseImageSetPlanJson } from "./image-set-kit.ts";
 import type { ImageSetArtDirection } from "./product-visual-analysis.ts";
 import { planImageSetRoles, type ImageSetRoleSpec } from "./image-set-roles.ts";
 import { deriveBenefitPoints } from "./benefit-points.ts";
@@ -286,6 +287,61 @@ test("the benefit icon style is chosen at confirm time, drives the prompt, and i
   // 並且記在批次上，之後看得出這組 icon 是用哪種風格生的。
   const savedPlan = JSON.parse(String(persisted?.planJson)) as Array<Record<string, unknown>>;
   assert.ok(savedPlan.every(({ benefitIconStyle }) => benefitIconStyle === "soft"));
+});
+
+test("a plan made today can be confirmed: everything confirm needs survives planJson", async () => {
+  // 這支測試存在的理由：publicPlanItem 是逐欄位明列的，漏掉一個欄位就會在存檔時
+  // 被丟掉。benefitIconConcept 就這樣漏過一次，結果每一份新清單都確認不了——
+  // 而規劃與確認各自的單元測試都是綠的，因為沒有人把兩段接起來跑。
+  const imageProduct = { ...input().product, description: "賣點： 酵素角質護理，除毛前柔嫩肌膚、帶走老廢角質。" };
+  const storedProduct = {
+    ...imageProduct,
+    visualProfileJson: JSON.stringify(profile),
+    visualProfileSourceHash: computeProductVisualSourceHash(imageProduct),
+    rawImageUrls: JSON.stringify(imageProduct.rawImageUrls),
+  };
+
+  let draft: { planJson: string; artDirectionJson: string } | undefined;
+  const planned = await planProductImageSet({ product: storedProduct, client: null }, {
+    createBatchId: () => "kit-roundtrip",
+    createDraft: async (data) => { draft = { planJson: data.planJson, artDirectionJson: data.artDirectionJson }; },
+    chatText: async () => JSON.stringify([
+      { title: "溫和去角質", description: "帶走老廢角質", iconConcept: "a soft brush sweeping over skin" },
+      { title: "除毛前準備", description: "肌膚前置保養", iconConcept: "a droplet above smooth skin" },
+      { title: "柔嫩平滑肌膚", description: "提升細緻滑順感", iconConcept: "a feather touching smooth skin" },
+    ]),
+  });
+  assert.equal(planned.ok, true);
+  assert.ok(draft, "沒有建立草稿");
+  const saved = draft as { planJson: string; artDirectionJson: string };
+  const savedPlan = parseImageSetPlanJson(saved.planJson);
+  const savedIcons = savedPlan.filter(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"));
+  assert.equal(savedIcons.length, 3);
+  // 英文視覺描述必須真的存進去，否則確認階段重算不出這幾張。
+  assert.ok(savedIcons.every(({ benefitIconConcept }) => benefitIconConcept), "planJson 沒有存到 benefitIconConcept");
+
+  // 接著用這份存檔直接確認——這就是使用者實際會走的路。
+  const result = await confirmAndScheduleProductImageSet({
+    product: storedProduct,
+    client: null,
+    batchId: "kit-roundtrip",
+    selectedItemIds: savedIcons.map(({ id }) => id),
+    artDirection,
+    execution: createImageSetExecution(10_000, "kit-lease"),
+  }, {
+    loadDraft: async () => ({
+      id: "kit-roundtrip", productId: "product-1", status: "DRAFT", themeKey: null, themeLabel: null,
+      artDirectionJson: saved.artDirectionJson, planJson: saved.planJson,
+    }),
+    claimProductLease: async () => true,
+    releaseProductLease: async () => true,
+    persistConfirmedBatch: async () => savedIcons.map((_, index) => ({ id: `row-${index}` })),
+    scheduleAfter: () => {},
+    runBatch: async () => ({ statuses: {}, params: {} }),
+    readBatchStatuses: async () => savedIcons.map(() => "DONE" as const),
+    updateKitStatus: async () => {},
+  });
+  assert.equal(result.ok, true, result.ok ? "" : result.error);
 });
 
 test("a draft made before benefit icons required an english concept says exactly what to press", async () => {

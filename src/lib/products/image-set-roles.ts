@@ -84,7 +84,7 @@ function detailSpec(profile: ProductVisualProfile, context: string): ImageSetRol
   if (profile.productArchetype === "skincare" || profile.productArchetype === "cosmetics") {
     return {
       role: "detail", label: "質地細節", usageDescription: "呈現產品使用感與質地", path: "text", cutout: false,
-      sceneCn: `真實攝影微距的乳液／凝露／泡沫質地：質地抹在肌膚上、或落在乾淨表面的近景。畫面中只有質地本身與承載它的肌膚或表面；${context}`,
+      sceneCn: `真實攝影微距的乳液／凝露／泡沫質地：質地抹在肌膚上、或落在乾淨表面的近景。畫面中只有質地本身與承載它的肌膚或表面。這張的重點是「質地長什麼樣」——黏稠度、光澤、顆粒、延展性；不是在演示功效或前後改善，那是賣點視覺的工作；${context}`,
       objective: "Create a real photographic macro texture study of lotion, gel, or foam resting on skin or a clean surface. The frame contains only the formula and the skin or surface holding it. Show only visibly supported texture characteristics.",
       composition: "Photographic macro close-up with visible real texture, natural highlights, and shallow depth of field.",
       mustNotShow: ["抽象液體波浪", "漂浮微粒", "功效意象圖", "任何容器、瓶罐、軟管、按壓頭或出料口", "任何器具或工具", "完整商品", "包裝", "Logo", "文字", "未提供的成分或功效宣稱"],
@@ -98,7 +98,7 @@ function detailSpec(profile: ProductVisualProfile, context: string): ImageSetRol
       : "商品材質與表面質地細節";
   return {
     role: "detail", label: "質地細節", usageDescription: `呈現${detail}`, path: "crop", cutout: false,
-    sceneCn: `真實攝影微距的${detail}；只依已提供的外觀資料呈現，不加入不存在的材料或功能；${context}`,
+    sceneCn: `真實攝影微距的${detail}；只依已提供的外觀資料呈現，不加入不存在的材料或功能。這張的重點是「表面長什麼樣」，不是在演示功效或前後改善，那是賣點視覺的工作；${context}`,
     objective: `Create a real photographic macro study of the supplied ${detail}. Do not invent materials, ingredients, controls, or functions.`,
     composition: "Photographic macro close-up with authentic surface detail, natural highlights, and shallow depth of field.",
     mustNotShow: ["抽象功效意象", "完整商品", "未提供的材料、成分或功能"],
@@ -130,14 +130,14 @@ function coreRoles(profile: ProductVisualProfile, themeKey: string, theme?: Imag
     }, { category: "background", assetSubtype: "primary-scene", purpose: `提供主版面合成與文案留白${themePurpose}`, core: true, themeKey }),
     withPlanMetadata({
       role: "benefit", label: "賣點視覺", usageDescription: "將產品賣點轉成視覺素材", path: "text", cutout: false,
-      sceneCn: `把已提供的賣點畫成一個看得懂的畫面：用具體、可辨識的物件、材質或情境去表現那個好處（例如柔嫩觸感、乾淨俐落、舒適放鬆），而不是只放泛用的光暈、緞帶或漩渦。畫面仍要高級且留有文案空間；${context}`,
-      objective: "Create an advertising visual that makes the stated benefit legible at a glance. Build it from concrete, recognisable subject matter — materials, surfaces, textures, or a situation that stands for that benefit. Do not fall back on generic abstract flourishes such as floating ribbons, swooshes, light streaks, or swirls. Never depict the actual product.",
-      composition: "概念型抽象素材，有層次但保留可放置文案或與商品主體合成的空間。",
-      mustNotShow: ["實際商品", "瓶罐", "包裝", "Logo", "文字", "真實攝影微距的商品材質或表面質地", "泛用的飄帶、緞帶、漩渦、光束等看不出在講什麼好處的裝飾", "未提供的成分、功效、認證或醫療宣稱"],
-    }, { category: "benefit", assetSubtype: "benefit-metaphor", purpose: `把已提供的賣點轉成可合成的視覺隱喻${themePurpose}`, core: true, themeKey }),
+      sceneCn: `把賣點具象化成「看得出功效」的畫面。三選一，優先順序如下：①肌膚或使用部位的效果特寫（變平滑、水潤、透亮、柔嫩、淨化）；②質地與功效的互動過程（乳液在肌膚上延展、老廢角質被溫和帶走、水分滲透、泡沫包覆）——要有作用中的過程，不是靜態材質展示；③自然暗示「改善前→改善後」的狀態變化（粗糙轉細緻、暗沉轉透亮、乾燥轉水潤），不要硬切對比圖。不露臉、不誇張、不帶醫美或臨床感；日系簡約的高級保養廣告質感，構圖乾淨並留排版空間；${context}`,
+      objective: "Show the stated benefit happening, so a viewer understands what the product does without reading any text. Choose one: a close-up of skin or the treated area showing the result (smoother, hydrated, clarified, softened); the formula visibly at work on skin (spreading, lifting away dead surface cells, absorbing, foaming over residue); or a natural progression from the before state to the improved state within one frame. Photographic and credible, not an illustration. No face, no clinical or medical styling, no exaggerated claims. Never depict the product packaging.",
+      composition: "貼近肌膚或使用部位的廣告特寫，主體清楚可辨識；乾淨留白並保留可放置文案或與商品主體合成的空間。",
+      mustNotShow: ["實際商品", "瓶罐", "包裝", "Logo", "文字", "抽象球體、飄帶、緞帶、漩渦、光束或純裝飾 3D 物件當成畫面主體", "只有氛圍、看不出在講什麼功效的畫面", "人物臉部", "醫美、診所或臨床器材感", "誇大或未提供的成分、功效、認證或醫療宣稱"],
+    }, { category: "benefit", assetSubtype: "benefit-metaphor", purpose: `把賣點具象化成看得出功效的畫面${themePurpose}`, core: true, themeKey }),
     withPlanMetadata({
       role: "decoration", label: "裝飾元素", usageDescription: "增加版面完整度的 PNG 元素", path: "text", cutout: true,
-      sceneCn: `單一可獨立疊加的非文字裝飾元素${motif ? `；視覺元素參考：${motif}` : ""}。`,
+      sceneCn: `單一可獨立疊加的非文字裝飾元素${motif ? `；視覺元素參考：${motif}` : ""}。。用途是排版輔助，不負責說明商品功效——功效交給賣點視覺`,
       objective: "Create one isolated non-typographic decorative overlay element on a plain removable background.",
       composition: "單一元素、清楚輪廓、無完整場景、無文字，方便去背後獨立疊加。",
       mustNotShow: ["商品", "Logo", "文字", "字母", "數字", "完整場景", "產品包裝"],

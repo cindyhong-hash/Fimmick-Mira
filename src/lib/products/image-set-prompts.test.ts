@@ -63,9 +63,12 @@ test("benefit visuals receive the brand's own benefit wording and are told not t
   assert.match(prompt, /Supplied use cases: 腿部日常修整/);
   // 原本只給 use cases 又要求「抽象」，生成結果是泛用緞帶，看不出在講什麼賣點。
   // 現在改成餵真正的賣點文字，並明確禁止泛用裝飾。
-  assert.match(prompt, /benefit legible at a glance/i);
-  assert.match(prompt, /concrete, recognisable subject matter/i);
-  assert.match(prompt, /ribbons, swooshes, light streaks, or swirls/i);
+  // 賣點視覺要「演出功效」而不是給氛圍：驗它被要求畫肌膚效果／作用過程／前後變化，
+  // 且抽象球體與飄帶被列為不可當主體。
+  assert.match(prompt, /understands what the product does without reading any text/i);
+  assert.match(prompt, /close-up of skin|formula visibly at work/i);
+  assert.match(prompt, /抽象球體、飄帶/);
+  assert.match(prompt, /只有氛圍、看不出在講什麼功效/);
   assert.match(prompt, /actual product|Logo/i);
   assert.doesNotMatch(prompt, /Product name: 女性電動除毛刀/);
   assert.doesNotMatch(prompt, /Visible text or logos: Schick/);
@@ -115,9 +118,15 @@ test("detail asks for a real photographic product texture while benefit stays co
   assert.match(detailPrompt, /campaign palette.*surroundings and background/i);
   assert.doesNotMatch(detailPrompt, /dispensed|pump|nozzle|spread on skin|dense foam/i);
   assert.match(detailPrompt, /抽象功效意象/);
-  // benefit 不再走「抽象」路線（會生出看不懂的泛用裝飾），改驗它被要求畫具體可辨識的內容。
-  assert.match(benefitPrompt, /concrete, recognisable/i);
-  assert.match(benefitPrompt, /真實攝影微距的商品材質或表面質地/);
+  // benefit 不再走抽象路線，改驗它被要求演出功效；
+  // 同時確認它與 detail 的分工寫進提示詞（detail 講質地長相，benefit 講功效）。
+  assert.match(benefitPrompt, /formula visibly at work|close-up of skin/i);
+  assert.match(detailPrompt, /不是在演示功效或前後改善/);
+  // 原本靠「禁止真實攝影微距的商品材質」來區隔兩者，但那會連「乳液延展在肌膚上」
+  // 這種功效互動一起擋掉——那正是賣點視覺該畫的。改成用職責分工區隔：
+  // detail 講「長什麼樣」，benefit 講「做了什麼」。
+  assert.match(benefitPrompt, /只有氛圍、看不出在講什麼功效/);
+  assert.doesNotMatch(benefitPrompt, /真實攝影微距的商品材質或表面質地/);
 });
 
 test("background forbids the product and reserves layout space", () => {
@@ -228,4 +237,35 @@ test("choosing a theme changes the background prompt's setting and lighting, not
   assert.match(prompt, /Lighting: .*秋/);
   // 主題不該讓背景重新開始放商品或文字。
   assert.match(prompt, /完全淨空|什麼都沒有放/);
+});
+
+// 保養類商品：detail 會走 formula-texture 分支，benefit 的規則也以這類商品為主要場景。
+const skincareProfile: ProductVisualProfile = {
+  ...beautyDeviceProfile,
+  productType: "去角質除毛前乳液",
+  productArchetype: "skincare",
+} as ProductVisualProfile;
+
+test("benefit / decoration / background each state what they are not, so the model does not blur them", () => {
+  // 使用者回報三者容易混在一起：賣點視覺生出裝飾意象、背景又像氛圍圖。
+  // 各自的提示詞要寫清楚邊界。
+  const roles = planImageSetRoles(skincareProfile);
+  const promptFor = (name: string) => compileImageSetPrompt({
+    product, profile: skincareProfile, artDirection,
+    role: roles.find(({ role }) => role === name)!,
+  });
+
+  // 賣點視覺＝功效具象化
+  const benefit = promptFor("benefit");
+  assert.match(benefit, /close-up of skin|formula visibly at work|before state to the improved state/i);
+  assert.match(benefit, /抽象球體、飄帶/);
+
+  // 質地細節＝質地長相，不演功效
+  assert.match(promptFor("detail"), /不是在演示功效或前後改善/);
+
+  // 裝飾元素＝排版輔助，不說明功效
+  assert.match(promptFor("decoration"), /不負責說明商品功效/);
+
+  // 情境背景＝放商品的空間，檯面淨空
+  assert.match(promptFor("background"), /完全淨空|什麼都沒有放/);
 });

@@ -31,7 +31,8 @@ import {
   type ImageSetRoleSpec,
   type ImageSetTheme,
 } from "./image-set-roles.ts";
-import { deriveBenefitPoints } from "./benefit-points.ts";
+import { deriveBenefitPoints, extractBenefitPoints, type BenefitPoint } from "./benefit-points.ts";
+import { chatTextOpenRouter } from "../openrouter.ts";
 import {
   deriveImageSetKitStatus,
   IMAGE_SET_MAX_ASSETS,
@@ -481,6 +482,8 @@ export type PlanProductImageSetDependencies = {
     brand: ProductBrandFacts,
     theme: ImageSetTheme | null,
   ) => ImageSetArtDirection;
+  /** 打 LLM 整理賣點；注入而不是直接 import，測試才不用真的連網。 */
+  chatText?: (prompt: string) => Promise<string | null>;
 };
 
 export type PlanProductImageSetResult =
@@ -513,6 +516,53 @@ function publicPlanItem(role: ReturnType<typeof planImageSetRoles>[number]): Ima
  * 讀回這批草稿記錄的賣點圖示風格。風格是在「確認生成」那一刻選的，
  * 所以正常情況下請求會帶；這裡是後備，給沒帶風格的舊批次用。
  */
+/**
+ * 讀回規劃時整理好的賣點文字。舊批次沒有這些欄位，回 undefined 讓呼叫端
+ * 退回規則拆解——那是這些批次原本就在用的推導方式，結果會一致。
+ */
+const BENEFIT_TITLE_MAX = 8;
+const BENEFIT_DESCRIPTION_MAX = 16;
+
+/**
+ * 把使用者改過的賣點文字套回計畫。前端已經擋過一次，但這裡是付費生成的入口，
+ * 不能只靠前端——標題空白會生出一張不知道在畫什麼的 icon。
+ */
+function applyBenefitTextEdits(
+  plan: ImageSetPlanItem[],
+  edits: Record<string, { title: string; description: string }> | undefined,
+): { ok: true; plan: ImageSetPlanItem[] } | { ok: false; error: string } {
+  if (!edits) return { ok: true, plan };
+  const next: ImageSetPlanItem[] = [];
+  for (const item of plan) {
+    const edit = edits[item.id];
+    if (!edit || !item.assetSubtype.startsWith("benefit-icon")) {
+      next.push(item);
+      continue;
+    }
+    const title = typeof edit.title === "string" ? edit.title.trim().slice(0, BENEFIT_TITLE_MAX) : "";
+    if (!title) return { ok: false, error: "賣點標題不能留空" };
+    const description = typeof edit.description === "string"
+      ? edit.description.trim().slice(0, BENEFIT_DESCRIPTION_MAX)
+      : "";
+    next.push({
+      ...item,
+      benefitTitle: title,
+      ...(description ? { benefitDescription: description } : { benefitDescription: undefined }),
+      purpose: description ? `${title}——${description}` : title,
+    });
+  }
+  return { ok: true, plan: next };
+}
+
+function storedBenefitPoints(plan: ImageSetPlanItem[]): BenefitPoint[] | undefined {
+  const icons = plan.filter(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"));
+  if (!icons.length || !icons.every(({ benefitTitle }) => benefitTitle)) return undefined;
+  return icons.map(({ benefitTitle, benefitDescription }) => ({
+    title: benefitTitle as string,
+    description: benefitDescription ?? "",
+  }));
+}
+
 function storedBenefitIconStyle(plan: ImageSetPlanItem[]): BenefitIconStyle | undefined {
   return plan.find(({ benefitIconStyle }) => benefitIconStyle)?.benefitIconStyle;
 }
@@ -539,9 +589,14 @@ export async function planProductImageSet(
   }
   const buildDirection = dependencies.buildArtDirection ?? buildImageSetArtDirection;
   const artDirection = buildDirection(profile, imageSetBrand(request.client, request.product.primaryColorOverride), theme);
-  // 規劃與確認兩階段必須算出同一組項目（確認時會逐項比對 id 與角色），
-  // 所以兩邊都用同一個純函式從商品資料推導賣點。
-  const benefitPoints = deriveBenefitPoints(request.product.description, profile.useCases);
+  // 賣點由 LLM 整理（規則拆解切得出句子，切不出「不同面向」），結果跟著
+  // planJson 存下來，確認階段直接讀存好的，不重算——否則兩次的賣點可能不同。
+  // LLM 失敗時 extractBenefitPoints 會自己退回規則版本。
+  const benefitPoints = await extractBenefitPoints(
+    { name: request.product.name, category: request.product.category, description: request.product.description },
+    profile.useCases,
+    dependencies.chatText ?? chatTextOpenRouter,
+  );
   // 規劃階段不需要知道賣點圖示風格：planJson 只存 id／角色／用途，不含提示詞，
   // 而風格只改提示詞。風格留到「確認生成」那一刻再選。
   const items = planImageSetRoles({ profile, artDirection, theme: theme ?? undefined, benefitPoints }).map(publicPlanItem);
@@ -1264,6 +1319,8 @@ export async function confirmAndScheduleProductImageSet(
     artDirection: unknown;
     /** 賣點圖示風格在確認這一刻決定；沒帶就沿用草稿裡記的（舊批次或重新確認）。 */
     benefitIconStyle?: BenefitIconStyle;
+    /** 使用者在清單上改過的賣點文字，key 是計畫項目 id。AI 抓的不一定對。 */
+    benefitTexts?: Record<string, { title: string; description: string }>;
     execution: ImageSetExecution;
   },
   dependencies: ConfirmProductImageSetDependencies,
@@ -1308,7 +1365,11 @@ export async function confirmAndScheduleProductImageSet(
   // 確認時選的才算數，草稿裡記的只是舊批次的後備值。
   const benefitIconStyle = request.benefitIconStyle ?? storedBenefitIconStyle(storedPlan);
   const selectedIds = new Set(request.selectedItemIds);
-  const selectedPlan = storedPlan
+  // 使用者改過的賣點文字蓋掉草稿裡 AI 整理的版本；空標題不接受——標題就是這張
+  // icon 要畫的東西，也是排版階段要渲染的字。
+  const edited = applyBenefitTextEdits(storedPlan, request.benefitTexts);
+  if (!edited.ok) return { ok: false, status: 400, error: edited.error };
+  const selectedPlan = edited.plan
     .filter(({ id }) => selectedIds.has(id))
     // 存回這一批實際用到的風格，之後看紀錄才知道這組 icon 是怎麼生的。
     .map((item) => item.assetSubtype.startsWith("benefit-icon") && benefitIconStyle
@@ -1324,7 +1385,9 @@ export async function confirmAndScheduleProductImageSet(
     profile,
     artDirection,
     theme: theme ?? undefined,
-    benefitPoints: deriveBenefitPoints(request.product.description, profile.useCases),
+    // 規劃時 LLM 整理好的賣點存在 planJson 上，這裡讀回來，不重新問一次 LLM——
+    // 重問會得到不同的賣點，跟使用者在清單上看到的對不起來。
+    benefitPoints: storedBenefitPoints(edited.plan) ?? deriveBenefitPoints(request.product.description, profile.useCases),
     benefitIconStyle: benefitIconStyle ?? undefined,
   });
   const specsById = new Map(currentSpecs.map((spec) => [spec.id, spec]));

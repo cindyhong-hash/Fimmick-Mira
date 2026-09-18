@@ -13,10 +13,16 @@ const CATEGORY_LABELS: Record<ImageSetPlanSelection["category"], string> = {
   decoration: "裝飾與版型元素",
 };
 
-export function ImageSetPlanChecklist({ items, maxAssets, onToggle, benefitIconStyleControl }: {
+/** 跟提示詞那邊的上限一致：標題 8 字、說明 16 字。 */
+const BENEFIT_TITLE_MAX = 8;
+const BENEFIT_DESCRIPTION_MAX = 16;
+
+export function ImageSetPlanChecklist({ items, maxAssets, onToggle, onEditBenefitText, benefitIconStyleControl }: {
   items: ImageSetPlanSelection[];
   maxAssets: number;
   onToggle: (id: string) => void;
+  /** AI 抓的賣點不一定對，所以標題與說明都可以就地改。 */
+  onEditBenefitText?: (id: string, field: "benefitTitle" | "benefitDescription", value: string) => void;
   /** 賣點圖示的風格選擇；就近接在那幾個項目下面，勾選時才需要決定。 */
   benefitIconStyleControl?: ReactNode;
 }) {
@@ -44,9 +50,46 @@ export function ImageSetPlanChecklist({ items, maxAssets, onToggle, benefitIconS
         const label = item.benefitTitle
           ? { zh: item.benefitTitle, en: subtypeLabel.en, description: item.benefitDescription ?? "" }
           : subtypeLabel;
-        return <label key={item.id} className={`flex items-start gap-3 rounded-xl border p-3.5 transition ${item.checked ? "border-violet-500 bg-violet-50" : "border-[#e7ebf1] bg-white hover:border-violet-300"} ${disabled ? "cursor-not-allowed opacity-45" : "cursor-pointer"}`}>
+        const rowClass = `flex items-start gap-3 rounded-xl border p-3.5 transition ${item.checked ? "border-violet-500 bg-violet-50" : "border-[#e7ebf1] bg-white hover:border-violet-300"} ${disabled ? "opacity-45" : ""}`;
+        const box = <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${item.checked ? "border-violet-600 bg-violet-600 text-white" : "border-gray-300 bg-white"}`}>{item.checked && <Check className="h-3.5 w-3.5" />}</span>;
+
+        // 賣點圖示的文字是可編輯的，所以整列不能是 <label>——點輸入框會連帶
+        // 切換勾選。改成勾選框自己是一顆按鈕，文字區塊獨立。
+        if (item.benefitTitle && onEditBenefitText) {
+          return <div key={item.id} className={rowClass}>
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={item.checked}
+              aria-label={`選擇「${item.benefitTitle}」`}
+              disabled={disabled}
+              onClick={() => onToggle(item.id)}
+              className={disabled ? "cursor-not-allowed" : "cursor-pointer"}
+            >{box}</button>
+            <span className="min-w-0 flex-1">
+              <input
+                value={item.benefitTitle}
+                maxLength={BENEFIT_TITLE_MAX}
+                aria-label="賣點標題"
+                onChange={(event) => onEditBenefitText(item.id, "benefitTitle", event.target.value)}
+                className="w-full rounded-md border border-transparent bg-transparent px-1.5 py-0.5 text-sm font-bold text-gray-900 outline-none hover:border-[#e5e9f0] focus:border-violet-400 focus:bg-white"
+              />
+              <span className="mt-0.5 block px-1.5 text-[11px] leading-4 text-gray-400">{label.en}</span>
+              <input
+                value={item.benefitDescription ?? ""}
+                maxLength={BENEFIT_DESCRIPTION_MAX}
+                aria-label="賣點說明"
+                placeholder="補充說明（可留空）"
+                onChange={(event) => onEditBenefitText(item.id, "benefitDescription", event.target.value)}
+                className="mt-1 w-full rounded-md border border-transparent bg-transparent px-1.5 py-0.5 text-xs leading-5 text-gray-500 outline-none placeholder:text-gray-300 hover:border-[#e5e9f0] focus:border-violet-400 focus:bg-white"
+              />
+            </span>
+          </div>;
+        }
+
+        return <label key={item.id} className={`${rowClass} ${disabled ? "cursor-not-allowed" : "cursor-pointer"}`}>
           <input className="sr-only" type="checkbox" checked={item.checked} disabled={disabled} onChange={() => onToggle(item.id)} />
-          <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${item.checked ? "border-violet-600 bg-violet-600 text-white" : "border-gray-300 bg-white"}`}>{item.checked && <Check className="h-3.5 w-3.5" />}</span>
+          {box}
           <span className="min-w-0 flex-1">
             <span className="flex flex-wrap items-center gap-2 text-sm font-bold text-gray-900">{label.zh}{item.core && <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-bold text-violet-600">核心</span>}</span>
             {label.en && <span className="mt-0.5 block text-[11px] leading-4 text-gray-400">{label.en}</span>}

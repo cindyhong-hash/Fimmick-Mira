@@ -43,6 +43,39 @@ export function toggleImageSetPlanItem(
   return items.map((item) => item.id === itemId ? { ...item, checked: !item.checked } : item);
 }
 
+/** 賣點文字的長度上限，跟提示詞那邊一致。空字串＝清掉說明。 */
+const BENEFIT_TITLE_MAX = 8;
+const BENEFIT_DESCRIPTION_MAX = 16;
+
+export function editImageSetBenefitText(
+  items: ImageSetPlanSelection[],
+  itemId: string,
+  field: "benefitTitle" | "benefitDescription",
+  value: string,
+): ImageSetPlanSelection[] {
+  const limit = field === "benefitTitle" ? BENEFIT_TITLE_MAX : BENEFIT_DESCRIPTION_MAX;
+  const next = value.slice(0, limit);
+  return items.map((item) => item.id === itemId ? { ...item, [field]: next } : item);
+}
+
+/**
+ * 使用者改過的賣點文字。只送被勾選的——沒勾的不會生成，帶著它的文字沒有意義。
+ * 標題不能空白：它就是這張 icon 要畫的東西，也是排版階段要渲染的字。
+ */
+export function collectImageSetBenefitTexts(
+  items: ImageSetPlanSelection[],
+): Record<string, { title: string; description: string }> {
+  const texts: Record<string, { title: string; description: string }> = {};
+  for (const item of items) {
+    if (!item.checked || !item.benefitTitle) continue;
+    texts[item.id] = {
+      title: item.benefitTitle.trim().slice(0, BENEFIT_TITLE_MAX),
+      description: (item.benefitDescription ?? "").trim().slice(0, BENEFIT_DESCRIPTION_MAX),
+    };
+  }
+  return texts;
+}
+
 export function buildImageSetConfirmationPayload(input: {
   batchId: string;
   items: ImageSetPlanSelection[];
@@ -57,13 +90,17 @@ export function buildImageSetConfirmationPayload(input: {
     selectedItemIds: string[];
     artDirection: ImageSetArtDirection;
     benefitIconStyle?: BenefitIconStyle;
+    benefitTexts?: Record<string, { title: string; description: string }>;
   };
 } | { ok: false; error: string } {
   const selectedItemIds = input.items.filter(({ checked }) => checked).map(({ id }) => id);
   if (!selectedItemIds.length) return { ok: false, error: "至少要選擇一項素材" };
+  const blankTitle = input.items.find((item) => item.checked && item.benefitTitle !== undefined && !item.benefitTitle.trim());
+  if (blankTitle) return { ok: false, error: "賣點標題不能留空" };
   if (selectedItemIds.length > (input.maxAssets ?? IMAGE_SET_MAX_ASSETS)) {
     return { ok: false, error: `單批最多只能生成 ${input.maxAssets ?? IMAGE_SET_MAX_ASSETS} 項素材` };
   }
+  const benefitTexts = collectImageSetBenefitTexts(input.items);
   return {
     ok: true,
     payload: {
@@ -71,6 +108,7 @@ export function buildImageSetConfirmationPayload(input: {
       selectedItemIds,
       artDirection: input.artDirection,
       ...(input.benefitIconStyle ? { benefitIconStyle: input.benefitIconStyle } : {}),
+      ...(Object.keys(benefitTexts).length ? { benefitTexts } : {}),
     },
   };
 }

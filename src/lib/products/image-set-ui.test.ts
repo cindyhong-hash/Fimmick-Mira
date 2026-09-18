@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   clearSavedImageSetBatch,
+  editImageSetBenefitText,
   dialogFocusTargetIndex,
   imageSetBatchProgress,
   imageSetGenerationAnnouncement,
@@ -18,6 +19,7 @@ import {
   shouldAnalyzeBeforeImageSetPicker,
   shouldNotifySettledBatch,
   shouldRenderDeterminateImageSetProgress,
+  type ImageSetPlanSelection,
   toggleImageSetPlanItem,
   buildImageSetConfirmationPayload,
   writeSavedImageSetBatch,
@@ -196,4 +198,44 @@ test("missing saved rows become non-retryable placeholders without hiding surviv
     },
     { id: "row-background", role: "background", label: "情境空景", status: "GENERATING" },
   ]);
+});
+
+const benefitItem = (overrides: Partial<ImageSetPlanSelection> = {}): ImageSetPlanSelection => ({
+  id: "benefit-benefit-icon-1-evergreen",
+  category: "benefit",
+  assetRole: "benefit",
+  assetSubtype: "benefit-icon-1",
+  purpose: "酵素去角質",
+  core: false,
+  defaultSelected: false,
+  checked: true,
+  benefitTitle: "酵素去角質",
+  benefitDescription: "帶走老廢角質",
+  ...overrides,
+});
+
+test("benefit text edits are capped at the same lengths the prompt promises", () => {
+  const items = [benefitItem()];
+  const longTitle = editImageSetBenefitText(items, items[0].id, "benefitTitle", "這是一個過長的賣點標題文字");
+  assert.equal(longTitle[0].benefitTitle?.length, 8);
+  const longDescription = editImageSetBenefitText(items, items[0].id, "benefitDescription", "這是一段非常長的補充說明文字內容還在繼續");
+  assert.equal(longDescription[0].benefitDescription?.length, 16);
+  // 清空說明是合法的；說明本來就可選。
+  assert.equal(editImageSetBenefitText(items, items[0].id, "benefitDescription", "")[0].benefitDescription, "");
+});
+
+test("only checked benefit items send their text, and a blank title blocks the paid confirm", () => {
+  const artDirection = { concept: "c", palette: { dominant: [], accent: [] }, lighting: "l", materials: [], backgroundLanguage: "b", cameraLanguage: "c", consistencyRules: [], mood: [], decorationStyle: [] };
+  const checked = benefitItem();
+  const unchecked = benefitItem({ id: "benefit-benefit-icon-2-evergreen", assetSubtype: "benefit-icon-2", checked: false, benefitTitle: "不會送出" });
+
+  const payload = buildImageSetConfirmationPayload({ batchId: "b1", items: [checked, unchecked], artDirection });
+  assert.equal(payload.ok, true);
+  assert.ok(payload.ok && payload.payload.benefitTexts);
+  assert.deepEqual(Object.keys(payload.ok ? payload.payload.benefitTexts ?? {} : {}), [checked.id]);
+
+  // 標題就是這張 icon 要畫的東西，空白不能放行。
+  const blank = buildImageSetConfirmationPayload({ batchId: "b1", items: [benefitItem({ benefitTitle: "   " })], artDirection });
+  assert.equal(blank.ok, false);
+  assert.match(blank.ok ? "" : blank.error, /賣點標題不能留空/);
 });

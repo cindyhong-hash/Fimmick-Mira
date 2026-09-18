@@ -37,6 +37,7 @@ import {
   shouldAnalyzeBeforeImageSetPicker,
   shouldNotifySettledBatch,
   shouldRenderDeterminateImageSetProgress,
+  editImageSetBenefitText,
   toggleImageSetPlanItem,
   writeSavedImageSetBatch,
   type ImageSetPlanSelection,
@@ -524,6 +525,7 @@ export function ImageSetModal({ clientId, productId, onClose, onFinished }: {
                 items={items}
                 maxAssets={maxAssets}
                 onToggle={(id) => setItems((current) => toggleImageSetPlanItem(current, id, maxAssets))}
+                onEditBenefitText={(id, field, value) => setItems((current) => editImageSetBenefitText(current, id, field, value))}
                 benefitIconStyleControl={
                   <div className="mt-2 rounded-xl border border-[#e7ebf1] bg-[#fbfcfe] p-3.5">
                     <div className="flex items-center gap-2"><Shapes className="h-3.5 w-3.5 text-violet-600" /><span className="text-xs font-bold text-gray-800">賣點圖示風格</span></div>

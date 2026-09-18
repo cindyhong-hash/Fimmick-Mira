@@ -47,6 +47,18 @@ export const POST = protectPaidRoute(async (
     return NextResponse.json({ error: "benefitIconStyle 格式不正確" }, { status: 400 });
   }
 
+  // 只收得懂的形狀；內容長度與空白由 orchestrator 驗（那裡才是付費生成的關卡）。
+  const rawTexts = body.benefitTexts;
+  const benefitTexts: Record<string, { title: string; description: string }> = {};
+  if (rawTexts && typeof rawTexts === "object" && !Array.isArray(rawTexts)) {
+    for (const [id, value] of Object.entries(rawTexts as Record<string, unknown>)) {
+      if (!value || typeof value !== "object") continue;
+      const entry = value as Record<string, unknown>;
+      if (typeof entry.title !== "string") continue;
+      benefitTexts[id] = { title: entry.title, description: typeof entry.description === "string" ? entry.description : "" };
+    }
+  }
+
   const product = await db.product.findUnique({ where: { id: productId }, include: { client: true } });
   if (!product) return NextResponse.json({ error: "Not found" }, { status: 404 });
   await reconcileStaleImageSetWork(product.id, new Date());
@@ -59,6 +71,7 @@ export const POST = protectPaidRoute(async (
     selectedItemIds,
     artDirection: body.artDirection,
     benefitIconStyle: benefitIconStyle ?? undefined,
+    ...(Object.keys(benefitTexts).length ? { benefitTexts } : {}),
     execution,
   }, {
     loadDraft: (ownerProductId, batchId) => db.productImageSet.findFirst({ where: { id: batchId, productId: ownerProductId } }),

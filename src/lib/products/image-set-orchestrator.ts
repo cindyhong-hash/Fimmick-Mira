@@ -1398,6 +1398,18 @@ export async function confirmAndScheduleProductImageSet(
     return spec;
   });
   if (selectedSpecs.some((spec) => !spec)) {
+    // 最常見的原因是舊草稿：賣點圖示改成必須帶英文視覺描述之後（中文標題送進
+    // 提示詞會被模型畫進圖裡），在那之前建立的草稿重算不出這幾張。與其丟一句
+    // 讓人自己猜的通用錯誤，不如講清楚該按哪裡，而且要說明重建不用錢。
+    const staleIcons = selectedPlan.filter((item, index) =>
+      !selectedSpecs[index] && item.assetSubtype.startsWith("benefit-icon") && !item.benefitIconConcept);
+    if (staleIcons.length) {
+      return {
+        ok: false,
+        status: 409,
+        error: "這份清單是賣點圖示更新前建立的，請按「重新選擇主題」再建立一次建議清單（不會扣款）。",
+      };
+    }
     return { ok: false, status: 409, error: "儲存的套圖角色或素材變化已失效，請重新規劃。" };
   }
   const roles = selectedSpecs.filter((spec): spec is NonNullable<typeof spec> => !!spec);

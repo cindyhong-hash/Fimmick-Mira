@@ -288,6 +288,57 @@ test("the benefit icon style is chosen at confirm time, drives the prompt, and i
   assert.ok(savedPlan.every(({ benefitIconStyle }) => benefitIconStyle === "soft"));
 });
 
+test("a draft made before benefit icons required an english concept says exactly what to press", async () => {
+  // 舊草稿只有中文標題，沒有 iconConcept。中文標題不能進提示詞（會被畫成圖上的字），
+  // 所以那幾張重算不出來，確認就會對不起來。這時要給可以照做的指示，不是通用錯誤。
+  const imageProduct = { ...input().product, description: "賣點： 酵素角質護理，除毛前柔嫩肌膚、帶走老廢角質。" };
+  const storedProduct = {
+    ...imageProduct,
+    visualProfileJson: JSON.stringify(profile),
+    visualProfileSourceHash: computeProductVisualSourceHash(imageProduct),
+    rawImageUrls: JSON.stringify(imageProduct.rawImageUrls),
+  };
+  const points = deriveBenefitPoints(storedProduct.description, profile.useCases)
+    .map((point, index) => ({ ...point, iconConcept: `a pictogram number ${index + 1}` }));
+  const planned = planImageSetRoles({ profile, artDirection, benefitPoints: points });
+  const icons = planned.filter(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"));
+  assert.ok(icons.length);
+  // 模擬舊草稿：把英文描述拿掉，只留中文標題。
+  const legacyPlan = planned.map((item) => {
+    const legacy: Record<string, unknown> = { ...item };
+    delete legacy.benefitIconConcept;
+    return legacy;
+  });
+
+  let leaseClaimed = false;
+  const result = await confirmAndScheduleProductImageSet({
+    product: storedProduct,
+    client: null,
+    batchId: "kit-legacy",
+    selectedItemIds: [icons[0].id],
+    artDirection,
+    execution: createImageSetExecution(10_000, "kit-lease"),
+  }, {
+    loadDraft: async () => ({
+      id: "kit-legacy", productId: "product-1", status: "DRAFT", themeKey: null, themeLabel: null,
+      artDirectionJson: JSON.stringify(artDirection), planJson: JSON.stringify(legacyPlan),
+    }),
+    claimProductLease: async () => { leaseClaimed = true; return true; },
+    releaseProductLease: async () => true,
+    persistConfirmedBatch: async () => [{ id: "row-1" }],
+    scheduleAfter: () => {},
+    runBatch: async () => ({ statuses: {}, params: {} }),
+    readBatchStatuses: async () => ["DONE"],
+    updateKitStatus: async () => {},
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.ok ? "" : result.error, /重新選擇主題/);
+  assert.match(result.ok ? "" : result.error, /不會扣款/);
+  // 擋在付費關卡之前：不能因為這個就先把租約搶走。
+  assert.equal(leaseClaimed, false);
+});
+
 test("invalid confirmation snapshots are rejected before claiming the paid lease", async () => {
   const imageProduct = input().product;
   const storedProduct = {

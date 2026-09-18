@@ -2,6 +2,7 @@ import { after, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db";
 import { protectPaidRoute } from "@/lib/site-gate";
+import { parseBenefitIconStyle } from "@/lib/products/image-set-kit";
 import {
   claimProductPaidOperationLease,
   confirmAndScheduleProductImageSet,
@@ -40,6 +41,11 @@ export const POST = protectPaidRoute(async (
   const selectedItemIds = Array.isArray(body.selectedItemIds)
     ? body.selectedItemIds.filter((id: unknown): id is string => typeof id === "string")
     : [];
+  // 沒送＝沿用草稿記的；送了不認得的值就退回 400，不要默默改成預設風格後付費生圖。
+  const benefitIconStyle = body.benefitIconStyle === undefined ? undefined : parseBenefitIconStyle(body.benefitIconStyle);
+  if (body.benefitIconStyle !== undefined && !benefitIconStyle) {
+    return NextResponse.json({ error: "benefitIconStyle 格式不正確" }, { status: 400 });
+  }
 
   const product = await db.product.findUnique({ where: { id: productId }, include: { client: true } });
   if (!product) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -52,6 +58,7 @@ export const POST = protectPaidRoute(async (
     batchId: typeof body.batchId === "string" ? body.batchId : "",
     selectedItemIds,
     artDirection: body.artDirection,
+    benefitIconStyle: benefitIconStyle ?? undefined,
     execution,
   }, {
     loadDraft: (ownerProductId, batchId) => db.productImageSet.findFirst({ where: { id: batchId, productId: ownerProductId } }),

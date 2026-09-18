@@ -1,6 +1,7 @@
 "use client";
 
 import { Check } from "lucide-react";
+import type { ReactNode } from "react";
 import type { ImageSetPlanSelection } from "@/lib/products/image-set-ui";
 import { imageSetSubtypeLabel } from "@/lib/products/image-set-subtype-labels";
 
@@ -12,10 +13,12 @@ const CATEGORY_LABELS: Record<ImageSetPlanSelection["category"], string> = {
   decoration: "裝飾與版型元素",
 };
 
-export function ImageSetPlanChecklist({ items, maxAssets, onToggle }: {
+export function ImageSetPlanChecklist({ items, maxAssets, onToggle, benefitIconStyleControl }: {
   items: ImageSetPlanSelection[];
   maxAssets: number;
   onToggle: (id: string) => void;
+  /** 賣點圖示的風格選擇；就近接在那幾個項目下面，勾選時才需要決定。 */
+  benefitIconStyleControl?: ReactNode;
 }) {
   const selectedCount = items.filter(({ checked }) => checked).length;
   const groups = Object.entries(CATEGORY_LABELS).map(([category, label]) => ({
@@ -46,6 +49,7 @@ export function ImageSetPlanChecklist({ items, maxAssets, onToggle }: {
           </span>
         </label>;
       })}</div>
+      {group.items.some(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon")) && benefitIconStyleControl}
     </section>)}</div>
   </div>;
 }

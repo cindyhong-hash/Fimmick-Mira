@@ -1,5 +1,5 @@
 import type { ImageSetArtDirection } from "./product-visual-analysis.ts";
-import { IMAGE_SET_MAX_ASSETS, type ImageSetPlanItem } from "./image-set-kit.ts";
+import { IMAGE_SET_MAX_ASSETS, type BenefitIconStyle, type ImageSetPlanItem } from "./image-set-kit.ts";
 
 export type ImageSetUiPhase = "analyzing" | "pick" | "generating" | "done";
 
@@ -48,14 +48,31 @@ export function buildImageSetConfirmationPayload(input: {
   items: ImageSetPlanSelection[];
   artDirection: ImageSetArtDirection;
   maxAssets?: number;
-}): { ok: true; payload: { batchId: string; selectedItemIds: string[]; artDirection: ImageSetArtDirection } }
-  | { ok: false; error: string } {
+  /** 賣點圖示風格在確認這一刻才決定，跟著送出；沒有選到賣點圖示時不需要帶。 */
+  benefitIconStyle?: BenefitIconStyle;
+}): {
+  ok: true;
+  payload: {
+    batchId: string;
+    selectedItemIds: string[];
+    artDirection: ImageSetArtDirection;
+    benefitIconStyle?: BenefitIconStyle;
+  };
+} | { ok: false; error: string } {
   const selectedItemIds = input.items.filter(({ checked }) => checked).map(({ id }) => id);
   if (!selectedItemIds.length) return { ok: false, error: "至少要選擇一項素材" };
   if (selectedItemIds.length > (input.maxAssets ?? IMAGE_SET_MAX_ASSETS)) {
     return { ok: false, error: `單批最多只能生成 ${input.maxAssets ?? IMAGE_SET_MAX_ASSETS} 項素材` };
   }
-  return { ok: true, payload: { batchId: input.batchId, selectedItemIds, artDirection: input.artDirection } };
+  return {
+    ok: true,
+    payload: {
+      batchId: input.batchId,
+      selectedItemIds,
+      artDirection: input.artDirection,
+      ...(input.benefitIconStyle ? { benefitIconStyle: input.benefitIconStyle } : {}),
+    },
+  };
 }
 
 export function imageSetTerminalSummary(items: Array<Pick<ImageSetUiRole, "status">>): {

@@ -501,9 +501,8 @@ function publicPlanItem(role: ReturnType<typeof planImageSetRoles>[number]): Ima
 }
 
 /**
- * 確認階段要重算 roles，而風格只影響提示詞、不影響 id／角色／子型別，
- * 所以比對那一關抓不到風格不符。規劃時選的風格存在 planJson 的賣點圖示項目上，
- * 這裡把它讀回來，避免確認時默默用預設風格生圖。
+ * 讀回這批草稿記錄的賣點圖示風格。風格是在「確認生成」那一刻選的，
+ * 所以正常情況下請求會帶；這裡是後備，給沒帶風格的舊批次用。
  */
 function storedBenefitIconStyle(plan: ImageSetPlanItem[]): BenefitIconStyle | undefined {
   return plan.find(({ benefitIconStyle }) => benefitIconStyle)?.benefitIconStyle;
@@ -516,7 +515,6 @@ export async function planProductImageSet(
     client: ImageSetClient;
     themeKey?: string;
     themeKind?: ImageSetTheme["kind"];
-    benefitIconStyle?: BenefitIconStyle;
   },
   dependencies: PlanProductImageSetDependencies,
 ): Promise<PlanProductImageSetResult> {
@@ -535,13 +533,9 @@ export async function planProductImageSet(
   // 規劃與確認兩階段必須算出同一組項目（確認時會逐項比對 id 與角色），
   // 所以兩邊都用同一個純函式從商品資料推導賣點。
   const benefitPoints = deriveBenefitPoints(request.product.description, profile.useCases);
-  const items = planImageSetRoles({
-    profile,
-    artDirection,
-    theme: theme ?? undefined,
-    benefitPoints,
-    benefitIconStyle: request.benefitIconStyle,
-  }).map(publicPlanItem);
+  // 規劃階段不需要知道賣點圖示風格：planJson 只存 id／角色／用途，不含提示詞，
+  // 而風格只改提示詞。風格留到「確認生成」那一刻再選。
+  const items = planImageSetRoles({ profile, artDirection, theme: theme ?? undefined, benefitPoints }).map(publicPlanItem);
   const batchId = dependencies.createBatchId();
   await dependencies.createDraft({
     id: batchId,
@@ -1259,6 +1253,8 @@ export async function confirmAndScheduleProductImageSet(
     batchId: string;
     selectedItemIds: string[];
     artDirection: unknown;
+    /** 賣點圖示風格在確認這一刻決定；沒帶就沿用草稿裡記的（舊批次或重新確認）。 */
+    benefitIconStyle?: BenefitIconStyle;
     execution: ImageSetExecution;
   },
   dependencies: ConfirmProductImageSetDependencies,
@@ -1299,8 +1295,16 @@ export async function confirmAndScheduleProductImageSet(
   } catch {
     return { ok: false, status: 409, error: "儲存的套圖規劃已失效，請重新規劃。" };
   }
+  // 風格只影響提示詞，不影響 id／角色／子型別，所以下面的比對關卡抓不到風格不符。
+  // 確認時選的才算數，草稿裡記的只是舊批次的後備值。
+  const benefitIconStyle = request.benefitIconStyle ?? storedBenefitIconStyle(storedPlan);
   const selectedIds = new Set(request.selectedItemIds);
-  const selectedPlan = storedPlan.filter(({ id }) => selectedIds.has(id));
+  const selectedPlan = storedPlan
+    .filter(({ id }) => selectedIds.has(id))
+    // 存回這一批實際用到的風格，之後看紀錄才知道這組 icon 是怎麼生的。
+    .map((item) => item.assetSubtype.startsWith("benefit-icon") && benefitIconStyle
+      ? { ...item, benefitIconStyle }
+      : item);
   if (selectedPlan.length !== selectedIds.size) return { ok: false, status: 400, error: "選取清單包含未知素材" };
 
   const theme = draft.themeKey
@@ -1312,7 +1316,7 @@ export async function confirmAndScheduleProductImageSet(
     artDirection,
     theme: theme ?? undefined,
     benefitPoints: deriveBenefitPoints(request.product.description, profile.useCases),
-    benefitIconStyle: storedBenefitIconStyle(storedPlan),
+    benefitIconStyle: benefitIconStyle ?? undefined,
   });
   const specsById = new Map(currentSpecs.map((spec) => [spec.id, spec]));
   const selectedSpecs = selectedPlan.map((item) => {

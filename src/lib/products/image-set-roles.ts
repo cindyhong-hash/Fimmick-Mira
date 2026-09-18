@@ -1,5 +1,5 @@
 import { PROMO_FIXED, TAIWAN_SEASONAL } from "../calendar/tw-calendar.ts";
-import { IMAGE_SET_MAX_ASSETS, type ImageSetCategory, type ImageSetPlanItem } from "./image-set-kit.ts";
+import { DEFAULT_BENEFIT_ICON_STYLE, IMAGE_SET_MAX_ASSETS, type BenefitIconStyle, type ImageSetCategory, type ImageSetPlanItem } from "./image-set-kit.ts";
 import type { ImageSetArtDirection } from "./product-visual-analysis.ts";
 import type { ProductVisualProfile } from "./product-visual-profile.ts";
 import type { BenefitPoint } from "./benefit-points.ts";
@@ -27,6 +27,8 @@ export type PlanImageSetInput = {
   theme?: ImageSetTheme;
   /** 賣點圖示：每個功效點一個 icon。空陣列＝不做這組素材。 */
   benefitPoints?: BenefitPoint[];
+  /** 賣點圖示的視覺路線；一組套圖只用一種，混用會失去成組感。預設無框線稿。 */
+  benefitIconStyle?: BenefitIconStyle;
 };
 export type PlannedImageSetRole = ImageSetRoleSpec & ImageSetPlanItem;
 
@@ -73,7 +75,7 @@ export function resolveImageSetTheme(key?: string, kind?: ImageSetTheme["kind"])
 
 function withPlanMetadata(
   spec: ImageSetRoleSpec,
-  input: { category: ImageSetCategory; assetSubtype: string; purpose: string; core: boolean; themeKey: string },
+  input: { category: ImageSetCategory; assetSubtype: string; purpose: string; core: boolean; themeKey: string; benefitIconStyle?: BenefitIconStyle },
 ): PlannedImageSetRole {
   return {
     ...spec,
@@ -84,6 +86,8 @@ function withPlanMetadata(
     purpose: input.purpose,
     core: input.core,
     defaultSelected: input.core,
+    // 只有賣點圖示帶風格；存進 planJson 後，確認階段才還原得出規劃時選的那一種。
+    ...(input.benefitIconStyle ? { benefitIconStyle: input.benefitIconStyle } : {}),
   };
 }
 
@@ -153,33 +157,83 @@ function coreRoles(profile: ProductVisualProfile, themeKey: string, theme?: Imag
 }
 
 /**
+ * ⚠️ 一致性要靠可執行的數字，不能靠形容詞。
+ *
+ * 每張 icon 是**獨立一次 API 呼叫**，模型看不到同組的其他張，所以
+ * 「請保持風格一致」這種要求本質上不可靠——實測 4 張就有 1 張畫成
+ * 攝影棚商品照，加了圓框之後兩張的圓又大小不一。真正有約束力的是
+ * 寫死的比例：icon 佔畫布多少百分比、線寬佔畫布多少百分比。
+ *
+ * 同理，元素數量要釘死。放任模型自由發揮會得到「皮膚輪廓＋波浪＋星點
+ * ＋葉子＋水滴」五個元素疊在一起，那已經不是 icon 了。
+ */
+const BENEFIT_ICON_SPECS: Record<BenefitIconStyle, (title: string) => Pick<ImageSetRoleSpec, "sceneCn" | "objective" | "composition"> & { mustNotShow: string[] }> = {
+  // 參考 flaticon「Sir.Vector Outline」那類 64px 格線圖示集：沒有外框，
+  // 靠固定線寬與固定佔比成組。單色中性，排版時可以直接換成品牌色，
+  // 所以同一組 icon 能套到任何產品與品牌——這是預設值的理由。
+  plain: (title) => ({
+    sceneCn: `一張扁平向量線稿，純白底，不是照片、不是 3D、不是渲染圖。畫面正中央是一個象徵「${title}」的極簡輪廓圖形，沒有外框。圖形高度佔畫布的 60%，正置中；線條粗細固定為畫布寬度的 3%，端點與轉角都是圓角，整張只有這一種線寬。主體只有一個圖形，最多再加一顆小小的四角星點綴，不能更多。整張圖只有一種線條顏色，中性深灰，沒有填色、沒有陰影、沒有漸層。畫面上沒有文字、沒有商品、沒有情境。`,
+    objective: `Draw one minimal flat vector outline icon for "${title}", in the style of a 64px-grid icon set: no frame, no container. One single pictogram centred on a pure white background, its height exactly 60% of the canvas. Uniform stroke width of 3% of the canvas width with rounded caps and joins, one stroke weight throughout. At most one small four-point sparkle as an accent beyond the main shape. Monochrome dark grey strokes only — no fills, shadows or gradients, so the icon can be recoloured to any brand palette later. This is line art, never a photograph, product shot or 3D render. No lettering of any kind, no product, no scene.`,
+    composition: "單一輪廓圖形置中，高度佔畫布 60%，無外框；固定線寬，四周均勻留白。",
+    mustNotShow: [
+      "任何文字、字母、數字",
+      "任何外框、圓框、方框或容器",
+      "超過一個主體圖形、或一顆以上的星點",
+      "填色色塊、陰影、漸層、立體光澤",
+      "Emoji、卡通角色、吉祥物",
+      "實際商品、瓶罐、包裝、Logo",
+      "情境照、背景場景、人物",
+      "粗細不一的線條",
+    ],
+  }),
+  framed: (title) => ({
+    sceneCn: `一張扁平向量線稿，純白底，不是照片、不是 3D、不是渲染圖。畫面正中央有一個細線條畫的正圓外框，圓的直徑固定為畫布寬度的 70%、正置中——這個比例不能變，整組 icon 的圓要一樣大才能並排。圓框內放一個象徵「${title}」的極簡圖形，圖形高度佔圓直徑的一半，只能有 1 到 2 個元素，寧可太簡單也不要複雜，且完全在圓內、不可碰到或穿出圓框。線條粗細固定為畫布寬度的 2%，端點圓角。除了這個圓框與框內圖形之外，畫面上沒有任何東西：沒有文字、沒有商品、沒有情境、沒有散落的星點。整張只有一種線條顏色，取自品牌點綴色或商品主色。背景整張純白、沒有色塊或漸層。`,
+    objective: `Draw one minimal flat vector line icon for "${title}": a perfect circular frame whose diameter is exactly 70% of the canvas width, centred — this ratio is fixed so every icon in the set lines up. Inside it, a simple pictogram of at most two elements, half the circle's diameter tall, fully contained within the circle and never touching or crossing it. Uniform stroke width of 2% of the canvas width with rounded caps, identical across the set. Pure white background, the exact same flat white on every icon, no tint or gradient. Monochrome line art in a single accent colour. This is line art, never a photograph, product shot or 3D render. No lettering of any kind, no product, no scene, no scattered sparkles or filler decoration.`,
+    composition: "細線正圓框置中、直徑佔畫布 70%，框內 1–2 個元素且不碰框；整組並排時圓框大小一致。",
+    mustNotShow: [
+      "任何文字、字母、數字",
+      "超過兩個元素、或框外散落的星點與裝飾",
+      "圖形穿出或碰到圓框",
+      "Emoji、卡通角色、吉祥物",
+      "立體光澤、陰影、漸層、3D 或擬真渲染",
+      "實際商品、瓶罐、包裝、Logo",
+      "情境照、背景場景、人物",
+      "與同組其他 icon 不同大小的外框或不同粗細的線條",
+    ],
+  }),
+  orb: (title) => ({
+    sceneCn: `一顆半透明的淺藍色光澤圓球，正置中，純白底。球的直徑固定為畫布寬度的 70%——這個比例不能變，整組的球要一樣大才能並排。球體內部放一個象徵「${title}」的白色簡單圖形，高度佔球直徑的一半，只能有 1 到 2 個元素，且完全在球內。光澤反白固定在左上角。球體之外的畫面完全空白：沒有文字、沒有商品、沒有情境、沒有其他裝飾、沒有落地陰影，也沒有任何其他顏色的光暈溢到球外。球體邊緣乾淨，不要爆開的光暈或水花。`,
+    objective: `Render one glossy translucent light-blue sphere, centred on a pure white background, its diameter exactly 70% of the canvas width — this ratio is fixed so every icon in the set lines up. Inside it, a simple white pictogram of at most two elements that stands for "${title}", half the sphere's diameter tall and fully contained within it. Put the specular highlight at the upper left, the same way on every icon. Clean sphere edge: no splash, burst, drop shadow, or glow of any colour spilling outside it — the area around the sphere is plain white and nothing else. No lettering of any kind, no product, no scene, nothing outside the sphere.`,
+    composition: "單一光澤圓球置中、直徑佔畫布 70%，球內 1–2 個白色元素，球外全白無陰影；整組並排時球徑一致。",
+    mustNotShow: [
+      "任何文字、字母、數字",
+      "球體之外的任何元素",
+      "落地陰影、或溢出球外的光暈與色塊",
+      "超過兩個元素、或球內堆疊多個圖形",
+      "實際商品、瓶罐、包裝、Logo",
+      "情境照、背景場景、人物",
+      "與同組其他 icon 不同大小或不同藍色的球體",
+    ],
+  }),
+};
+
+/**
  * 賣點圖示：把賣點整理成「Icon＋短標題」的資訊型素材。
  *
  * 與賣點視覺分工明確——賣點視覺用情境把功效演出來，賣點圖示只負責
- * 「快速說清楚有哪些功效」。所以這裡不要情境照、不要商品照、不要抽象球體。
+ * 「快速說清楚有哪些功效」。所以這裡不要情境照、不要商品照。
  *
  * ⚠️ icon 本身不含文字。短標題存在 label／purpose 裡，排版階段才用真正的
  * 字型渲染——圖像模型畫中文很容易缺筆畫或糊掉（這個專案已經踩過）。
  */
-function benefitIconRoles(points: BenefitPoint[], themeKey: string): PlannedImageSetRole[] {
+function benefitIconRoles(points: BenefitPoint[], themeKey: string, style: BenefitIconStyle): PlannedImageSetRole[] {
   return points.map((point, index) => withPlanMetadata({
     role: "benefit",
     label: `賣點圖示 · ${point.title}`,
     usageDescription: "可獨立使用的功效 Icon",
     path: "text",
     cutout: true,
-    sceneCn: `單一個象徵「${point.title}」的極簡線性 icon，置中、透明或純淨淺色背景。整組 icon 必須是同一套視覺語言：一致的線條粗細、圓角、留白與繁簡程度，看起來像同一位設計師畫的同一個系列。畫面中只有這一個 icon，沒有文字、沒有商品、沒有情境。線條顏色取自品牌點綴色或商品主色，整組維持同一個顏色。`,
-    objective: `Draw one minimal line icon that stands for "${point.title}". Single centred pictogram on a plain removable background. Keep stroke weight, corner radius, padding and level of detail identical across the set so the icons read as one family. No lettering of any kind, no product, no scene, no photographic content.`,
-    composition: "單一 icon 置中，四周均勻留白，可獨立裁切使用也可與同組其他 icon 並排成賣點模組。",
-    mustNotShow: [
-      "任何文字、字母、數字",
-      "Emoji、卡通角色、吉祥物",
-      "複雜 3D 或擬真渲染",
-      "實際商品、瓶罐、包裝、Logo",
-      "情境照、背景場景、人物",
-      "抽象球體、飄帶、光束等沒有語意的裝飾",
-      "與同組其他 icon 不同的線條粗細或風格",
-    ],
+    ...BENEFIT_ICON_SPECS[style](point.title),
   }, {
     category: "benefit",
     assetSubtype: `benefit-icon-${index + 1}`,
@@ -187,6 +241,7 @@ function benefitIconRoles(points: BenefitPoint[], themeKey: string): PlannedImag
     purpose: point.note ? `${point.title}——${point.note}` : point.title,
     core: false,
     themeKey,
+    benefitIconStyle: style,
   }));
 }
 
@@ -238,6 +293,6 @@ export function planImageSetRoles(input: PlanImageSetInput | ProductVisualProfil
   const core = coreRoles(profile, themeKey, theme);
   if (!configurable) return core;
   // 賣點圖示放在核心之後、其他選配之前——它是一整組，優先順序高於單張選配素材。
-  const icons = benefitIconRoles(input.benefitPoints ?? [], themeKey);
+  const icons = benefitIconRoles(input.benefitPoints ?? [], themeKey, input.benefitIconStyle ?? DEFAULT_BENEFIT_ICON_STYLE);
   return [...core, ...icons, ...extraRoles(input, themeKey)].slice(0, IMAGE_SET_MAX_ASSETS);
 }

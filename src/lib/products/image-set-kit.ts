@@ -2,6 +2,22 @@ export type ImageSetKitStatus = "DRAFT" | "CONFIRMED" | "GENERATING" | "COMPLETE
 export type ImageSetCategory = "product" | "texture" | "background" | "benefit" | "decoration";
 export type StoredAssetRole = "hero" | "detail" | "background" | "benefit" | "decoration";
 
+/**
+ * 賣點圖示的視覺路線。定義放在這一層而不是 image-set-roles，因為它必須
+ * 跟著 planJson 一起存下來——規劃時選了哪一種，確認生成時就得用同一種。
+ *
+ * `plain`  無框線稿：中性單色，可跟著品牌色換色，套任何產品都能用（預設）
+ * `framed` 線稿加圓框：DM 上常見的「功效四格」
+ * `orb`    藍色光澤圓球：顏色寫死在圖裡，換品牌就不能用，給特定案子用
+ */
+export type BenefitIconStyle = "plain" | "framed" | "orb";
+export const BENEFIT_ICON_STYLES: readonly BenefitIconStyle[] = ["plain", "framed", "orb"];
+export const DEFAULT_BENEFIT_ICON_STYLE: BenefitIconStyle = "plain";
+
+export function parseBenefitIconStyle(value: unknown): BenefitIconStyle | null {
+  return BENEFIT_ICON_STYLES.includes(value as BenefitIconStyle) ? (value as BenefitIconStyle) : null;
+}
+
 export type ImageSetPlanItem = {
   id: string;
   category: ImageSetCategory;
@@ -10,6 +26,8 @@ export type ImageSetPlanItem = {
   purpose: string;
   core: boolean;
   defaultSelected: boolean;
+  /** 只有賣點圖示會帶；確認階段靠它還原規劃時選的風格。 */
+  benefitIconStyle?: BenefitIconStyle;
 };
 
 export const IMAGE_SET_MAX_ASSETS = 20;
@@ -122,6 +140,15 @@ export function parseImageSetPlanJson(value: string): ImageSetPlanItem[] {
       throw new Error(`套圖計畫第 ${index + 1} 項的選取設定不正確`);
     }
 
+    // 舊批次的 planJson 沒有這個欄位，所以缺少時不算錯；但寫了不認得的值就是錯，
+    // 不能默默退回預設風格——那會讓確認階段生出跟規劃時不同的圖。
+    let benefitIconStyle: BenefitIconStyle | undefined;
+    if (candidate.benefitIconStyle !== undefined) {
+      const style = parseBenefitIconStyle(candidate.benefitIconStyle);
+      if (!style) throw new Error(`套圖計畫第 ${index + 1} 項的賣點圖示風格不支援`);
+      benefitIconStyle = style;
+    }
+
     return {
       id,
       category,
@@ -130,6 +157,7 @@ export function parseImageSetPlanJson(value: string): ImageSetPlanItem[] {
       purpose: requiredString(candidate.purpose, "purpose", index),
       core: candidate.core,
       defaultSelected: candidate.defaultSelected,
+      ...(benefitIconStyle ? { benefitIconStyle } : {}),
     };
   });
 }

@@ -36,6 +36,7 @@ import {
   deriveImageSetKitStatus,
   IMAGE_SET_MAX_ASSETS,
   parseImageSetPlanJson,
+  type BenefitIconStyle,
   type ImageSetPlanItem,
   type ImageSetKitStatus,
 } from "./image-set-kit.ts";
@@ -495,8 +496,17 @@ export type PlanProductImageSetResult =
   | { ok: false; status: 400 | 409; error: string };
 
 function publicPlanItem(role: ReturnType<typeof planImageSetRoles>[number]): ImageSetPlanItem {
-  const { id, category, assetRole, assetSubtype, purpose, core, defaultSelected } = role;
-  return { id, category, assetRole, assetSubtype, purpose, core, defaultSelected };
+  const { id, category, assetRole, assetSubtype, purpose, core, defaultSelected, benefitIconStyle } = role;
+  return { id, category, assetRole, assetSubtype, purpose, core, defaultSelected, ...(benefitIconStyle ? { benefitIconStyle } : {}) };
+}
+
+/**
+ * 確認階段要重算 roles，而風格只影響提示詞、不影響 id／角色／子型別，
+ * 所以比對那一關抓不到風格不符。規劃時選的風格存在 planJson 的賣點圖示項目上，
+ * 這裡把它讀回來，避免確認時默默用預設風格生圖。
+ */
+function storedBenefitIconStyle(plan: ImageSetPlanItem[]): BenefitIconStyle | undefined {
+  return plan.find(({ benefitIconStyle }) => benefitIconStyle)?.benefitIconStyle;
 }
 
 /** Creates a free, immutable planning snapshot from the current cached product analysis. */
@@ -506,6 +516,7 @@ export async function planProductImageSet(
     client: ImageSetClient;
     themeKey?: string;
     themeKind?: ImageSetTheme["kind"];
+    benefitIconStyle?: BenefitIconStyle;
   },
   dependencies: PlanProductImageSetDependencies,
 ): Promise<PlanProductImageSetResult> {
@@ -524,7 +535,13 @@ export async function planProductImageSet(
   // 規劃與確認兩階段必須算出同一組項目（確認時會逐項比對 id 與角色），
   // 所以兩邊都用同一個純函式從商品資料推導賣點。
   const benefitPoints = deriveBenefitPoints(request.product.description, profile.useCases);
-  const items = planImageSetRoles({ profile, artDirection, theme: theme ?? undefined, benefitPoints }).map(publicPlanItem);
+  const items = planImageSetRoles({
+    profile,
+    artDirection,
+    theme: theme ?? undefined,
+    benefitPoints,
+    benefitIconStyle: request.benefitIconStyle,
+  }).map(publicPlanItem);
   const batchId = dependencies.createBatchId();
   await dependencies.createDraft({
     id: batchId,
@@ -1295,6 +1312,7 @@ export async function confirmAndScheduleProductImageSet(
     artDirection,
     theme: theme ?? undefined,
     benefitPoints: deriveBenefitPoints(request.product.description, profile.useCases),
+    benefitIconStyle: storedBenefitIconStyle(storedPlan),
   });
   const specsById = new Map(currentSpecs.map((spec) => [spec.id, spec]));
   const selectedSpecs = selectedPlan.map((item) => {

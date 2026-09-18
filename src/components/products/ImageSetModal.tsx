@@ -3,9 +3,19 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { AlertCircle, CalendarDays, Check, ChevronLeft, Clock3, HelpCircle, Loader2, LockKeyhole, Palette, RefreshCw, Sparkles, X } from "lucide-react";
+import { AlertCircle, CalendarDays, Check, ChevronLeft, Clock3, HelpCircle, Loader2, LockKeyhole, Palette, RefreshCw, Shapes, Sparkles, X } from "lucide-react";
 import type { ImageSetArtDirection, ProductVisualProfile, SetItem } from "@/lib/imageSet";
-import type { ImageSetPlanItem } from "@/lib/products/image-set-kit";
+import { DEFAULT_BENEFIT_ICON_STYLE, type BenefitIconStyle, type ImageSetPlanItem } from "@/lib/products/image-set-kit";
+
+/**
+ * 只有無框線稿與線稿加框是中性單色、可跟著品牌色換色，所以能套到任何產品；
+ * 藍色圓球把顏色畫死在圖裡，換品牌就得重生，說明文字要讓使用者看得出這個差別。
+ */
+const BENEFIT_ICON_STYLE_OPTIONS: { value: BenefitIconStyle; label: string; hint: string }[] = [
+  { value: "plain", label: "線稿（無框）", hint: "單色細線圖形，可換成品牌色，任何產品都能用" },
+  { value: "framed", label: "線稿加圓框", hint: "圖形加一圈細圓框，適合排成功效四格" },
+  { value: "orb", label: "藍色圓球", hint: "立體光澤球，顏色固定為藍色系，換品牌要重生" },
+];
 import type { ImageSetTheme } from "@/lib/products/image-set-roles";
 import { ImageSetDirectionEditor } from "@/components/products/ImageSetDirectionEditor";
 import { ImageSetPlanChecklist } from "@/components/products/ImageSetPlanChecklist";
@@ -99,6 +109,7 @@ export function ImageSetModal({ clientId, productId, onClose, onFinished }: {
   const [needsAnalysis, setNeedsAnalysis] = useState(true);
   const [themes, setThemes] = useState<ImageSetTheme[]>([]);
   const [selectedThemeKey, setSelectedThemeKey] = useState("");
+  const [iconStyle, setIconStyle] = useState<BenefitIconStyle>(DEFAULT_BENEFIT_ICON_STYLE);
   const [maxAssets, setMaxAssets] = useState(20);
   const [draftBatchId, setDraftBatchId] = useState("");
   const [gen, setGen] = useState<GenState[]>([]);
@@ -355,7 +366,10 @@ export function ImageSetModal({ clientId, productId, onClose, onFinished }: {
       const response = await fetch(`/api/products/${productId}/image-set/plan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(theme ? { themeKey: theme.key, themeKind: theme.kind } : {}),
+        body: JSON.stringify({
+          ...(theme ? { themeKey: theme.key, themeKind: theme.kind } : {}),
+          benefitIconStyle: iconStyle,
+        }),
       });
       const data = await response.json().catch(() => ({})) as Partial<PlannedKit> & { error?: string };
       if (!response.ok || !data.batchId || !data.artDirection || !Array.isArray(data.items) || !Array.isArray(data.themes)) {
@@ -501,6 +515,24 @@ export function ImageSetModal({ clientId, productId, onClose, onFinished }: {
                   <optgroup label="促銷檔期">{themes.filter(({ kind }) => kind === "PROMO").map((theme) => <option key={theme.key} value={theme.key}>{theme.label}</option>)}</optgroup>
                   <optgroup label="季節主題">{themes.filter(({ kind }) => kind === "SEASONAL").map((theme) => <option key={theme.key} value={theme.key}>{theme.label}</option>)}</optgroup>
                 </select>
+              </div>
+              <div className="rounded-2xl border border-[#e7ebf1] bg-white p-4 sm:p-5">
+                <div className="flex items-center gap-2"><Shapes className="h-4 w-4 text-violet-600" /><h3 className="text-sm font-bold text-gray-900">賣點圖示風格</h3></div>
+                <p className="mt-1 text-xs leading-5 text-gray-500">只影響「賣點圖示」這組素材，其他素材不受影響。一組套圖只用一種風格，混用會失去成組感。</p>
+                <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                  {BENEFIT_ICON_STYLE_OPTIONS.map(({ value, label, hint }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-pressed={iconStyle === value}
+                      onClick={() => setIconStyle(value)}
+                      className={`rounded-xl border p-3 text-left transition ${iconStyle === value ? "border-violet-400 bg-violet-50/60 ring-2 ring-violet-100" : "border-[#e5e9f0] bg-white hover:bg-gray-50"}`}
+                    >
+                      <span className="block text-sm font-bold text-gray-800">{label}</span>
+                      <span className="mt-1 block text-[11px] leading-4 text-gray-500">{hint}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
               {error && <ErrorMessage>{error}</ErrorMessage>}
               <div className="flex flex-col items-center pt-1"><button type="button" onClick={() => void createPlan()} disabled={!profile || !themes.length} className="inline-flex items-center justify-center gap-2 rounded-full bg-violet-600 px-10 py-3.5 text-sm font-bold text-white shadow-[0_8px_8px_rgba(124,58,237,0.15)] hover:bg-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-[#F8F9FB] disabled:text-[#868D99] disabled:shadow-none sm:px-14"><Sparkles className="h-[18px] w-[18px]" />建立建議清單</button></div>

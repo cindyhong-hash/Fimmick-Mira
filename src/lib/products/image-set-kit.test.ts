@@ -71,6 +71,23 @@ test("rejects duplicate IDs, unknown roles, and blank subtype or purpose", () =>
   assert.throws(() => parseImageSetPlanJson(JSON.stringify([item({ purpose: "" })])), /purpose/);
 });
 
+test("carries the benefit icon style through planJson so confirm can restore it", () => {
+  // 風格只影響提示詞，不影響 id／角色／子型別，所以確認階段的比對關卡抓不到
+  // 風格不符。唯一的還原來源就是這個欄位——它必須完整存進去也讀得回來。
+  const withStyle = item({ id: "benefit-icon-1", category: "benefit", assetRole: "benefit", benefitIconStyle: "orb" });
+  assert.deepEqual(parseImageSetPlanJson(JSON.stringify([withStyle])), [withStyle]);
+
+  // 舊批次沒有這個欄位，不能當成壞資料。
+  const legacy = item({ id: "benefit-icon-1", category: "benefit", assetRole: "benefit" });
+  assert.deepEqual(parseImageSetPlanJson(JSON.stringify([legacy])), [legacy]);
+
+  // 但認不得的值要炸，不能默默退回預設——那會生出跟規劃時不同風格的圖。
+  assert.throws(
+    () => parseImageSetPlanJson(JSON.stringify([{ ...withStyle, benefitIconStyle: "sketch" }])),
+    /賣點圖示風格/,
+  );
+});
+
 test("rejects plans above the server asset limit", () => {
   const oversized = Array.from({ length: IMAGE_SET_MAX_ASSETS + 1 }, (_, index) => item({ id: `asset-${index}` }));
   assert.throws(() => parseImageSetPlanJson(JSON.stringify(oversized)), new RegExp(String(IMAGE_SET_MAX_ASSETS)));

@@ -195,6 +195,7 @@ const BENEFIT_ICON_SPECS: Record<BenefitIconStyle, (concept: string) => Pick<Ima
       "超過一個主體圖形、或一顆以上的星點",
       "填色色塊、陰影、漸層、立體光澤",
       "Emoji、卡通角色、吉祥物",
+      "只有抽象幾何、波浪色塊或膠囊形狀，看不出在講什麼",
       "實際商品、瓶罐、包裝、Logo",
       "情境照、背景場景、人物",
       "粗細不一的線條",
@@ -209,6 +210,7 @@ const BENEFIT_ICON_SPECS: Record<BenefitIconStyle, (concept: string) => Pick<Ima
       "超過兩個元素、或框外散落的星點與裝飾",
       "圖形穿出或碰到圓框",
       "Emoji、卡通角色、吉祥物",
+      "只有抽象幾何、波浪色塊或膠囊形狀，看不出在講什麼",
       "立體光澤、陰影、漸層、3D 或擬真渲染",
       "實際商品、瓶罐、包裝、Logo",
       "情境照、背景場景、人物",
@@ -225,6 +227,7 @@ const BENEFIT_ICON_SPECS: Record<BenefitIconStyle, (concept: string) => Pick<Ima
       "漸層、光澤、立體陰影、3D 或擬真渲染",
       "線條輪廓風格（這一組是面狀填色）",
       "Emoji、卡通角色、吉祥物",
+      "只有抽象幾何、波浪色塊或膠囊形狀，看不出在講什麼",
       "實際商品、瓶罐、包裝、Logo",
       "情境照、背景場景、人物",
       "與同組其他 icon 不同大小或不同色調的圖形",
@@ -246,6 +249,12 @@ const BENEFIT_ICON_SPECS: Record<BenefitIconStyle, (concept: string) => Pick<Ima
  * 就是「圖裡不能有字」——中文交給排版階段用字型渲染，影像模型畫中文會缺筆畫。
  * 實測過的失敗長相：標籤上出現「元亮」「歲㤉憦栃」這種亂碼。
  */
+/**
+ * 造型辨識度優先於裝飾感。實測失敗的那幾張都很漂亮，但看不出在畫什麼——
+ * 使用者不看下方文字就該猜得出這張在講什麼，這是這組素材存在的理由。
+ */
+const BENEFIT_ICON_READABILITY = "The drawing must read at a glance: someone who cannot see the caption should still be able to tell what is happening. Show the action, not just a mood — if the subject is skin or hair, draw a clearly recognisable contour of it and make the effect visible on it. Never fall back on abstract geometry, wavy colour bands or capsule blobs to stand in for the idea.";
+
 const BENEFIT_ICON_TEXT_BAN = "Icon only. No text, no letters, no numbers, no words, no typography, no watermark, no signature, no measurement marks. A single isolated object on a clean, empty background, suitable for dropping into an advertising layout.";
 
 function benefitIconRoles(points: BenefitPoint[], themeKey: string, style: BenefitIconStyle): PlannedImageSetRole[] {
@@ -262,7 +271,7 @@ function benefitIconRoles(points: BenefitPoint[], themeKey: string, style: Benef
       // 這條路回傳 JPG，拿不到透明底；底色靠提示詞釘死成純白。
       cutout: false,
       ...spec,
-      objective: `${spec.objective} ${BENEFIT_ICON_TEXT_BAN}`,
+      objective: `${spec.objective} ${BENEFIT_ICON_READABILITY} ${BENEFIT_ICON_TEXT_BAN}`,
     }, {
       category: "benefit",
       assetSubtype: `benefit-icon-${index + 1}`,

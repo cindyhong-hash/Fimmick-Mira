@@ -113,6 +113,71 @@ export function deriveBenefitPoints(
 const MAX_TITLE_FOR_LLM = 8;
 const MAX_DESCRIPTION_FOR_LLM = 16;
 
+/**
+ * icon 看不懂的原因不是畫得差，是「要畫什麼」講得太籠統。
+ *
+ * 實測：a cozy bathroom setting with soft towels 畫出看不懂的藍色罐子、
+ * smooth skin with gentle waves 畫出藍色膠囊。問題不在出現「肌膚」，而在
+ * 整句話只有氛圍、沒有「發生什麼事」——模型沒有東西可畫，只好畫色塊。
+ *
+ * 所以改成三段式：畫誰（subject）、正在發生什麼（action）、看得到的結果
+ * （result）。「溫和去角質」拆成 skin on a leg ／ gently lifting away ／
+ * small dead skin particles，模型就知道要畫顆粒被帶離肌膚，而不是自由聯想。
+ */
+export type BenefitIconBrief = { subject: string; action: string; result: string };
+
+const ICON_CONCEPT_RULES = [
+  "2. 每個賣點要拆成三段，全部用英文，只能有純英文字母與空格：",
+  "   subject：畫面主體，具體看得到的東西。肌膚、腿部、毛髮、水滴、葉子、手都可以（skin on a leg / a strand of hair / a water droplet）。",
+  "   action：正在發生的動作，要畫得出來（gently lifting away / soaking into / smoothing down）。",
+  "   result：動作造成的、看得見的結果（small dead skin particles / a soft highlight / a smooth curve）。",
+  "   三段合起來必須讓人不看文字也猜得出在講什麼。只有氛圍或性質（cozy, comfort, experience,",
+  "   quality, feeling, atmosphere）不是主體，也不是結果，不要拿來填。",
+  "   每一段只放一個東西，整張 icon 最多兩個核心元素。",
+].join("\n");
+
+/** 三段合成一句 icon 指示。合成放在同一個地方，規劃與重新想圖才會產出一樣的句子。 */
+export function composeIconConcept(brief: BenefitIconBrief): string {
+  const subject = brief.subject.trim();
+  const action = brief.action.trim();
+  const result = brief.result.trim();
+  if (!subject) return "";
+  const tail = [action, result].filter(Boolean).join(" ");
+  return (tail ? `${subject}, ${tail}` : subject).slice(0, 160);
+}
+
+/**
+ * 模型不一定照規則走，所以描述本身也要驗。這些字沒有固定形狀，畫成極簡圖示
+ * 一定是色塊——與其生一張看不懂的圖，不如不生這一張。
+ */
+/**
+ * 只擋真正沒有形狀的字。肌膚、毛髮、腿這些是合法主體——問題從來不是它們出現，
+ * 而是整句話只有它們、沒有正在發生的事。
+ */
+const UNDRAWABLE_WORDS = [
+  "setting", "scene", "room", "bathroom", "background", "atmosphere", "ambience",
+  "experience", "feeling", "comfort", "cozy", "quality", "essence", "vibe", "concept",
+];
+
+/** @returns 這段描述能不能畫成看得懂的 icon。 */
+export function isDrawableIconConcept(concept: string): boolean {
+  const words = concept.toLowerCase().match(/[a-z]+/g) ?? [];
+  return words.length > 0 && !words.some((word) => UNDRAWABLE_WORDS.includes(word));
+}
+
+/**
+ * 從模型回來的一筆資料讀出三段式 icon 指示並合成。
+ *
+ * 任何一段夾帶中文就整筆作廢——這一段會原封不動進生圖提示詞，中文會被畫成
+ * 圖上的字。沒有主體、或整句只剩氛圍字，也一樣作廢：那種描述生出來是色塊。
+ */
+function readIconConcept(candidate: Record<string, unknown>): string {
+  const part = (key: string) => typeof candidate[key] === "string" ? (candidate[key] as string).trim() : "";
+  const concept = composeIconConcept({ subject: part("subject"), action: part("action"), result: part("result") });
+  if (!concept || !/^[\x20-\x7E]+$/.test(concept)) return "";
+  return isDrawableIconConcept(concept) ? concept : "";
+}
+
 export function buildBenefitPointsPrompt(product: {
   name: string;
   category?: string | null;
@@ -129,11 +194,12 @@ export function buildBenefitPointsPrompt(product: {
     "1. 每個賣點必須是不同面向。若兩個賣點在講同一件事（例如「酵素角質護理」與「帶走老廢角質」都在講去角質），只保留一個，換成其他面向（使用時機、膚觸結果、適用部位、搭配用途等）。",
     `2. title 為 ${MAX_TITLE_FOR_LLM} 個中文字以內的短標題，直接寫出賣點本身，不要標點。`,
     `3. description 為 ${MAX_DESCRIPTION_FOR_LLM} 個中文字以內的補充說明，不要重複 title 的字。`,
-    "4. iconConcept 用英文描述這個賣點要畫成什麼圖形，只能有純英文字母與空格，不要出現中文、品牌名、產品名或任何要寫進畫面的字詞。描述具體的物件，例如 two overlapping water droplets、a feather touching smooth skin。",
+    "4. 同時給出這個賣點要畫成什麼，不要出現中文、品牌名、產品名。",
+    ICON_CONCEPT_RULES,
     "5. 只能使用商品資料裡有的資訊，不要自行發明功效或成分。",
     "6. 只輸出 JSON 陣列，不要有其他文字或 markdown 標記。",
     "",
-    '格式：[{"title":"溫和去角質","description":"酵素帶走老廢角質","iconConcept":"a soft brush sweeping over skin"}]',
+    '格式：[{"title":"溫和去角質","description":"酵素帶走老廢角質","subject":"skin on a leg","action":"gently lifting away","result":"small dead skin particles"}]',
   ].filter(Boolean).join("\n");
 }
 
@@ -164,11 +230,9 @@ export function parseBenefitPointsJson(raw: string | null | undefined): BenefitP
     const fullDescription = typeof candidate.description === "string" ? candidate.description.trim() : "";
     // 只是複述標題的說明沒有資訊；要在截斷前比，否則長標題截短後就比不出來了。
     const description = fullDescription === fullTitle ? "" : fullDescription.slice(0, MAX_DESCRIPTION_FOR_LLM);
-    // iconConcept 進得了生圖提示詞，所以只收純 ASCII：夾帶中文的話，
-    // 模型就會把那幾個字畫進圖裡。可疑就整筆丟掉。
-    const concept = typeof candidate.iconConcept === "string" ? candidate.iconConcept.trim() : "";
-    if (!concept || !/^[\x20-\x7E]+$/.test(concept)) continue;
-    points.push({ title, description, iconConcept: concept.slice(0, 120) });
+    const concept = readIconConcept(candidate);
+    if (!concept) continue;
+    points.push({ title, description, iconConcept: concept });
     if (points.length >= MAX_POINTS) break;
   }
   return points.length >= MIN_POINTS ? points : [];
@@ -211,12 +275,11 @@ export function buildIconConceptPrompt(titles: string[]): string {
     ...titles.map((title, index) => `${index + 1}. ${title}`),
     "",
     "規則：",
-    "1. 用英文描述具體的物件或畫面，只能有純英文字母與空格，例如 two overlapping water droplets。",
-    "2. 不要出現中文、品牌名、產品名，也不要描述任何要寫進畫面的文字。",
-    "3. 描述要簡單到可以用幾條線畫出來，最多兩個元素。",
-    "4. 只輸出 JSON 陣列，順序與上面的編號一致，不要有其他文字或 markdown 標記。",
+    "1. 用英文寫，只能有純英文字母與空格，不要出現中文、品牌名、產品名。",
+    ICON_CONCEPT_RULES,
+    "3. 只輸出 JSON 陣列，順序與上面的編號一致，不要有其他文字或 markdown 標記。",
     "",
-    '格式：[{"index":1,"iconConcept":"two overlapping water droplets"}]',
+    '格式：[{"index":1,"subject":"a water droplet","action":"soaking into","result":"a smooth skin curve"}]',
   ].join("\n");
 }
 
@@ -236,11 +299,10 @@ export function parseIconConceptsJson(raw: string | null | undefined, count: num
     if (!entry || typeof entry !== "object") continue;
     const candidate = entry as Record<string, unknown>;
     const index = typeof candidate.index === "number" ? candidate.index : Number.NaN;
-    const concept = typeof candidate.iconConcept === "string" ? candidate.iconConcept.trim() : "";
-    // 跟賣點整理同一條底線：夾帶中文的描述會被畫成圖上的字，不要。
     if (!Number.isInteger(index) || index < 1 || index > count) continue;
-    if (!concept || !/^[\x20-\x7E]+$/.test(concept)) continue;
-    concepts[index - 1] = concept.slice(0, 120);
+    const concept = readIconConcept(candidate);
+    if (!concept) continue;
+    concepts[index - 1] = concept;
   }
   return concepts;
 }

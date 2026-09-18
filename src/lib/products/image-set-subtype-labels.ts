@@ -77,6 +77,10 @@ export function imageSetSubtypeLabel(assetSubtype: string | null | undefined): I
   const key = assetSubtype?.trim() ?? "";
   const known = LABELS[key];
   if (known) return known;
+  // 賣點圖示是一組（benefit-icon-1、-2…），共用同一個顯示名稱。
+  // description 留空，讓清單與看板改顯示該筆的 purpose——那裡放的是
+  // 這個 icon 對應的賣點標題，使用者才分得出哪個是哪個。
+  if (/^benefit-icon-\d+$/.test(key)) return { zh: "賣點圖示", en: "Benefit Icon", description: "" };
   const readable = key ? key.replaceAll("-", " ") : "視覺素材";
   return { zh: readable, en: "", description: "" };
 }

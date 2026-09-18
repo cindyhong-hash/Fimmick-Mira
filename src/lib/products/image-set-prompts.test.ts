@@ -269,3 +269,37 @@ test("benefit / decoration / background each state what they are not, so the mod
   // 情境背景＝放商品的空間，檯面淨空
   assert.match(promptFor("background"), /完全淨空|什麼都沒有放/);
 });
+
+test("benefit icons are one-per-point, text-free, transparent, and visually consistent", () => {
+  const points = [
+    { title: "酵素角質護理", note: "" },
+    { title: "帶走老廢角質", note: "" },
+    { title: "肌膚更細緻", note: "" },
+  ];
+  const roles = planImageSetRoles({ profile: skincareProfile, artDirection, benefitPoints: points });
+  const icons = roles.filter(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"));
+
+  // 每個賣點一張，可以單獨選取與使用。
+  assert.equal(icons.length, points.length);
+  assert.deepEqual(icons.map(({ assetSubtype }) => assetSubtype), ["benefit-icon-1", "benefit-icon-2", "benefit-icon-3"]);
+  // 透明底，方便後續排版。
+  assert.ok(icons.every(({ cutout }) => cutout));
+  // 預設不勾選——它是一整組，會一次加 3–5 張付費圖片。
+  assert.ok(icons.every(({ core }) => !core));
+
+  const prompt = compileImageSetPrompt({ product, profile: skincareProfile, artDirection, role: icons[0] });
+  assert.match(prompt, /酵素角質護理/);
+  // icon 本身不能有字：中文交給排版階段用字型渲染，不讓圖像模型畫。
+  assert.match(prompt, /No lettering of any kind/i);
+  assert.match(prompt, /任何文字、字母、數字/);
+  // 整組風格要一致。
+  assert.match(prompt, /stroke weight, corner radius, padding and level of detail identical/i);
+  // 不要變成情境照或抽象裝飾——那是另外兩個角色的工作。
+  assert.match(prompt, /情境照、背景場景、人物/);
+  assert.match(prompt, /Emoji、卡通角色/);
+});
+
+test("no benefit points means no icon roles at all", () => {
+  const roles = planImageSetRoles({ profile: skincareProfile, artDirection, benefitPoints: [] });
+  assert.equal(roles.filter(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon")).length, 0);
+});

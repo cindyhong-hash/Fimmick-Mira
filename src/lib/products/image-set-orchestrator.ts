@@ -31,6 +31,7 @@ import {
   type ImageSetRoleSpec,
   type ImageSetTheme,
 } from "./image-set-roles.ts";
+import { deriveBenefitPoints } from "./benefit-points.ts";
 import {
   deriveImageSetKitStatus,
   IMAGE_SET_MAX_ASSETS,
@@ -520,7 +521,10 @@ export async function planProductImageSet(
   }
   const buildDirection = dependencies.buildArtDirection ?? buildImageSetArtDirection;
   const artDirection = buildDirection(profile, imageSetBrand(request.client, request.product.primaryColorOverride), theme);
-  const items = planImageSetRoles({ profile, artDirection, theme: theme ?? undefined }).map(publicPlanItem);
+  // 規劃與確認兩階段必須算出同一組項目（確認時會逐項比對 id 與角色），
+  // 所以兩邊都用同一個純函式從商品資料推導賣點。
+  const benefitPoints = deriveBenefitPoints(request.product.description, profile.useCases);
+  const items = planImageSetRoles({ profile, artDirection, theme: theme ?? undefined, benefitPoints }).map(publicPlanItem);
   const batchId = dependencies.createBatchId();
   await dependencies.createDraft({
     id: batchId,
@@ -1286,7 +1290,12 @@ export async function confirmAndScheduleProductImageSet(
     ? imageSetThemeCatalog().find(({ key, label }) => key === draft.themeKey && label === draft.themeLabel) ?? null
     : null;
   if (draft.themeKey && !theme) return { ok: false, status: 409, error: "儲存的套圖主題已失效，請重新規劃。" };
-  const currentSpecs = planImageSetRoles({ profile, artDirection, theme: theme ?? undefined });
+  const currentSpecs = planImageSetRoles({
+    profile,
+    artDirection,
+    theme: theme ?? undefined,
+    benefitPoints: deriveBenefitPoints(request.product.description, profile.useCases),
+  });
   const specsById = new Map(currentSpecs.map((spec) => [spec.id, spec]));
   const selectedSpecs = selectedPlan.map((item) => {
     const spec = specsById.get(item.id);

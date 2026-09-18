@@ -2,6 +2,7 @@ import { PROMO_FIXED, TAIWAN_SEASONAL } from "../calendar/tw-calendar.ts";
 import { IMAGE_SET_MAX_ASSETS, type ImageSetCategory, type ImageSetPlanItem } from "./image-set-kit.ts";
 import type { ImageSetArtDirection } from "./product-visual-analysis.ts";
 import type { ProductVisualProfile } from "./product-visual-profile.ts";
+import type { BenefitPoint } from "./benefit-points.ts";
 
 // lifestyle stays accepted for rows created by previous versions. New batches use benefit instead.
 export type ImageSetRole = "hero" | "detail" | "lifestyle" | "background" | "benefit" | "decoration";
@@ -20,7 +21,13 @@ export type ImageSetRoleSpec = {
 };
 
 export type ImageSetTheme = { key: string; label: string; kind: "PROMO" | "SEASONAL" };
-export type PlanImageSetInput = { profile: ProductVisualProfile; artDirection: ImageSetArtDirection; theme?: ImageSetTheme };
+export type PlanImageSetInput = {
+  profile: ProductVisualProfile;
+  artDirection: ImageSetArtDirection;
+  theme?: ImageSetTheme;
+  /** 賣點圖示：每個功效點一個 icon。空陣列＝不做這組素材。 */
+  benefitPoints?: BenefitPoint[];
+};
 export type PlannedImageSetRole = ImageSetRoleSpec & ImageSetPlanItem;
 
 function first(values: string[]): string | null {
@@ -145,6 +152,44 @@ function coreRoles(profile: ProductVisualProfile, themeKey: string, theme?: Imag
   ];
 }
 
+/**
+ * 賣點圖示：把賣點整理成「Icon＋短標題」的資訊型素材。
+ *
+ * 與賣點視覺分工明確——賣點視覺用情境把功效演出來，賣點圖示只負責
+ * 「快速說清楚有哪些功效」。所以這裡不要情境照、不要商品照、不要抽象球體。
+ *
+ * ⚠️ icon 本身不含文字。短標題存在 label／purpose 裡，排版階段才用真正的
+ * 字型渲染——圖像模型畫中文很容易缺筆畫或糊掉（這個專案已經踩過）。
+ */
+function benefitIconRoles(points: BenefitPoint[], themeKey: string): PlannedImageSetRole[] {
+  return points.map((point, index) => withPlanMetadata({
+    role: "benefit",
+    label: `賣點圖示 · ${point.title}`,
+    usageDescription: "可獨立使用的功效 Icon",
+    path: "text",
+    cutout: true,
+    sceneCn: `單一個象徵「${point.title}」的極簡線性 icon，置中、透明或純淨淺色背景。整組 icon 必須是同一套視覺語言：一致的線條粗細、圓角、留白與繁簡程度，看起來像同一位設計師畫的同一個系列。畫面中只有這一個 icon，沒有文字、沒有商品、沒有情境。線條顏色取自品牌點綴色或商品主色，整組維持同一個顏色。`,
+    objective: `Draw one minimal line icon that stands for "${point.title}". Single centred pictogram on a plain removable background. Keep stroke weight, corner radius, padding and level of detail identical across the set so the icons read as one family. No lettering of any kind, no product, no scene, no photographic content.`,
+    composition: "單一 icon 置中，四周均勻留白，可獨立裁切使用也可與同組其他 icon 並排成賣點模組。",
+    mustNotShow: [
+      "任何文字、字母、數字",
+      "Emoji、卡通角色、吉祥物",
+      "複雜 3D 或擬真渲染",
+      "實際商品、瓶罐、包裝、Logo",
+      "情境照、背景場景、人物",
+      "抽象球體、飄帶、光束等沒有語意的裝飾",
+      "與同組其他 icon 不同的線條粗細或風格",
+    ],
+  }, {
+    category: "benefit",
+    assetSubtype: `benefit-icon-${index + 1}`,
+    // purpose 會顯示在清單與看板上，讓使用者知道每個 icon 對應哪個賣點。
+    purpose: point.note ? `${point.title}——${point.note}` : point.title,
+    core: false,
+    themeKey,
+  }));
+}
+
 function extraRoles(input: PlanImageSetInput, themeKey: string): PlannedImageSetRole[] {
   const { artDirection, theme } = input;
   const extras: PlannedImageSetRole[] = [
@@ -192,5 +237,7 @@ export function planImageSetRoles(input: PlanImageSetInput | ProductVisualProfil
   const themeKey = normalizedKey(theme?.key ?? "evergreen");
   const core = coreRoles(profile, themeKey, theme);
   if (!configurable) return core;
-  return [...core, ...extraRoles(input, themeKey)].slice(0, IMAGE_SET_MAX_ASSETS);
+  // 賣點圖示放在核心之後、其他選配之前——它是一整組，優先順序高於單張選配素材。
+  const icons = benefitIconRoles(input.benefitPoints ?? [], themeKey);
+  return [...core, ...icons, ...extraRoles(input, themeKey)].slice(0, IMAGE_SET_MAX_ASSETS);
 }

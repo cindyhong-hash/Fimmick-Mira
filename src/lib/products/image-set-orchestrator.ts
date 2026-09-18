@@ -31,7 +31,7 @@ import {
   type ImageSetRoleSpec,
   type ImageSetTheme,
 } from "./image-set-roles.ts";
-import { deriveBenefitPoints, deriveIconConcepts, extractBenefitPoints, type BenefitPoint } from "./benefit-points.ts";
+import { deriveBenefitPoints, deriveIconConcepts, extractBenefitPoints, iconConceptSubject, type BenefitPoint } from "./benefit-points.ts";
 import { chatTextOpenRouter } from "../openrouter.ts";
 import {
   deriveImageSetKitStatus,
@@ -574,7 +574,15 @@ async function refreshEditedIconConcepts(
     selectedIds.has(item.id) && item.assetSubtype.startsWith("benefit-icon") && item.benefitTitle && !item.benefitIconConcept);
   if (!missing.length) return { ok: true, plan };
 
-  const concepts = await deriveIconConcepts(missing.map(({ benefitTitle }) => benefitTitle as string), chat);
+  // 沿用這一組已經在用的主體，補畫的那張才會跟其他張成套。
+  const existingSubject = iconConceptSubject(
+    plan.find(({ benefitIconConcept }) => benefitIconConcept)?.benefitIconConcept ?? "",
+  );
+  const concepts = await deriveIconConcepts(
+    missing.map(({ benefitTitle }) => benefitTitle as string),
+    chat,
+    existingSubject,
+  );
   const filled = new Map(missing.map((item, index) => [item.id, concepts[index] ?? ""]));
   const stillMissing = missing.filter(({ id }) => !filled.get(id));
   if (stillMissing.length) {

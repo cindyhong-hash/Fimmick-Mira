@@ -306,9 +306,9 @@ test("a plan made today can be confirmed: everything confirm needs survives plan
     createBatchId: () => "kit-roundtrip",
     createDraft: async (data) => { draft = { planJson: data.planJson, artDirectionJson: data.artDirectionJson }; },
     chatText: async () => JSON.stringify([
-      { title: "溫和去角質", description: "帶走老廢角質", subject: "skin on a leg", hint: "gently lifting away small dead skin particles" },
-      { title: "除毛前準備", description: "肌膚前置保養", subject: "a water droplet", hint: "soaking into a smooth curve" },
-      { title: "柔嫩平滑肌膚", description: "提升細緻滑順感", subject: "a feather", hint: "brushing a soft highlight" },
+      { title: "溫和去角質", description: "帶走老廢角質", subject: "a leg", hint: "a few small particles" },
+      { title: "除毛前準備", description: "肌膚前置保養", subject: "a leg", hint: "a water droplet" },
+      { title: "柔嫩平滑肌膚", description: "提升細緻滑順感", subject: "a leg", hint: "a feather" },
     ]),
   });
   assert.equal(planned.ok, true);
@@ -355,7 +355,7 @@ test("editing a benefit title redraws the icon instead of keeping the old pictur
     rawImageUrls: JSON.stringify(imageProduct.rawImageUrls),
   };
   const points = deriveBenefitPoints(storedProduct.description, profile.useCases)
-    .map((point) => ({ ...point, iconConcept: "a soft brush sweeping over skin" }));
+    .map((point) => ({ ...point, iconConcept: "a leg with a soft brush" }));
   const planned = planImageSetRoles({ profile, artDirection, benefitPoints: points });
   const icon = planned.find(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"))!;
 
@@ -374,7 +374,7 @@ test("editing a benefit title redraws the icon instead of keeping the old pictur
       id: "kit-retitled", productId: "product-1", status: "DRAFT", themeKey: null, themeLabel: null,
       artDirectionJson: JSON.stringify(artDirection), planJson: JSON.stringify(planned),
     }),
-    chatText: async (prompt) => { askedFor = prompt; return '[{"index":1,"subject":"two water droplets","hint":"soaking into a smooth curve"}]'; },
+    chatText: async (prompt) => { askedFor = prompt; return '[{"index":1,"subject":"a leg","hint":"two water droplets"}]'; },
     claimProductLease: async () => true,
     releaseProductLease: async () => true,
     persistConfirmedBatch: async (data) => { persisted = data as unknown as Record<string, unknown>; return [{ id: "row-1" }]; },
@@ -387,13 +387,13 @@ test("editing a benefit title redraws the icon instead of keeping the old pictur
   assert.equal(result.ok, true, result.ok ? "" : result.error);
   assert.match(askedFor, /保濕/, "沒有拿改過的標題去重新想圖");
   const rows = persisted?.rows as Array<Record<string, unknown>>;
-  assert.match(String(rows[0].prompt), /two water droplets with soaking into a smooth curve/, "還在用舊的圖示描述");
-  assert.doesNotMatch(String(rows[0].prompt), /dead skin particles/, "舊描述沒有被換掉");
+  assert.match(String(rows[0].prompt), /a leg with two water droplets/, "還在用舊的圖示描述");
+  assert.doesNotMatch(String(rows[0].prompt), /a few small particles/, "舊描述沒有被換掉");
   // 中文一樣不能進提示詞。
   assert.doesNotMatch(String(rows[0].prompt), /保濕/);
   // 新描述要存回批次，之後重新生成同一張才畫得出一樣的東西。
   const savedPlan = JSON.parse(String(persisted?.planJson)) as Array<Record<string, unknown>>;
-  assert.equal(savedPlan[0].benefitIconConcept, "two water droplets with soaking into a smooth curve");
+  assert.equal(savedPlan[0].benefitIconConcept, "a leg with two water droplets");
   assert.equal(savedPlan[0].benefitTitle, "保濕");
 });
 
@@ -406,7 +406,7 @@ test("if no icon idea comes back for an edited title, the paid run is blocked an
     rawImageUrls: JSON.stringify(imageProduct.rawImageUrls),
   };
   const points = deriveBenefitPoints(storedProduct.description, profile.useCases)
-    .map((point) => ({ ...point, iconConcept: "a soft brush sweeping over skin" }));
+    .map((point) => ({ ...point, iconConcept: "a leg with a soft brush" }));
   const planned = planImageSetRoles({ profile, artDirection, benefitPoints: points });
   const icon = planned.find(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"))!;
 
@@ -473,7 +473,7 @@ test("an old draft with no icon idea heals itself instead of making the user reb
       id: "kit-legacy", productId: "product-1", status: "DRAFT", themeKey: null, themeLabel: null,
       artDirectionJson: JSON.stringify(artDirection), planJson: JSON.stringify(legacyPlan),
     }),
-    chatText: async () => '[{"index":1,"subject":"a soft brush","hint":"sweeping over a skin curve"}]',
+    chatText: async () => '[{"index":1,"subject":"a leg","hint":"a soft brush"}]',
     claimProductLease: async () => true,
     releaseProductLease: async () => true,
     persistConfirmedBatch: async (data) => { persisted = data as unknown as Record<string, unknown>; return [{ id: "row-1" }]; },
@@ -485,7 +485,7 @@ test("an old draft with no icon idea heals itself instead of making the user reb
 
   assert.equal(result.ok, true, result.ok ? "" : result.error);
   const rows = persisted?.rows as Array<Record<string, unknown>>;
-  assert.match(String(rows[0].prompt), /a soft brush with sweeping over a skin curve/);
+  assert.match(String(rows[0].prompt), /a leg with a soft brush/);
   assert.doesNotMatch(String(rows[0].prompt), /酵素角質護理/, "中文標題不能進提示詞");
 });
 

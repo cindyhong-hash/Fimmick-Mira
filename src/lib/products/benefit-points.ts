@@ -129,9 +129,11 @@ export type BenefitIconBrief = { subject: string; hint: string };
 const ICON_CONCEPT_RULES = [
   "2. 每個賣點只拆成兩段，全部用英文，只能有純英文字母與空格：",
   "   subject：唯一的主體，只能是身體部位或自然元素——a leg / a hand / a strand of hair / a water droplet / a leaf。",
-  "   hint：一個輔助元素，用來說明正在發生什麼。要具體、畫得出來，而且只有一個。",
-  "   例子：去角質 → subject: a leg，hint: a few small particles lifting away",
-  "        肌膚柔嫩 → subject: a leg，hint: a hand stroking it",
+  "   ⚠️ 整組賣點必須共用同一個 subject（這支商品用哪個部位，全部就都用那個），只換 hint。",
+  "   hint：一個輔助元素，必須是「看得見的東西」，寫成名詞片語，要以 a / an / the / two / a few 這類詞開頭。",
+  "   不可以寫成動作（applying cream / gliding smoothly / lifting away）——動作沒有形狀，會被畫成一團色塊。",
+  "   例子：去角質 → subject: a leg，hint: a few small particles",
+  "        肌膚柔嫩 → subject: a leg，hint: a hand",
   "        除毛    → subject: a leg，hint: a simple razor",
   "   整張 icon 只會有這兩個元素，不要再多。",
   "   subject 不可以是商品或器皿（bottle, jar, tube, tube of cream, packaging），也不可以是場景、",
@@ -139,12 +141,29 @@ const ICON_CONCEPT_RULES = [
   "   subject 與 hint 都不可以是抽象性質或表情（comfort, quality, experience, expression, feeling, mood）。",
 ].join("\n");
 
+/**
+ * hint 必須是名詞片語。實測模型填過 `gently applying cream onto skin`，那是動作，
+ * 沒有形狀，結果畫成一團看不懂的黃色色塊。名詞片語才有東西可畫。
+ */
+const NOUN_PHRASE_START = /^(a|an|the|one|two|three|four|five|some|several|a few|a pair of)\b/i;
+
+export function isNounPhrase(hint: string): boolean {
+  return NOUN_PHRASE_START.test(hint.trim());
+}
+
 /** 兩段合成一句 icon 指示。合成放在同一個地方，規劃與重新想圖才會產出一樣的句子。 */
 export function composeIconConcept(brief: BenefitIconBrief): string {
   const subject = brief.subject.trim();
   const hint = brief.hint.trim();
   if (!subject) return "";
-  return (hint ? `${subject} with ${hint}` : subject).slice(0, 140);
+  // hint 不是名詞片語就當它不存在，只畫主體——總比畫出一團沒有形狀的東西好。
+  const usable = hint && isNounPhrase(hint) ? hint : "";
+  return (usable ? `${subject} with ${usable}` : subject).slice(0, 140);
+}
+
+/** 讀回一句指示裡的主體，讓同一組後續補的 icon 沿用同一個主體。 */
+export function iconConceptSubject(concept: string): string {
+  return concept.split(" with ")[0]?.trim() ?? "";
 }
 
 /**
@@ -241,7 +260,23 @@ export function parseBenefitPointsJson(raw: string | null | undefined): BenefitP
     points.push({ title, description, iconConcept: concept });
     if (points.length >= MAX_POINTS) break;
   }
-  return points.length >= MIN_POINTS ? points : [];
+  return points.length >= MIN_POINTS ? withSharedSubject(points) : [];
+}
+
+/**
+ * 整組 icon 共用同一個主體。
+ *
+ * 提示詞已經要求了，但那是「請保持一致」那一類的要求，實測還是會跑掉——
+ * 三張裡兩張畫腿、一張畫手，並排就不成套。主體改由程式統一：取第一個賣點的
+ * 主體，其餘全部換成它，只保留各自的輔助元素。
+ */
+function withSharedSubject(points: BenefitPoint[]): BenefitPoint[] {
+  const shared = iconConceptSubject(points[0]?.iconConcept ?? "");
+  if (!shared) return points;
+  return points.map((point) => {
+    const hint = point.iconConcept.split(" with ").slice(1).join(" with ").trim();
+    return { ...point, iconConcept: composeIconConcept({ subject: shared, hint }) };
+  });
 }
 
 /**
@@ -274,9 +309,10 @@ export async function extractBenefitPoints(
  *
  * 一次問完所有改過的標題，不要一個標題打一次 LLM。
  */
-export function buildIconConceptPrompt(titles: string[]): string {
+export function buildIconConceptPrompt(titles: string[], sharedSubject = ""): string {
   return [
     "以下每一行是一個產品賣點。請為每一個賣點想一個適合畫成極簡圖示的畫面。",
+    sharedSubject ? `這一組 icon 的主體固定是 ${sharedSubject}，subject 請一律填這個，只換 hint。` : "",
     "",
     ...titles.map((title, index) => `${index + 1}. ${title}`),
     "",
@@ -317,11 +353,18 @@ export function parseIconConceptsJson(raw: string | null | undefined, count: num
 export async function deriveIconConcepts(
   titles: string[],
   chat: (prompt: string) => Promise<string | null>,
+  /** 這一組已經在用的主體；補畫時沿用它，不然新的那張會跟其他張不成套。 */
+  sharedSubject = "",
 ): Promise<string[]> {
   if (!titles.length) return [];
   try {
-    const concepts = parseIconConceptsJson(await chat(buildIconConceptPrompt(titles)), titles.length);
-    return titles.map((_, index) => concepts[index] ?? "");
+    const concepts = parseIconConceptsJson(await chat(buildIconConceptPrompt(titles, sharedSubject)), titles.length);
+    return titles.map((_, index) => {
+      const concept = concepts[index] ?? "";
+      if (!concept || !sharedSubject) return concept;
+      const hint = concept.split(" with ").slice(1).join(" with ").trim();
+      return composeIconConcept({ subject: sharedSubject, hint });
+    });
   } catch {
     return titles.map(() => "");
   }

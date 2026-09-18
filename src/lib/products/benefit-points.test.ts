@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildBenefitPointsPrompt, buildIconConceptPrompt, composeIconConcept, deriveBenefitPoints, extractBenefitPoints, isDrawableIconConcept, parseBenefitPointsJson } from "./benefit-points.ts";
+import { buildBenefitPointsPrompt, buildIconConceptPrompt, composeIconConcept, deriveIconConcepts, iconConceptSubject, isNounPhrase, deriveBenefitPoints, extractBenefitPoints, isDrawableIconConcept, parseBenefitPointsJson } from "./benefit-points.ts";
 
 const realDescription = "賣點： 酵素角質護理，除毛前柔嫩肌膚、帶走老廢角質，讓刮毛更加滑順。\n定位： 專為除毛前打造的肌膚前導保養，提升居家除毛的細緻度與舒適感。";
 
@@ -52,11 +52,11 @@ test("the extraction prompt carries the product facts and the no-overlap rule", 
 test("model output is validated, not trusted: length, duplicates and count are all enforced", () => {
   // 包在說明文字與 markdown 裡也要挖得出來。
   assert.deepEqual(
-    parseBenefitPointsJson('好的，以下是結果：\n```json\n[{"title":"溫和去角質","description":"酵素帶走老廢角質","subject":"a soft brush","hint":""},{"title":"除毛前準備","description":"幫助肌膚做好前置保養","subject":"a water droplet","hint":""},{"title":"柔嫩平滑肌膚","description":"提升細緻滑順感","subject":"a feather","hint":""}]\n```'),
+    parseBenefitPointsJson('好的，以下是結果：\n```json\n[{"title":"溫和去角質","description":"酵素帶走老廢角質","subject":"a leg","hint":"a soft brush"},{"title":"除毛前準備","description":"幫助肌膚做好前置保養","subject":"a leg","hint":"a water droplet"},{"title":"柔嫩平滑肌膚","description":"提升細緻滑順感","subject":"a leg","hint":"a feather"}]\n```'),
     [
-      { title: "溫和去角質", description: "酵素帶走老廢角質", iconConcept: "a soft brush" },
-      { title: "除毛前準備", description: "幫助肌膚做好前置保養", iconConcept: "a water droplet" },
-      { title: "柔嫩平滑肌膚", description: "提升細緻滑順感", iconConcept: "a feather" },
+      { title: "溫和去角質", description: "酵素帶走老廢角質", iconConcept: "a leg with a soft brush" },
+      { title: "除毛前準備", description: "幫助肌膚做好前置保養", iconConcept: "a leg with a water droplet" },
+      { title: "柔嫩平滑肌膚", description: "提升細緻滑順感", iconConcept: "a leg with a feather" },
     ],
   );
 
@@ -136,8 +136,13 @@ test("an undrawable concept is dropped rather than generated as a mush of colour
     [],
   );
   // 混合時只留畫得出來的那些（不足 3 個仍視為不可用，維持原規則）。
-  const mixed = parseBenefitPointsJson('[{"title":"保濕","subject":"a water droplet","hint":""},{"title":"清潔","subject":"a soap bar","hint":""},{"title":"柔嫩","subject":"a feather","hint":""},{"title":"舒適","subject":"a cozy room setting","hint":""}]');
-  assert.deepEqual(mixed.map(({ iconConcept }) => iconConcept), ["a water droplet", "a soap bar", "a feather"]);
+  // 主體統一之後，區別留在輔助元素上；畫不出來的那一筆整個不收。
+  const mixed = parseBenefitPointsJson('[{"title":"保濕","subject":"a leg","hint":"a water droplet"},{"title":"清潔","subject":"a leg","hint":"a soap bar"},{"title":"柔嫩","subject":"a leg","hint":"a feather"},{"title":"舒適","subject":"a cozy room setting","hint":"a towel"}]');
+  assert.deepEqual(mixed.map(({ iconConcept }) => iconConcept), [
+    "a leg with a water droplet",
+    "a leg with a soap bar",
+    "a leg with a feather",
+  ]);
 });
 
 test("the icon idea prompt asks for the three parts and names what is not a subject", () => {
@@ -151,4 +156,55 @@ test("the icon idea prompt asks for the three parts and names what is not a subj
   assert.match(prompt, /a leg/);
   // 氛圍字不是主體。
   assert.match(prompt, /comfort/);
+});
+
+test("a hint must be a visible thing, not an action", () => {
+  // 實測模型填過 gently applying cream onto skin——那是動作，沒有形狀，
+  // 畫出來是一團看不懂的黃色色塊。名詞片語才有東西可畫。
+  assert.equal(isNounPhrase("a few small particles"), true);
+  assert.equal(isNounPhrase("a simple razor"), true);
+  assert.equal(isNounPhrase("two water droplets"), true);
+  assert.equal(isNounPhrase("gently applying cream onto skin"), false);
+  assert.equal(isNounPhrase("gliding smoothly"), false);
+
+  // 不是名詞片語就當它不存在，只畫主體——總比畫出沒有形狀的東西好。
+  assert.equal(
+    composeIconConcept({ subject: "a leg", hint: "gently applying cream onto skin" }),
+    "a leg",
+  );
+  assert.equal(
+    composeIconConcept({ subject: "a leg", hint: "a simple razor" }),
+    "a leg with a simple razor",
+  );
+});
+
+test("every icon in a set shares one subject so they read as a family", () => {
+  // 提示詞已經要求共用主體，但那是「請保持一致」那一類的要求，實測還是跑掉：
+  // 三張裡兩張畫腿、一張畫手，並排就不成套。主體改由程式統一。
+  const points = parseBenefitPointsJson(JSON.stringify([
+    { title: "溫和去角質", subject: "a leg", hint: "a few small particles" },
+    { title: "刮毛滑順", subject: "a leg", hint: "a simple razor" },
+    { title: "除毛前護理", subject: "a hand", hint: "a water droplet" },
+  ]));
+  assert.deepEqual(points.map(({ iconConcept }) => iconConcept), [
+    "a leg with a few small particles",
+    "a leg with a simple razor",
+    // 主體被統一成第一個賣點的「腿」，只留下它自己的輔助元素。
+    "a leg with a water droplet",
+  ]);
+  assert.equal(iconConceptSubject("a leg with a simple razor"), "a leg");
+});
+
+test("an icon added later reuses the subject the set is already using", async () => {
+  const concepts = await deriveIconConcepts(
+    ["保濕"],
+    async (prompt) => {
+      // 主體要寫進提示詞，模型才知道不能自由發揮。
+      assert.match(prompt, /主體固定是 a leg/);
+      return '[{"index":1,"subject":"a hand","hint":"a water droplet"}]';
+    },
+    "a leg",
+  );
+  // 就算模型回了別的主體，也會被換回這一組在用的那個。
+  assert.deepEqual(concepts, ["a leg with a water droplet"]);
 });

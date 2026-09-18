@@ -14,8 +14,8 @@ git log --oneline mine/main..HEAD    # 未推的
 ```
 
 **目前主要工作區**：`.worktrees/release-kit`（分支 `release/visual-asset-kit`）
-**未推**：1 個 commit — `d8193e7 feat: 新增素材類型「賣點圖示」`
-**正式站**：`mine/main` = `318d836`
+**未推**：0 個（本地與 `mine/main` 完全同步）
+**正式站**：`mine/main` = `1ba8f21`
 
 ⚠️ `mine` 這個 remote 才是正式站（`cindyhong-hash/Fimmick-Mira`）。
 `origin` 是別人的舊 repo，**不要推到 origin**。
@@ -126,9 +126,9 @@ npx next build                      # EXIT 0
 
 ---
 
-## 6. 未推的那一個 commit
+## 6. 賣點圖示（已上線，但沒人看過）
 
-`d8193e7` **賣點圖示（Benefit Icons）** — 新素材類型，與賣點視覺分工。
+`d8193e7` **賣點圖示（Benefit Icons）** — 新素材類型，與賣點視覺分工。**已推上正式站。**
 
 - 賣點視覺＝用情境演出功效；賣點圖示＝把賣點整理成 Icon 資訊模組
 - **icon 不含文字**：中文交給排版階段用字型渲染。理由是圖像模型畫中文會缺筆畫
@@ -138,7 +138,8 @@ npx next build                      # EXIT 0
   ——規劃與確認兩階段必須算出同一組，純函式才穩定
 - 實測這支商品得到：酵素角質護理／除毛前柔嫩肌膚／帶走老廢角質／刮毛更加滑順
 
-**待辦**：使用者尚未決定要不要推；也還沒實際生成驗證 icon 風格一致性（4 張成本）。
+**待辦**：⚠️ 已經在正式站上，但**從來沒有實際生成驗證過** icon 風格一致性（這支商品 4 個賣點 = 4 張成本）。
+特別要看的是「icon 不含中文」這個前提有沒有守住——模型若自己硬塞中文字，整個設計前提就垮了。
 
 ---
 
@@ -150,7 +151,7 @@ npx next build                      # EXIT 0
 | 🟡 | 公司站部署權限未穩定 |
 | 🟡 | 決定何時把使用者從 x5hn 切到 fimmick-mira（換網域＝所有人重輸密碼，只該換一次） |
 | 🟡 | **提示詞改動全部只有測試驗證，沒有實際生成驗證**。使用者要自己花錢生才知道效果 |
-| 🟡 | Codex 分支 `codex/ad-layout-composition-plan` 落後 main 32 個 commit，要繼續開發得先 merge main |
+| 🟡 | Codex 分支 `codex/ad-layout-composition-plan` 落後 main 34 個 commit，要繼續開發得先 merge main |
 | 🟡 | 本機 dev 若不設 `SITE_PASSWORD`，付費端點**完全無認證**（`site-gate.ts:50` 開發環境直接放行）。曾發生過「沒人按確認卻收到 8 張 generation POST」 |
 | ⚪ | 素材背景有 AI 亂碼文字（「Eaodr Shavts」），一直沒處理 |
 | ⚪ | lint 全 repo 還有 34 個既有 error，刻意不改 |

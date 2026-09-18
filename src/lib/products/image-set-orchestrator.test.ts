@@ -240,7 +240,10 @@ test("the benefit icon style is chosen at confirm time, drives the prompt, and i
     visualProfileSourceHash: computeProductVisualSourceHash(imageProduct),
     rawImageUrls: JSON.stringify(imageProduct.rawImageUrls),
   };
-  const benefitPoints = deriveBenefitPoints(storedProduct.description, profile.useCases);
+  // 規則拆解給不出英文視覺描述，而沒有描述就不做 icon（中文標題不能進提示詞），
+  // 所以這裡補上 LLM 那一段會給的 iconConcept。
+  const benefitPoints = deriveBenefitPoints(storedProduct.description, profile.useCases)
+    .map((point, index) => ({ ...point, iconConcept: `a simple pictogram number ${index + 1}` }));
   // 草稿是用預設風格建的（那份提示詞不會被採用，planJson 只存 id／角色／用途），
   // 真正算數的是確認那一刻選的風格。
   const planned = planImageSetRoles({ profile, artDirection, benefitPoints });

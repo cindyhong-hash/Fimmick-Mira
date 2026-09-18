@@ -84,6 +84,7 @@ function withPlanMetadata(
     benefitIconStyle?: BenefitIconStyle;
     benefitTitle?: string;
     benefitDescription?: string;
+    benefitIconConcept?: string;
   },
 ): PlannedImageSetRole {
   return {
@@ -100,6 +101,7 @@ function withPlanMetadata(
     ...(input.benefitIconStyle ? { benefitIconStyle: input.benefitIconStyle } : {}),
     ...(input.benefitTitle ? { benefitTitle: input.benefitTitle } : {}),
     ...(input.benefitDescription ? { benefitDescription: input.benefitDescription } : {}),
+    ...(input.benefitIconConcept ? { benefitIconConcept: input.benefitIconConcept } : {}),
   };
 }
 
@@ -179,13 +181,13 @@ function coreRoles(profile: ProductVisualProfile, themeKey: string, theme?: Imag
  * 同理，元素數量要釘死。放任模型自由發揮會得到「皮膚輪廓＋波浪＋星點
  * ＋葉子＋水滴」五個元素疊在一起，那已經不是 icon 了。
  */
-const BENEFIT_ICON_SPECS: Record<BenefitIconStyle, (title: string) => Pick<ImageSetRoleSpec, "sceneCn" | "objective" | "composition"> & { mustNotShow: string[] }> = {
+const BENEFIT_ICON_SPECS: Record<BenefitIconStyle, (concept: string) => Pick<ImageSetRoleSpec, "sceneCn" | "objective" | "composition"> & { mustNotShow: string[] }> = {
   // 參考 flaticon「Sir.Vector Outline」那類 64px 格線圖示集：沒有外框，
   // 靠固定線寬與固定佔比成組。單色中性，排版時可以直接換成品牌色，
   // 所以同一組 icon 能套到任何產品與品牌——這是預設值的理由。
-  plain: (title) => ({
-    sceneCn: `一張扁平向量線稿，純白底，不是照片、不是 3D、不是渲染圖。畫面正中央是一個象徵「${title}」的極簡輪廓圖形，沒有外框。圖形高度佔畫布的 60%，正置中；線條粗細固定為畫布寬度的 3%，端點與轉角都是圓角，整張只有這一種線寬。主體只有一個圖形，最多再加一顆小小的四角星點綴，不能更多。整張圖只有一種線條顏色，中性深灰，沒有填色、沒有陰影、沒有漸層。畫面上沒有文字、沒有商品、沒有情境。`,
-    objective: `Draw one minimal flat vector outline icon for "${title}", in the style of a 64px-grid icon set: no frame, no container. One single pictogram centred on a pure white background, its height exactly 60% of the canvas. Uniform stroke width of 3% of the canvas width with rounded caps and joins, one stroke weight throughout. At most one small four-point sparkle as an accent beyond the main shape. Monochrome dark grey strokes only — no fills, shadows or gradients, so the icon can be recoloured to any brand palette later. This is line art, never a photograph, product shot or 3D render. No lettering of any kind, no product, no scene.`,
+  plain: (concept) => ({
+    sceneCn: `一張扁平向量線稿，純白底，不是照片、不是 3D、不是渲染圖。畫面正中央是一個描繪 ${concept} 的極簡輪廓圖形，沒有外框。圖形高度佔畫布的 60%，正置中；線條粗細固定為畫布寬度的 3%，端點與轉角都是圓角，整張只有這一種線寬。主體只有一個圖形，最多再加一顆小小的四角星點綴，不能更多。整張圖只有一種線條顏色，中性深灰，沒有填色、沒有陰影、沒有漸層。畫面上沒有文字、沒有商品、沒有情境。`,
+    objective: `Draw one minimal flat vector outline icon of ${concept}: no frame, no container, drawn with the even stroke weight of a professional icon set. One single pictogram centred on a pure white background, its height exactly 60% of the canvas. Uniform stroke width of 3% of the canvas width with rounded caps and joins, one stroke weight throughout. At most one small four-point sparkle as an accent beyond the main shape. Monochrome dark grey strokes only — no fills, shadows or gradients, so the icon can be recoloured to any brand palette later. This is line art, never a photograph, product shot or 3D render. No lettering of any kind, no product, no scene.`,
     composition: "單一輪廓圖形置中，高度佔畫布 60%，無外框；固定線寬，四周均勻留白。",
     mustNotShow: [
       "任何文字、字母、數字",
@@ -198,9 +200,9 @@ const BENEFIT_ICON_SPECS: Record<BenefitIconStyle, (title: string) => Pick<Image
       "粗細不一的線條",
     ],
   }),
-  framed: (title) => ({
-    sceneCn: `一張扁平向量線稿，純白底，不是照片、不是 3D、不是渲染圖。畫面正中央有一個細線條畫的正圓外框，圓的直徑固定為畫布寬度的 70%、正置中——這個比例不能變，整組 icon 的圓要一樣大才能並排。圓框內放一個象徵「${title}」的極簡圖形，圖形高度佔圓直徑的一半，只能有 1 到 2 個元素，寧可太簡單也不要複雜，且完全在圓內、不可碰到或穿出圓框。線條粗細固定為畫布寬度的 2%，端點圓角。除了這個圓框與框內圖形之外，畫面上沒有任何東西：沒有文字、沒有商品、沒有情境、沒有散落的星點。整張只有一種線條顏色，取自品牌點綴色或商品主色。背景整張純白、沒有色塊或漸層。`,
-    objective: `Draw one minimal flat vector line icon for "${title}": a perfect circular frame whose diameter is exactly 70% of the canvas width, centred — this ratio is fixed so every icon in the set lines up. Inside it, a simple pictogram of at most two elements, half the circle's diameter tall, fully contained within the circle and never touching or crossing it. Uniform stroke width of 2% of the canvas width with rounded caps, identical across the set. Pure white background, the exact same flat white on every icon, no tint or gradient. Monochrome line art in a single accent colour. This is line art, never a photograph, product shot or 3D render. No lettering of any kind, no product, no scene, no scattered sparkles or filler decoration.`,
+  framed: (concept) => ({
+    sceneCn: `一張扁平向量線稿，純白底，不是照片、不是 3D、不是渲染圖。畫面正中央有一個細線條畫的正圓外框，圓的直徑固定為畫布寬度的 70%、正置中——這個比例不能變，整組 icon 的圓要一樣大才能並排。圓框內放一個描繪 ${concept} 的極簡圖形，圖形高度佔圓直徑的一半，只能有 1 到 2 個元素，寧可太簡單也不要複雜，且完全在圓內、不可碰到或穿出圓框。線條粗細固定為畫布寬度的 2%，端點圓角。除了這個圓框與框內圖形之外，畫面上沒有任何東西：沒有文字、沒有商品、沒有情境、沒有散落的星點。整張只有一種線條顏色，取自品牌點綴色或商品主色。背景整張純白、沒有色塊或漸層。`,
+    objective: `Draw one minimal flat vector line icon of ${concept}: a perfect circular frame whose diameter is exactly 70% of the canvas width, centred — this ratio is fixed so every icon in the set lines up. Inside it, a simple pictogram of at most two elements, half the circle's diameter tall, fully contained within the circle and never touching or crossing it. Uniform stroke width of 2% of the canvas width with rounded caps, identical across the set. Pure white background, the exact same flat white on every icon, no tint or gradient. Monochrome line art in a single accent colour. This is line art, never a photograph, product shot or 3D render. No lettering of any kind, no product, no scene, no scattered sparkles or filler decoration.`,
     composition: "細線正圓框置中、直徑佔畫布 70%，框內 1–2 個元素且不碰框；整組並排時圓框大小一致。",
     mustNotShow: [
       "任何文字、字母、數字",
@@ -213,9 +215,9 @@ const BENEFIT_ICON_SPECS: Record<BenefitIconStyle, (title: string) => Pick<Image
       "與同組其他 icon 不同大小的外框或不同粗細的線條",
     ],
   }),
-  soft: (title) => ({
-    sceneCn: `一張扁平向量圖示，純白底，不是照片、不是 3D、不是渲染圖。畫面正中央是一個象徵「${title}」的極簡圖形，用柔和的面狀色塊畫成（不是線條輪廓），色塊邊緣是圓潤的幾何形狀。圖形高度佔畫布的 60%，正置中。只能有 1 到 2 個色塊元素，寧可太簡單也不要複雜。整組只用同一組柔和色調，取自品牌點綴色或商品主色，深淺層次最多兩階。畫面上沒有文字、沒有商品、沒有情境、沒有陰影、沒有漸層光澤。`,
-    objective: `Draw one minimal flat vector icon for "${title}" built from soft filled colour shapes rather than outlines. One pictogram centred on a pure white background, its height exactly 60% of the canvas, made of at most two rounded geometric shapes. Use a single soft palette drawn from the brand colours with at most two tonal steps, identical across the set so the icons read as one family. Flat fills only — no gradients, gloss, drop shadows or 3D shading. No lettering of any kind, no product, no scene.`,
+  soft: (concept) => ({
+    sceneCn: `一張扁平向量圖示，純白底，不是照片、不是 3D、不是渲染圖。畫面正中央是一個描繪 ${concept} 的極簡圖形，用柔和的面狀色塊畫成（不是線條輪廓），色塊邊緣是圓潤的幾何形狀。圖形高度佔畫布的 60%，正置中。只能有 1 到 2 個色塊元素，寧可太簡單也不要複雜。整組只用同一組柔和色調，取自品牌點綴色或商品主色，深淺層次最多兩階。畫面上沒有文字、沒有商品、沒有情境、沒有陰影、沒有漸層光澤。`,
+    objective: `Draw one minimal flat vector icon of ${concept} built from soft filled colour shapes rather than outlines. One pictogram centred on a pure white background, its height exactly 60% of the canvas, made of at most two rounded geometric shapes. Use a single soft palette drawn from the brand colours with at most two tonal steps, identical across the set so the icons read as one family. Flat fills only — no gradients, gloss, drop shadows or 3D shading. No lettering of any kind, no product, no scene.`,
     composition: "單一面狀色塊圖形置中，高度佔畫布 60%，四周均勻留白；整組並排時大小與色調一致。",
     mustNotShow: [
       "任何文字、字母、數字",
@@ -247,8 +249,10 @@ const BENEFIT_ICON_SPECS: Record<BenefitIconStyle, (title: string) => Pick<Image
 const BENEFIT_ICON_TEXT_BAN = "Icon only. No text, no letters, no numbers, no words, no typography, no watermark, no signature, no measurement marks. A single isolated object on a clean, empty background, suitable for dropping into an advertising layout.";
 
 function benefitIconRoles(points: BenefitPoint[], themeKey: string, style: BenefitIconStyle): PlannedImageSetRole[] {
-  return points.map((point, index) => {
-    const spec = BENEFIT_ICON_SPECS[style](point.title);
+  // 沒有英文視覺描述就不做這張。中文標題絕對不能進提示詞——實測模型會把
+  // 那幾個字直接畫進圖裡（「雙重保濕」被畫了兩次），寧可少一張也不要生出有字的圖。
+  return points.filter(({ iconConcept }) => iconConcept.trim()).map((point, index) => {
+    const spec = BENEFIT_ICON_SPECS[style](point.iconConcept.trim());
     return withPlanMetadata({
       role: "benefit",
       // 主標題直接是賣點名稱——四張都叫「賣點圖示」的話，要往下讀小字才分得出誰是誰。
@@ -269,6 +273,7 @@ function benefitIconRoles(points: BenefitPoint[], themeKey: string, style: Benef
       benefitIconStyle: style,
       benefitTitle: point.title,
       benefitDescription: point.description,
+      benefitIconConcept: point.iconConcept.trim(),
     });
   });
 }

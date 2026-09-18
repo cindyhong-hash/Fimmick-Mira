@@ -23,7 +23,7 @@ export async function GET(request: Request, { params }: {
     const plan = parseImageSetPlanJson(kit.planJson);
     const artDirection = parseImageSetArtDirection(JSON.parse(kit.artDirectionJson));
     if (!artDirection) throw new Error("invalid art direction");
-    const assets = normalizeImageSetKitAssets(productId, batchId, rows);
+    const assets = normalizeImageSetKitAssets(productId, batchId, rows, plan);
     const terminalStatus = assets.length && !assets.some(({ status }) => status === "PENDING" || status === "GENERATING")
       ? deriveImageSetKitStatus(assets.map(({ status }) => status as "PENDING" | "GENERATING" | "DONE" | "FAILED"))
       : kit.status;

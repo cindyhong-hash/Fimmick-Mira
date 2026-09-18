@@ -272,9 +272,9 @@ test("benefit / decoration / background each state what they are not, so the mod
 
 test("benefit icons are one-per-point, text-free, flat white, and visually consistent", () => {
   const points = [
-    { title: "酵素角質護理", description: "" },
-    { title: "帶走老廢角質", description: "" },
-    { title: "肌膚更細緻", description: "" },
+    { title: "酵素角質護理", description: "", iconConcept: "a simple pictogram for xxxxxx" },
+    { title: "帶走老廢角質", description: "", iconConcept: "a simple pictogram for xxxxxx" },
+    { title: "肌膚更細緻", description: "", iconConcept: "a simple pictogram for xxxxx" },
   ];
   const roles = planImageSetRoles({ profile: skincareProfile, artDirection, benefitPoints: points, benefitIconStyle: "framed" });
   const icons = roles.filter(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"));
@@ -289,7 +289,10 @@ test("benefit icons are one-per-point, text-free, flat white, and visually consi
   assert.ok(icons.every(({ core }) => !core));
 
   const prompt = compileImageSetPrompt({ product, profile: skincareProfile, artDirection, role: icons[0] });
-  assert.match(prompt, /酵素角質護理/);
+  // 提示詞只放英文視覺描述。中文標題送進去會被模型直接畫在圖上（實測踩過）。
+  assert.doesNotMatch(prompt, /酵素角質護理/);
+  assert.match(prompt, new RegExp(points[0].iconConcept));
+  assert.equal(icons[0].benefitTitle, "酵素角質護理");
   // icon 本身不能有字：中文交給排版階段用字型渲染，不讓圖像模型畫。
   assert.match(prompt, /No lettering of any kind/i);
   assert.match(prompt, /任何文字、字母、數字/);
@@ -305,7 +308,7 @@ test("benefit icons are one-per-point, text-free, flat white, and visually consi
 });
 
 test("the soft icon style swaps the visual language but keeps every benefit-icon guarantee", () => {
-  const points = [{ title: "酵素角質護理", description: "" }, { title: "帶走老廢角質", description: "" }, { title: "肌膚更細緻", description: "" }];
+  const points = [{ title: "酵素角質護理", description: "", iconConcept: "a simple pictogram for xxxxxx" }, { title: "帶走老廢角質", description: "", iconConcept: "a simple pictogram for xxxxxx" }, { title: "肌膚更細緻", description: "", iconConcept: "a simple pictogram for xxxxx" }];
   const roles = planImageSetRoles({ profile: skincareProfile, artDirection, benefitPoints: points, benefitIconStyle: "soft" });
   const icons = roles.filter(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"));
   assert.equal(icons.length, points.length);
@@ -325,7 +328,7 @@ test("the soft icon style swaps the visual language but keeps every benefit-icon
 });
 
 test("benefit icons default to the frameless plain style, which is the recolourable one", () => {
-  const points = [{ title: "酵素角質護理", description: "" }, { title: "帶走老廢角質", description: "" }, { title: "肌膚更細緻", description: "" }];
+  const points = [{ title: "酵素角質護理", description: "", iconConcept: "a simple pictogram for xxxxxx" }, { title: "帶走老廢角質", description: "", iconConcept: "a simple pictogram for xxxxxx" }, { title: "肌膚更細緻", description: "", iconConcept: "a simple pictogram for xxxxx" }];
   const roles = planImageSetRoles({ profile: skincareProfile, artDirection, benefitPoints: points });
   const icons = roles.filter(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"));
   assert.ok(icons.length);
@@ -343,11 +346,50 @@ test("benefit icons default to the frameless plain style, which is the recoloura
   assert.match(prompt, /3% of the canvas width/i);
 });
 
+test("no benefit icon prompt contains the Chinese benefit wording, only the english concept", () => {
+  // 實測踩過：提示詞裡寫 Draw one icon for "雙重保濕"，模型就把那四個字畫進圖裡，
+  // 上下各一次。後面補再多「no text」也沒用——這個專案早就驗過否定指令對文字
+  // 生圖無效。中文只留在資料裡給排版階段渲染，提示詞一律只用英文視覺描述。
+  const points = [
+    { title: "雙重保濕", description: "鎖住肌膚水分", iconConcept: "two overlapping water droplets" },
+    { title: "溫和去角質", description: "帶走老廢角質", iconConcept: "a soft brush sweeping over skin" },
+    { title: "柔嫩平滑肌膚", description: "提升細緻滑順感", iconConcept: "a feather touching smooth skin" },
+  ];
+  for (const style of ["plain", "framed", "soft"] as const) {
+    const roles = planImageSetRoles({ profile: skincareProfile, artDirection, benefitPoints: points, benefitIconStyle: style });
+    const icons = roles.filter(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"));
+    assert.equal(icons.length, points.length, `${style} 少做了 icon`);
+    for (const [index, icon] of icons.entries()) {
+      const prompt = compileImageSetPrompt({ product, profile: skincareProfile, artDirection, role: icon });
+      assert.doesNotMatch(prompt, new RegExp(points[index].title), `${style} 把中文標題送進了提示詞`);
+      assert.doesNotMatch(prompt, new RegExp(points[index].description), `${style} 把中文說明送進了提示詞`);
+      assert.match(prompt, new RegExp(points[index].iconConcept), `${style} 沒有使用英文視覺描述`);
+      // 「64px-grid icon set」這個說法讓模型畫出方格紙背景。
+      assert.doesNotMatch(prompt, /\bgrid\b/i, `${style} 提示詞含有 grid，會被畫成方格紙`);
+    }
+    // 中文標題仍要留在資料裡——排版階段要用字型渲染它。
+    assert.deepEqual(icons.map(({ benefitTitle }) => benefitTitle), points.map(({ title }) => title));
+  }
+});
+
+test("a benefit point without an english concept makes no icon at all", () => {
+  // 規則拆解只有中文，給不出英文描述。與其把中文送進提示詞，不如不做這張。
+  const points = [
+    { title: "雙重保濕", description: "", iconConcept: "" },
+    { title: "溫和去角質", description: "", iconConcept: "" },
+    { title: "柔嫩平滑肌膚", description: "", iconConcept: "a feather touching smooth skin" },
+  ];
+  const roles = planImageSetRoles({ profile: skincareProfile, artDirection, benefitPoints: points });
+  const icons = roles.filter(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"));
+  assert.equal(icons.length, 1);
+  assert.equal(icons[0].benefitTitle, "柔嫩平滑肌膚");
+});
+
 test("no benefit icon prompt contains a raw hex colour code", () => {
   // 這個專案已經踩過：色碼送進生圖提示詞，模型會把字串本身當畫面文字描上去，
   // 而賣點圖示的整個設計前提就是「圖上不能有字」。既有的 hex 斷言只看核心角色，
   // 所以三種 icon 風格要各自再擋一次。
-  const points = [{ title: "酵素角質護理", description: "" }, { title: "帶走老廢角質", description: "" }, { title: "肌膚更細緻", description: "" }];
+  const points = [{ title: "酵素角質護理", description: "", iconConcept: "a simple pictogram for xxxxxx" }, { title: "帶走老廢角質", description: "", iconConcept: "a simple pictogram for xxxxxx" }, { title: "肌膚更細緻", description: "", iconConcept: "a simple pictogram for xxxxx" }];
   for (const style of ["plain", "framed", "soft"] as const) {
     const roles = planImageSetRoles({ profile: skincareProfile, artDirection, benefitPoints: points, benefitIconStyle: style });
     for (const icon of roles.filter(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"))) {
@@ -358,7 +400,7 @@ test("no benefit icon prompt contains a raw hex colour code", () => {
 });
 
 test("every benefit icon style pins the size ratio, because 'keep it consistent' does not survive separate calls", () => {
-  const points = [{ title: "酵素角質護理", description: "" }, { title: "帶走老廢角質", description: "" }, { title: "肌膚更細緻", description: "" }];
+  const points = [{ title: "酵素角質護理", description: "", iconConcept: "a simple pictogram for xxxxxx" }, { title: "帶走老廢角質", description: "", iconConcept: "a simple pictogram for xxxxxx" }, { title: "肌膚更細緻", description: "", iconConcept: "a simple pictogram for xxxxx" }];
   for (const style of ["plain", "framed", "soft"] as const) {
     const roles = planImageSetRoles({ profile: skincareProfile, artDirection, benefitPoints: points, benefitIconStyle: style });
     const icons = roles.filter(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"));

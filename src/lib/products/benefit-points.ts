@@ -16,6 +16,15 @@ export type BenefitPoint = {
   title: string;
   /** 8–16 字補充說明，可空 */
   description: string;
+  /**
+   * 這個賣點要畫成什麼圖形，英文純 ASCII，例如 "two overlapping water droplets"。
+   *
+   * ⚠️ 生圖提示詞只能用這個欄位，不能放中文標題。實測把中文標題放進提示詞，
+   * 模型會直接把那幾個字畫進圖裡（「雙重保濕」被畫了兩次），而且後面補多少
+   * 「不可以有文字」都沒用——這個專案早就驗證過否定指令對文字生圖無效。
+   * 沒有這個欄位就不做這張 icon，寧可少一張也不要生出有字的圖。
+   */
+  iconConcept: string;
 };
 
 const MIN_POINTS = 3;
@@ -42,10 +51,12 @@ type Candidate = BenefitPoint & { truncated: boolean };
 function toPoint(sentence: string): Candidate | null {
   const text = tidy(sentence);
   if (!text) return null;
-  if (text.length <= TITLE_MAX) return { title: text, description: "", truncated: false };
+  // 規則拆解只有中文，給不出英文視覺描述，所以 iconConcept 留空——
+  // 呼叫端會因此不做賣點圖示，避免把中文送進提示詞。
+  if (text.length <= TITLE_MAX) return { title: text, description: "", iconConcept: "", truncated: false };
   // 太長的句子切出來常是沒有意義的片段（「專為除毛前打造的」），
   // 所以標記起來，只有在完整句不夠 3 個時才拿來補。
-  return { title: text.slice(0, TITLE_MAX), description: text.slice(0, NOTE_MAX), truncated: true };
+  return { title: text.slice(0, TITLE_MAX), description: text.slice(0, NOTE_MAX), iconConcept: "", truncated: true };
 }
 
 /**
@@ -76,7 +87,7 @@ export function deriveBenefitPoints(
     for (const point of pool) {
       if (merged.length >= target || seen.has(point.title)) continue;
       seen.add(point.title);
-      merged.push({ title: point.title, description: point.description });
+      merged.push({ title: point.title, description: point.description, iconConcept: point.iconConcept });
     }
   };
 
@@ -118,10 +129,11 @@ export function buildBenefitPointsPrompt(product: {
     "1. 每個賣點必須是不同面向。若兩個賣點在講同一件事（例如「酵素角質護理」與「帶走老廢角質」都在講去角質），只保留一個，換成其他面向（使用時機、膚觸結果、適用部位、搭配用途等）。",
     `2. title 為 ${MAX_TITLE_FOR_LLM} 個中文字以內的短標題，直接寫出賣點本身，不要標點。`,
     `3. description 為 ${MAX_DESCRIPTION_FOR_LLM} 個中文字以內的補充說明，不要重複 title 的字。`,
-    "4. 只能使用商品資料裡有的資訊，不要自行發明功效或成分。",
-    "5. 只輸出 JSON 陣列，不要有其他文字或 markdown 標記。",
+    "4. iconConcept 用英文描述這個賣點要畫成什麼圖形，只能有純英文字母與空格，不要出現中文、品牌名、產品名或任何要寫進畫面的字詞。描述具體的物件，例如 two overlapping water droplets、a feather touching smooth skin。",
+    "5. 只能使用商品資料裡有的資訊，不要自行發明功效或成分。",
+    "6. 只輸出 JSON 陣列，不要有其他文字或 markdown 標記。",
     "",
-    '格式：[{"title":"溫和去角質","description":"酵素帶走老廢角質"}]',
+    '格式：[{"title":"溫和去角質","description":"酵素帶走老廢角質","iconConcept":"a soft brush sweeping over skin"}]',
   ].filter(Boolean).join("\n");
 }
 
@@ -152,7 +164,11 @@ export function parseBenefitPointsJson(raw: string | null | undefined): BenefitP
     const fullDescription = typeof candidate.description === "string" ? candidate.description.trim() : "";
     // 只是複述標題的說明沒有資訊；要在截斷前比，否則長標題截短後就比不出來了。
     const description = fullDescription === fullTitle ? "" : fullDescription.slice(0, MAX_DESCRIPTION_FOR_LLM);
-    points.push({ title, description });
+    // iconConcept 進得了生圖提示詞，所以只收純 ASCII：夾帶中文的話，
+    // 模型就會把那幾個字畫進圖裡。可疑就整筆丟掉。
+    const concept = typeof candidate.iconConcept === "string" ? candidate.iconConcept.trim() : "";
+    if (!concept || !/^[\x20-\x7E]+$/.test(concept)) continue;
+    points.push({ title, description, iconConcept: concept.slice(0, 120) });
     if (points.length >= MAX_POINTS) break;
   }
   return points.length >= MIN_POINTS ? points : [];

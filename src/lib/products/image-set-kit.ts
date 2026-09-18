@@ -40,6 +40,8 @@ export type ImageSetPlanItem = {
    */
   benefitTitle?: string;
   benefitDescription?: string;
+  /** 生圖提示詞只用這個英文描述；中文標題進提示詞會被模型畫進圖裡。 */
+  benefitIconConcept?: string;
 };
 
 export const IMAGE_SET_MAX_ASSETS = 20;
@@ -63,10 +65,22 @@ export function normalizeImageSetKitAssets(
   productId: string,
   batchId: string,
   assets: ImageSetKitAssetRecord[],
+  /**
+   * 這批的計畫。賣點圖示的中文文字只存在計畫裡（圖裡刻意不畫字），
+   * 加入畫布時要靠它才拆得出標題與說明的文字圖層。
+   */
+  plan: ImageSetPlanItem[] = [],
 ) {
+  const benefitText = new Map(plan
+    .filter(({ benefitTitle }) => benefitTitle)
+    .map((item) => [item.assetSubtype, { benefitTitle: item.benefitTitle, benefitDescription: item.benefitDescription }]));
   return assets
     .filter((asset) => asset.productId === productId && asset.batchId === batchId)
-    .map((asset) => ({ ...asset, category: asset.assetRole ? toImageSetCategory(asset.assetRole) : null }));
+    .map((asset) => ({
+      ...asset,
+      category: asset.assetRole ? toImageSetCategory(asset.assetRole) : null,
+      ...(asset.assetSubtype ? benefitText.get(asset.assetSubtype) ?? {} : {}),
+    }));
 }
 
 export function deriveImageSetKitStatus(
@@ -178,6 +192,7 @@ export function parseImageSetPlanJson(value: string): ImageSetPlanItem[] {
       ...(benefitIconStyle ? { benefitIconStyle } : {}),
       ...(optionalText(candidate.benefitTitle, "benefitTitle") ? { benefitTitle: optionalText(candidate.benefitTitle, "benefitTitle") } : {}),
       ...(optionalText(candidate.benefitDescription, "benefitDescription") ? { benefitDescription: optionalText(candidate.benefitDescription, "benefitDescription") } : {}),
+      ...(optionalText(candidate.benefitIconConcept, "benefitIconConcept") ? { benefitIconConcept: optionalText(candidate.benefitIconConcept, "benefitIconConcept") } : {}),
     };
   });
 }

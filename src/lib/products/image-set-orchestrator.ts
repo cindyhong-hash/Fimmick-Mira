@@ -557,9 +557,10 @@ function applyBenefitTextEdits(
 function storedBenefitPoints(plan: ImageSetPlanItem[]): BenefitPoint[] | undefined {
   const icons = plan.filter(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"));
   if (!icons.length || !icons.every(({ benefitTitle }) => benefitTitle)) return undefined;
-  return icons.map(({ benefitTitle, benefitDescription }) => ({
+  return icons.map(({ benefitTitle, benefitDescription, benefitIconConcept }) => ({
     title: benefitTitle as string,
     description: benefitDescription ?? "",
+    iconConcept: benefitIconConcept ?? "",
   }));
 }
 

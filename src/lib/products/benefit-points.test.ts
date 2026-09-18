@@ -52,21 +52,29 @@ test("the extraction prompt carries the product facts and the no-overlap rule", 
 test("model output is validated, not trusted: length, duplicates and count are all enforced", () => {
   // 包在說明文字與 markdown 裡也要挖得出來。
   assert.deepEqual(
-    parseBenefitPointsJson('好的，以下是結果：\n```json\n[{"title":"溫和去角質","description":"酵素帶走老廢角質"},{"title":"除毛前準備","description":"幫助肌膚做好前置保養"},{"title":"柔嫩平滑肌膚","description":"提升細緻滑順感"}]\n```'),
+    parseBenefitPointsJson('好的，以下是結果：\n```json\n[{"title":"溫和去角質","description":"酵素帶走老廢角質","iconConcept":"a soft brush sweeping over skin"},{"title":"除毛前準備","description":"幫助肌膚做好前置保養","iconConcept":"a droplet above smooth skin"},{"title":"柔嫩平滑肌膚","description":"提升細緻滑順感","iconConcept":"a feather touching skin"}]\n```'),
     [
-      { title: "溫和去角質", description: "酵素帶走老廢角質" },
-      { title: "除毛前準備", description: "幫助肌膚做好前置保養" },
-      { title: "柔嫩平滑肌膚", description: "提升細緻滑順感" },
+      { title: "溫和去角質", description: "酵素帶走老廢角質", iconConcept: "a soft brush sweeping over skin" },
+      { title: "除毛前準備", description: "幫助肌膚做好前置保養", iconConcept: "a droplet above smooth skin" },
+      { title: "柔嫩平滑肌膚", description: "提升細緻滑順感", iconConcept: "a feather touching skin" },
     ],
   );
 
+  // iconConcept 會進生圖提示詞，夾帶中文就整筆丟掉——那正是圖上出現中文字的原因。
+  assert.deepEqual(
+    parseBenefitPointsJson('[{"title":"雙重保濕","description":"","iconConcept":"雙重保濕 droplets"},{"title":"第二個","description":"","iconConcept":"a leaf"},{"title":"第三個","description":"","iconConcept":"a wave"}]'),
+    [],
+  );
+  // 完全沒給 iconConcept 也不收：沒有英文描述就不該做這張 icon。
+  assert.deepEqual(parseBenefitPointsJson('[{"title":"甲"},{"title":"乙"},{"title":"丙"}]'), []);
+
   // 過長要截斷；title 與 description 一樣時 description 清空（重複沒有資訊）。
-  const [trimmed] = parseBenefitPointsJson('[{"title":"這是一個非常長的賣點標題","description":"這是一個非常長的賣點標題"},{"title":"第二個","description":""},{"title":"第三個","description":""}]');
+  const [trimmed] = parseBenefitPointsJson('[{"title":"這是一個非常長的賣點標題","description":"這是一個非常長的賣點標題","iconConcept":"a long shape"},{"title":"第二個","description":"","iconConcept":"a leaf"},{"title":"第三個","description":"","iconConcept":"a wave"}]');
   assert.equal(trimmed.title.length, 8);
   assert.equal(trimmed.description, "");
 
   // 重複的 title 只留一個，剩下不足 3 個就整份作廢。
-  assert.deepEqual(parseBenefitPointsJson('[{"title":"去角質"},{"title":"去角質"},{"title":"保濕"}]'), []);
+  assert.deepEqual(parseBenefitPointsJson('[{"title":"去角質","iconConcept":"a brush"},{"title":"去角質","iconConcept":"a brush"},{"title":"保濕","iconConcept":"a droplet"}]'), []);
   // 壞掉的輸出不能讓流程爆炸——回空陣列，呼叫端會退回規則版本。
   assert.deepEqual(parseBenefitPointsJson("模型今天不想回 JSON"), []);
   assert.deepEqual(parseBenefitPointsJson(null), []);
@@ -74,7 +82,7 @@ test("model output is validated, not trusted: length, duplicates and count are a
 
 test("extraction falls back to the rule-based split whenever the model is unusable", async () => {
   const good = await extractBenefitPoints(productForLlm, [], async () =>
-    '[{"title":"溫和去角質","description":"酵素帶走老廢角質"},{"title":"除毛前準備","description":"幫助肌膚前置保養"},{"title":"柔嫩平滑肌膚","description":"提升細緻滑順感"}]');
+    '[{"title":"溫和去角質","description":"酵素帶走老廢角質","iconConcept":"a soft brush over skin"},{"title":"除毛前準備","description":"幫助肌膚前置保養","iconConcept":"a droplet above skin"},{"title":"柔嫩平滑肌膚","description":"提升細緻滑順感","iconConcept":"a feather on skin"}]');
   assert.deepEqual(good.map(({ title }) => title), ["溫和去角質", "除毛前準備", "柔嫩平滑肌膚"]);
 
   // 賣點決定會生幾張付費圖片，所以 LLM 沒回應或整個拋錯都不能讓功能不能用。

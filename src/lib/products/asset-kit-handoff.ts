@@ -19,6 +19,13 @@ export type HandoffKitAsset = {
   assetSubtype: string | null;
   imageUrl: string;
   status: string;
+  /**
+   * 賣點圖示的文字。icon 圖裡刻意不含任何字（影像模型畫中文會缺筆畫，
+   * 實測被畫出過「雙重保濕」四個字），所以文字要在畫布上另外變成文字圖層，
+   * 用真正的字型渲染。
+   */
+  benefitTitle?: string | null;
+  benefitDescription?: string | null;
 };
 
 export function parseMagicLayersSeed(raw: string): MagicLayersSeed | null {
@@ -62,6 +69,70 @@ function layerKind(category: ImageSetCategory | null): { type: LayerType; semant
   return { type: "object", semanticId: "object" };
 }
 
+/**
+ * 賣點圖示帶著標題與說明進畫布時，拆成三個圖層：icon 圖片、標題文字、說明文字。
+ *
+ * 三個都設 parentId 指向 icon，PSD 匯出時會成為同一組。編輯器目前沒有實作
+ * 群組拖曳，所以在畫布上它們是各自獨立的圖層——這樣也剛好符合需求：
+ * 版面窄的時候可以只留 icon 加標題，把說明刪掉。
+ */
+function benefitTextLayers(
+  iconLayerId: string,
+  asset: HandoffKitAsset,
+  icon: { x: number; y: number; width: number; height: number; zIndex: number },
+): LayerData[] {
+  const title = asset.benefitTitle?.trim();
+  if (!title) return [];
+  const rows: Array<{ suffix: string; text: string; size: number; weight: number; gap: number }> = [
+    { suffix: "title", text: title, size: Math.max(18, Math.round(icon.height * 0.16)), weight: 700, gap: Math.round(icon.height * 0.08) },
+  ];
+  const description = asset.benefitDescription?.trim();
+  if (description) {
+    rows.push({ suffix: "desc", text: description, size: Math.max(14, Math.round(icon.height * 0.11)), weight: 400, gap: Math.round(icon.height * 0.30) });
+  }
+  return rows.map((row, index) => {
+    const height = Math.round(row.size * 1.4);
+    const y = icon.y + icon.height + row.gap;
+    return {
+      id: `${iconLayerId}-${row.suffix}`,
+      type: "independent_text" as const,
+      semanticId: "text" as const,
+      name: row.text.slice(0, 14),
+      instanceId: `${iconLayerId}-${row.suffix}`,
+      // 關係記下來，PSD 匯出時三個會在同一組；編輯器目前不做群組拖曳。
+      parentId: iconLayerId,
+      bbox: { x: icon.x, y, w: icon.width, h: height },
+      mask: null,
+      image: null,
+      x: icon.x,
+      y,
+      width: icon.width,
+      height,
+      rotation: 0,
+      zIndex: icon.zIndex + index + 1,
+      confidence: 1,
+      source: "generated" as const,
+      editable: true,
+      embeddedText: [],
+      children: [],
+      meta: {
+        assetKit: true,
+        assetId: asset.id,
+        benefitText: row.suffix,
+        textObject: { text: row.text },
+        style: {
+          text: row.text,
+          color: "#3C3C3C",
+          fontWeight: row.weight,
+          align: "center" as const,
+          fontSizePx: row.size,
+          fontFamily: "'Noto Sans TC','PingFang TC',system-ui,sans-serif",
+        },
+      },
+    };
+  });
+}
+
 export function buildAssetKitSeedLayers(assets: HandoffKitAsset[], docW: number, docH: number): LayerData[] {
   const completed = assets.filter(({ status, imageUrl }) => status === "DONE" && !!imageUrl);
   const background = completed.find(({ category }) => category === "background");
@@ -74,7 +145,7 @@ export function buildAssetKitSeedLayers(assets: HandoffKitAsset[], docW: number,
     { x: 0.72, y: 0.70, w: 0.22, h: 0.22 },
   ];
   const ordered = background ? [background, ...foreground] : foreground;
-  return ordered.map((asset, index) => {
+  return ordered.flatMap((asset, index) => {
     const isBackground = asset.id === background?.id;
     const position = isBackground ? { x: 0, y: 0, w: 1, h: 1 } : positions[isBackground ? 0 : index - (background ? 1 : 0)] ?? positions[positions.length - 1];
     const x = Math.round(position.x * docW);
@@ -82,8 +153,10 @@ export function buildAssetKitSeedLayers(assets: HandoffKitAsset[], docW: number,
     const width = Math.round(position.w * docW);
     const height = Math.round(position.h * docH);
     const kind = layerKind(asset.category);
-    return {
-      id: `asset-kit-${asset.id}`,
+    const iconLayerId = `asset-kit-${asset.id}`;
+    const texts = benefitTextLayers(iconLayerId, asset, { x, y, width, height, zIndex: isBackground ? 0 : index + 1 });
+    const layer: LayerData = {
+      id: iconLayerId,
       type: kind.type,
       semanticId: kind.semanticId,
       name: asset.assetSubtype ? imageSetSubtypeLabel(asset.assetSubtype).zh : "視覺套組素材",
@@ -102,8 +175,9 @@ export function buildAssetKitSeedLayers(assets: HandoffKitAsset[], docW: number,
       source: "generated",
       editable: true,
       embeddedText: [],
-      children: [],
+      children: texts.map(({ id }) => id),
       meta: { assetKit: true, assetId: asset.id, category: asset.category },
     };
+    return [layer, ...texts];
   });
 }

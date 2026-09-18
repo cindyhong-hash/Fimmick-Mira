@@ -1,8 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { HelpCircle, Bell, CheckCircle2, Sparkles, X } from "lucide-react";
+import { HelpCircle, Bell, CheckCircle2, Sparkles, X, Menu } from "lucide-react";
 import { GuidedTour, type TourStep } from "./GuidedTour";
+import { useMobileNav } from "@/lib/useMobileNav";
 
 // 快速教學步驟：依實際操作動線排序（設定 → 首頁快速生成 → 首頁開始創作 → 靈感 → 素材庫 → 說明）。
 // 首頁專屬錨點（home-create / home-quickstart）只在首頁存在；在其他頁開啟導覽時，
@@ -63,6 +64,7 @@ function timeAgo(iso?: string): string {
 }
 
 export function TopHeader() {
+  const { toggle: toggleNav } = useMobileNav();
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState<"help" | "noti" | null>(null);
@@ -129,7 +131,17 @@ export function TopHeader() {
   if (HIDE_ON.some((re) => re.test(pathname))) return null;
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-end gap-3 border-b border-gray-200 bg-gray-50 px-8">
+    /* 手機：左上角選單鈕開導覽抽屉（原本的 64px 圖示欄佔掉 390px 的 16%，
+       而且圖示沒有文字標籤）。sm 以上不顯示這顆鈕，版面與改動前相同。 */
+    <header className="sticky top-0 z-30 flex h-16 items-center justify-end gap-3 border-b border-gray-200 bg-gray-50 px-4 sm:px-8">
+      <button
+        type="button"
+        onClick={toggleNav}
+        aria-label="開啟導覽"
+        className="mr-auto flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 sm:hidden"
+      >
+        <Menu className="h-5 w-5" />
+      </button>
       {/* 說明 */}
       <div className="relative">
         <button type="button" data-tour="help" onClick={() => setOpen((o) => (o === "help" ? null : "help"))}

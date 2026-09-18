@@ -97,6 +97,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const refresh = useCallback(() => force((n) => n + 1), []);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  /** 單選且是圖片圖層時才給「去背」——文字圖層沒有背景可去。 */
+  const [selectedIsImage, setSelectedIsImage] = useState(false);
   const selectedIdsRef = useRef<string[]>([]);
   const [dragLayerId, setDragLayerId] = useState<string | null>(null);
   const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null);
@@ -178,7 +180,14 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const rotHandle = (l: EL) => { const gap = 26 / view.current.zoom, dy = -(l.h / 2 + gap), cos = Math.cos(l.rotation), sin = Math.sin(l.rotation); return { x: l.cx - dy * sin, y: l.cy + dy * cos }; };
   const toLocal = (l: EL, dx: number, dy: number) => { const ox = dx - l.cx, oy = dy - l.cy, cos = Math.cos(-l.rotation), sin = Math.sin(-l.rotation); return { x: ox * cos - oy * sin, y: ox * sin + oy * cos }; };
   const sel = () => layersRef.current.find((l) => l.id === selectedId) ?? null;
-  const applySelection = (ids: string[], primary: string | null = ids[0] ?? null) => { selectedIdsRef.current = ids; setSelectedIds(ids); setSelectedId(primary); };
+  const applySelection = (ids: string[], primary: string | null = ids[0] ?? null) => {
+    selectedIdsRef.current = ids;
+    setSelectedIds(ids);
+    setSelectedId(primary);
+    // 在這裡算好，工具列 render 時就不必讀 ref（render 期間讀 ref 是 lint 擋的事）。
+    const only = ids.length === 1 ? layersRef.current.find((l) => l.id === ids[0]) : undefined;
+    setSelectedIsImage(!!only && !only.isText);
+  };
   const selectOnly = (id: string | null) => applySelection(id ? [id] : [], id);
   const toggleSelection = (id: string) => {
     const hit = layersRef.current.find((l) => l.id === id);
@@ -521,6 +530,36 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     } catch (err) { alert("加入產品失敗：" + (err instanceof Error ? err.message : String(err))); }
     finally { setAdding(false); }
   }, [adding, doc.w, doc.h, refresh, render]);
+
+  /* ---------- cut out an existing image layer ---------- */
+  // 生成的素材是白底 JPG（文字生圖拿不到透明底），放到有色背景上就會看到白方塊。
+  // 這裡沿用「加入產品」那支去背 API，差別是對畫布上已經有的圖層做。
+  // 做成按鈕而不是自動執行：去背是要付費的，什麼時候花錢該由使用者決定。
+  const cutoutSelected = useCallback(async () => {
+    const target = layersRef.current.find((l) => l.id === selectedIdsRef.current[0]);
+    if (!target || target.isText || !target.canvas || adding) return;
+    setAdding(true);
+    try {
+      const resp = await fetch("/api/magic-layers/cutout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageDataUrl: target.canvas.toDataURL("image/png") }),
+      });
+      const d = await resp.json();
+      if (!resp.ok) throw new Error(d.error ?? resp.statusText);
+      const canvas = await loadToCanvas(d.url);
+      if (!canvas) throw new Error("讀取去背圖失敗");
+      // 只換圖，不動位置與尺寸——使用者已經排好的版不該因為去背而跑掉。
+      target.canvas = canvas;
+      target.naturalW = canvas.width;
+      target.naturalH = canvas.height;
+      target.src = d.url;
+      target.thumb = makeThumb(target);
+      markDirty(); refresh(); render();
+    } catch (err) {
+      alert("去背失敗：" + (err instanceof Error ? err.message : String(err)));
+    } finally { setAdding(false); }
+  }, [adding, refresh, render]);
 
   /* ---------- insert tools: image / upload / text / logo ---------- */
   const FONT = "'Noto Sans TC',system-ui,sans-serif";
@@ -865,6 +904,11 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         <span style={S.divider} />
         {selectedIds.length >= 2 && !selectedIds.some((id) => !!layersRef.current.find((l) => l.id === id)?.groupId) && <button style={S.tbtn} onClick={groupSelected} title="將選取的物件設為一組">群組</button>}
         {selectedIds.some((id) => !!layersRef.current.find((l) => l.id === id)?.groupId) && <button style={S.tbtn} onClick={ungroupSelected} title="解除目前群組">解散群組</button>}
+        {selectedIsImage && (
+          <button style={S.tbtn} onClick={() => void cutoutSelected()} disabled={adding} title="移除這個圖層的背景（會呼叫付費去背服務）">
+            {adding ? "去背中…" : "去背"}
+          </button>
+        )}
         <button style={{ ...S.tbtn, border: "1px solid #ddd6fe", color: "#7c3aed", background: "#f5f3ff" }} onClick={() => addProdRef.current?.click()} disabled={adding} title="上傳一張產品圖，自動去背後加入為新圖層">
           {adding ? "去背中…" : <><Plus size={15} />加入產品</>}
         </button>

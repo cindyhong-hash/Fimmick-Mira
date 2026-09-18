@@ -55,6 +55,11 @@ test("a benefit icon becomes three layers: the icon, its title and its descripti
   // 文字排在 icon 下方，不要疊在圖上。
   assert.ok(title.y > icon.y + icon.height - 1);
   assert.ok(description.y > title.y);
+  // 整塊文字必須留在畫布內，而且字級要合理——字級曾經綁在 icon 高度上，
+  // 結果標題變成 104px、說明整層掉到畫布外面。
+  assert.ok(description.y + description.height <= 1200, "文字掉出畫布下緣");
+  const titleSize = (title.meta.style as { fontSizePx: number }).fontSizePx;
+  assert.ok(titleSize >= 24 && titleSize <= 80, `標題字級不合理：${titleSize}`);
 });
 
 test("説明留空時只拆成兩層，沒有標題就完全不拆", () => {

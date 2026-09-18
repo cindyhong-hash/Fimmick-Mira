@@ -80,19 +80,29 @@ function benefitTextLayers(
   iconLayerId: string,
   asset: HandoffKitAsset,
   icon: { x: number; y: number; width: number; height: number; zIndex: number },
+  doc: { w: number; h: number },
 ): LayerData[] {
   const title = asset.benefitTitle?.trim();
   if (!title) return [];
-  const rows: Array<{ suffix: string; text: string; size: number; weight: number; gap: number }> = [
-    { suffix: "title", text: title, size: Math.max(18, Math.round(icon.height * 0.16)), weight: 700, gap: Math.round(icon.height * 0.08) },
+  // 字級綁畫布寬度，不要綁 icon 高度——icon 被放在主位時高達畫布的 54%，
+  // 換算出來的標題會變成 100px 以上，而且整塊文字會被推到畫布外面。
+  const rows: Array<{ suffix: string; text: string; size: number; weight: number }> = [
+    { suffix: "title", text: title, size: Math.max(24, Math.round(doc.w * 0.045)), weight: 700 },
   ];
   const description = asset.benefitDescription?.trim();
   if (description) {
-    rows.push({ suffix: "desc", text: description, size: Math.max(14, Math.round(icon.height * 0.11)), weight: 400, gap: Math.round(icon.height * 0.30) });
+    rows.push({ suffix: "desc", text: description, size: Math.max(16, Math.round(doc.w * 0.03)), weight: 400 });
   }
+  const lineHeights = rows.map((row) => Math.round(row.size * 1.4));
+  const gap = Math.round(doc.h * 0.015);
+  const blockHeight = lineHeights.reduce((sum, height) => sum + height, 0) + gap * rows.length;
+  // 文字接在 icon 下面；若會超出畫布下緣就整塊往上移，寧可疊到 icon 也不要掉出畫面。
+  const top = Math.min(icon.y + icon.height + gap, Math.max(0, doc.h - blockHeight));
+  let cursor = top;
   return rows.map((row, index) => {
-    const height = Math.round(row.size * 1.4);
-    const y = icon.y + icon.height + row.gap;
+    const height = lineHeights[index];
+    const y = cursor;
+    cursor += height + gap;
     return {
       id: `${iconLayerId}-${row.suffix}`,
       type: "independent_text" as const,
@@ -154,7 +164,7 @@ export function buildAssetKitSeedLayers(assets: HandoffKitAsset[], docW: number,
     const height = Math.round(position.h * docH);
     const kind = layerKind(asset.category);
     const iconLayerId = `asset-kit-${asset.id}`;
-    const texts = benefitTextLayers(iconLayerId, asset, { x, y, width, height, zIndex: isBackground ? 0 : index + 1 });
+    const texts = benefitTextLayers(iconLayerId, asset, { x, y, width, height, zIndex: isBackground ? 0 : index + 1 }, { w: docW, h: docH });
     const layer: LayerData = {
       id: iconLayerId,
       type: kind.type,

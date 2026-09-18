@@ -163,9 +163,15 @@ export function compileImageSetPrompt({ product, profile, artDirection, role }: 
     // 卻被要求「以抽象藝術表現賣點」——沒有東西可以表達，就只會生出
     // 一條泛用緞帶。使用者在商品頁填的賣點（Product.description）
     // 之前完全沒有送進來，這裡補上。
-    const benefitStatement = role.role === "benefit" ? imageSetBenefitStatement(product.description) : "";
-    const context = role.role === "background"
-      ? `Setting: ${list(profile.suitableScenes, "a plain, quiet interior")}`
+    // 賣點圖示雖然也是 benefit 角色，但它不能收這段中文賣點——它已經有自己的
+    // 英文圖示描述，多送中文只會讓模型把那些字畫進圖裡（實測「雙重保濕」被畫出來過）。
+    const isBenefitIcon = "assetSubtype" in role && String(role.assetSubtype ?? "").startsWith("benefit-icon");
+    const benefitStatement = role.role === "benefit" && !isBenefitIcon
+      ? imageSetBenefitStatement(product.description)
+      : "";
+    const context = role.role === "background" || isBenefitIcon
+      // 圖示只需要知道要畫什麼，商品名詞與賣點文字對它沒有用處，只會變成畫面上的字。
+      ? isBenefitIcon ? "" : `Setting: ${list(profile.suitableScenes, "a plain, quiet interior")}`
       : [
           `Product positioning (context only; never depict the product): ${profile.productType || product.category || "unspecified"}`,
           `Supplied use cases: ${list(profile.useCases, "none supplied")}`,

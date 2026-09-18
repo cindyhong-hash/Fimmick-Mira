@@ -344,9 +344,9 @@ test("a plan made today can be confirmed: everything confirm needs survives plan
   assert.equal(result.ok, true, result.ok ? "" : result.error);
 });
 
-test("a draft made before benefit icons required an english concept says exactly what to press", async () => {
-  // 舊草稿只有中文標題，沒有 iconConcept。中文標題不能進提示詞（會被畫成圖上的字），
-  // 所以那幾張重算不出來，確認就會對不起來。這時要給可以照做的指示，不是通用錯誤。
+test("editing a benefit title redraws the icon instead of keeping the old picture", async () => {
+  // 使用者把標題從「溫和去角質」改成「保濕」，畫出來的卻還是刷子——因為圖是
+  // 由英文描述決定的，改標題沒有動到它。標題一改就要重新想圖。
   const imageProduct = { ...input().product, description: "賣點： 酵素角質護理，除毛前柔嫩肌膚、帶走老廢角質。" };
   const storedProduct = {
     ...imageProduct,
@@ -355,30 +355,76 @@ test("a draft made before benefit icons required an english concept says exactly
     rawImageUrls: JSON.stringify(imageProduct.rawImageUrls),
   };
   const points = deriveBenefitPoints(storedProduct.description, profile.useCases)
-    .map((point, index) => ({ ...point, iconConcept: `a pictogram number ${index + 1}` }));
+    .map((point) => ({ ...point, iconConcept: "a soft brush sweeping over skin" }));
   const planned = planImageSetRoles({ profile, artDirection, benefitPoints: points });
-  const icons = planned.filter(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"));
-  assert.ok(icons.length);
-  // 模擬舊草稿：把英文描述拿掉，只留中文標題。
-  const legacyPlan = planned.map((item) => {
-    const legacy: Record<string, unknown> = { ...item };
-    delete legacy.benefitIconConcept;
-    return legacy;
+  const icon = planned.find(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"))!;
+
+  let askedFor = "";
+  let persisted: Record<string, unknown> | undefined;
+  const result = await confirmAndScheduleProductImageSet({
+    product: storedProduct,
+    client: null,
+    batchId: "kit-retitled",
+    selectedItemIds: [icon.id],
+    artDirection,
+    benefitTexts: { [icon.id]: { title: "保濕", description: "鎖住肌膚水分" } },
+    execution: createImageSetExecution(10_000, "kit-lease"),
+  }, {
+    loadDraft: async () => ({
+      id: "kit-retitled", productId: "product-1", status: "DRAFT", themeKey: null, themeLabel: null,
+      artDirectionJson: JSON.stringify(artDirection), planJson: JSON.stringify(planned),
+    }),
+    chatText: async (prompt) => { askedFor = prompt; return '[{"index":1,"iconConcept":"two overlapping water droplets"}]'; },
+    claimProductLease: async () => true,
+    releaseProductLease: async () => true,
+    persistConfirmedBatch: async (data) => { persisted = data as unknown as Record<string, unknown>; return [{ id: "row-1" }]; },
+    scheduleAfter: () => {},
+    runBatch: async () => ({ statuses: {}, params: {} }),
+    readBatchStatuses: async () => ["DONE"],
+    updateKitStatus: async () => {},
   });
+
+  assert.equal(result.ok, true, result.ok ? "" : result.error);
+  assert.match(askedFor, /保濕/, "沒有拿改過的標題去重新想圖");
+  const rows = persisted?.rows as Array<Record<string, unknown>>;
+  assert.match(String(rows[0].prompt), /two overlapping water droplets/, "還在用舊的圖示描述");
+  assert.doesNotMatch(String(rows[0].prompt), /soft brush/, "舊描述沒有被換掉");
+  // 中文一樣不能進提示詞。
+  assert.doesNotMatch(String(rows[0].prompt), /保濕/);
+  // 新描述要存回批次，之後重新生成同一張才畫得出一樣的東西。
+  const savedPlan = JSON.parse(String(persisted?.planJson)) as Array<Record<string, unknown>>;
+  assert.equal(savedPlan[0].benefitIconConcept, "two overlapping water droplets");
+  assert.equal(savedPlan[0].benefitTitle, "保濕");
+});
+
+test("if no icon idea comes back for an edited title, the paid run is blocked and the benefit is named", async () => {
+  const imageProduct = { ...input().product, description: "賣點： 酵素角質護理，除毛前柔嫩肌膚、帶走老廢角質。" };
+  const storedProduct = {
+    ...imageProduct,
+    visualProfileJson: JSON.stringify(profile),
+    visualProfileSourceHash: computeProductVisualSourceHash(imageProduct),
+    rawImageUrls: JSON.stringify(imageProduct.rawImageUrls),
+  };
+  const points = deriveBenefitPoints(storedProduct.description, profile.useCases)
+    .map((point) => ({ ...point, iconConcept: "a soft brush sweeping over skin" }));
+  const planned = planImageSetRoles({ profile, artDirection, benefitPoints: points });
+  const icon = planned.find(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"))!;
 
   let leaseClaimed = false;
   const result = await confirmAndScheduleProductImageSet({
     product: storedProduct,
     client: null,
-    batchId: "kit-legacy",
-    selectedItemIds: [icons[0].id],
+    batchId: "kit-noidea",
+    selectedItemIds: [icon.id],
     artDirection,
+    benefitTexts: { [icon.id]: { title: "保濕", description: "" } },
     execution: createImageSetExecution(10_000, "kit-lease"),
   }, {
     loadDraft: async () => ({
-      id: "kit-legacy", productId: "product-1", status: "DRAFT", themeKey: null, themeLabel: null,
-      artDirectionJson: JSON.stringify(artDirection), planJson: JSON.stringify(legacyPlan),
+      id: "kit-noidea", productId: "product-1", status: "DRAFT", themeKey: null, themeLabel: null,
+      artDirectionJson: JSON.stringify(artDirection), planJson: JSON.stringify(planned),
     }),
+    chatText: async () => null,
     claimProductLease: async () => { leaseClaimed = true; return true; },
     releaseProductLease: async () => true,
     persistConfirmedBatch: async () => [{ id: "row-1" }],
@@ -389,10 +435,58 @@ test("a draft made before benefit icons required an english concept says exactly
   });
 
   assert.equal(result.ok, false);
-  assert.match(result.ok ? "" : result.error, /重新選擇主題/);
-  assert.match(result.ok ? "" : result.error, /不會扣款/);
-  // 擋在付費關卡之前：不能因為這個就先把租約搶走。
+  assert.match(result.ok ? "" : result.error, /保濕/, "錯誤訊息要講出是哪一個賣點");
+  // 與其拿中文標題去生圖（會被畫成圖上的字），不如不生。也不能先搶走租約。
   assert.equal(leaseClaimed, false);
+});
+
+test("an old draft with no icon idea heals itself instead of making the user rebuild the list", async () => {
+  // 舊草稿只有中文標題、沒有英文圖示描述。與其叫使用者重建清單，不如在確認時
+  // 幫它想一個——使用者看到的清單內容完全沒變，不該被要求重做。
+  const imageProduct = { ...input().product, description: "賣點： 酵素角質護理，除毛前柔嫩肌膚、帶走老廢角質。" };
+  const storedProduct = {
+    ...imageProduct,
+    visualProfileJson: JSON.stringify(profile),
+    visualProfileSourceHash: computeProductVisualSourceHash(imageProduct),
+    rawImageUrls: JSON.stringify(imageProduct.rawImageUrls),
+  };
+  const points = deriveBenefitPoints(storedProduct.description, profile.useCases)
+    .map((point, index) => ({ ...point, iconConcept: `a pictogram number ${index + 1}` }));
+  const planned = planImageSetRoles({ profile, artDirection, benefitPoints: points });
+  const icon = planned.find(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"))!;
+  const legacyPlan = planned.map((item) => {
+    const legacy: Record<string, unknown> = { ...item };
+    delete legacy.benefitIconConcept;
+    return legacy;
+  });
+
+  let persisted: Record<string, unknown> | undefined;
+  const result = await confirmAndScheduleProductImageSet({
+    product: storedProduct,
+    client: null,
+    batchId: "kit-legacy",
+    selectedItemIds: [icon.id],
+    artDirection,
+    execution: createImageSetExecution(10_000, "kit-lease"),
+  }, {
+    loadDraft: async () => ({
+      id: "kit-legacy", productId: "product-1", status: "DRAFT", themeKey: null, themeLabel: null,
+      artDirectionJson: JSON.stringify(artDirection), planJson: JSON.stringify(legacyPlan),
+    }),
+    chatText: async () => '[{"index":1,"iconConcept":"a soft brush sweeping over skin"}]',
+    claimProductLease: async () => true,
+    releaseProductLease: async () => true,
+    persistConfirmedBatch: async (data) => { persisted = data as unknown as Record<string, unknown>; return [{ id: "row-1" }]; },
+    scheduleAfter: () => {},
+    runBatch: async () => ({ statuses: {}, params: {} }),
+    readBatchStatuses: async () => ["DONE"],
+    updateKitStatus: async () => {},
+  });
+
+  assert.equal(result.ok, true, result.ok ? "" : result.error);
+  const rows = persisted?.rows as Array<Record<string, unknown>>;
+  assert.match(String(rows[0].prompt), /a soft brush sweeping over skin/);
+  assert.doesNotMatch(String(rows[0].prompt), /酵素角質護理/, "中文標題不能進提示詞");
 });
 
 test("invalid confirmation snapshots are rejected before claiming the paid lease", async () => {

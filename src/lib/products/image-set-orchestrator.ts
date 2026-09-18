@@ -31,7 +31,7 @@ import {
   type ImageSetRoleSpec,
   type ImageSetTheme,
 } from "./image-set-roles.ts";
-import { deriveBenefitPoints, extractBenefitPoints, type BenefitPoint } from "./benefit-points.ts";
+import { deriveBenefitPoints, deriveIconConcepts, extractBenefitPoints, type BenefitPoint } from "./benefit-points.ts";
 import { chatTextOpenRouter } from "../openrouter.ts";
 import {
   deriveImageSetKitStatus,
@@ -546,14 +546,45 @@ function applyBenefitTextEdits(
     const description = typeof edit.description === "string"
       ? edit.description.trim().slice(0, BENEFIT_DESCRIPTION_MAX)
       : "";
+    // 圖畫什麼是由英文描述決定的，不是標題。標題改了卻沿用舊描述，就會發生
+    // 「打了保濕卻畫出刷子」——所以標題一有變動就把描述作廢，稍後重新想一個。
+    const titleChanged = title !== item.benefitTitle;
     next.push({
       ...item,
       benefitTitle: title,
       ...(description ? { benefitDescription: description } : { benefitDescription: undefined }),
+      ...(titleChanged ? { benefitIconConcept: undefined } : {}),
       purpose: description ? `${title}——${description}` : title,
     });
   }
   return { ok: true, plan: next };
+}
+
+/**
+ * 補上被改過標題的那幾張 icon 的英文描述。只處理有勾選的——沒勾的不會生成，
+ * 沒必要為它多打一次 LLM。想不出來就擋下來，而且要講出是哪一個賣點：
+ * 沒有英文描述就只剩中文標題可送，那會被模型畫成圖上的字。
+ */
+async function refreshEditedIconConcepts(
+  plan: ImageSetPlanItem[],
+  selectedIds: Set<string>,
+  chat: (prompt: string) => Promise<string | null>,
+): Promise<{ ok: true; plan: ImageSetPlanItem[] } | { ok: false; error: string }> {
+  const missing = plan.filter((item) =>
+    selectedIds.has(item.id) && item.assetSubtype.startsWith("benefit-icon") && item.benefitTitle && !item.benefitIconConcept);
+  if (!missing.length) return { ok: true, plan };
+
+  const concepts = await deriveIconConcepts(missing.map(({ benefitTitle }) => benefitTitle as string), chat);
+  const filled = new Map(missing.map((item, index) => [item.id, concepts[index] ?? ""]));
+  const stillMissing = missing.filter(({ id }) => !filled.get(id));
+  if (stillMissing.length) {
+    const names = stillMissing.map(({ benefitTitle }) => `「${benefitTitle}」`).join("、");
+    return { ok: false, error: `想不出 ${names} 要畫成什麼圖，請換一個說法再試一次。` };
+  }
+  return {
+    ok: true,
+    plan: plan.map((item) => filled.get(item.id) ? { ...item, benefitIconConcept: filled.get(item.id) } : item),
+  };
 }
 
 function storedBenefitPoints(plan: ImageSetPlanItem[]): BenefitPoint[] | undefined {
@@ -1305,6 +1336,8 @@ export type ConfirmProductImageSetDependencies = {
   runBatch: (input: ImageSetBatchInput, execution: ImageSetExecution) => Promise<ImageSetBatchResult>;
   readBatchStatuses: (batchId: string, productId: string) => Promise<ImageSetRowStatus[]>;
   updateKitStatus: (batchId: string, status: Exclude<ImageSetKitStatus, "DRAFT" | "CONFIRMED">) => Promise<unknown>;
+  /** 使用者改過賣點標題時，重新想一個對應的英文圖示描述。 */
+  chatText?: (prompt: string) => Promise<string | null>;
   now?: () => Date;
 };
 
@@ -1372,7 +1405,14 @@ export async function confirmAndScheduleProductImageSet(
   // icon 要畫的東西，也是排版階段要渲染的字。
   const edited = applyBenefitTextEdits(storedPlan, request.benefitTexts);
   if (!edited.ok) return { ok: false, status: 400, error: edited.error };
-  const selectedPlan = edited.plan
+  // 標題被改過的那幾張，剛剛把英文描述作廢了，這裡一次補回來。
+  const refreshed = await refreshEditedIconConcepts(
+    edited.plan,
+    new Set(request.selectedItemIds),
+    dependencies.chatText ?? chatTextOpenRouter,
+  );
+  if (!refreshed.ok) return { ok: false, status: 400, error: refreshed.error };
+  const selectedPlan = refreshed.plan
     .filter(({ id }) => selectedIds.has(id))
     // 存回這一批實際用到的風格，之後看紀錄才知道這組 icon 是怎麼生的。
     .map((item) => item.assetSubtype.startsWith("benefit-icon") && benefitIconStyle
@@ -1390,7 +1430,7 @@ export async function confirmAndScheduleProductImageSet(
     theme: theme ?? undefined,
     // 規劃時 LLM 整理好的賣點存在 planJson 上，這裡讀回來，不重新問一次 LLM——
     // 重問會得到不同的賣點，跟使用者在清單上看到的對不起來。
-    benefitPoints: storedBenefitPoints(edited.plan) ?? deriveBenefitPoints(request.product.description, profile.useCases),
+    benefitPoints: storedBenefitPoints(refreshed.plan) ?? deriveBenefitPoints(request.product.description, profile.useCases),
     benefitIconStyle: benefitIconStyle ?? undefined,
   });
   const specsById = new Map(currentSpecs.map((spec) => [spec.id, spec]));
@@ -1400,18 +1440,6 @@ export async function confirmAndScheduleProductImageSet(
     return spec;
   });
   if (selectedSpecs.some((spec) => !spec)) {
-    // 最常見的原因是舊草稿：賣點圖示改成必須帶英文視覺描述之後（中文標題送進
-    // 提示詞會被模型畫進圖裡），在那之前建立的草稿重算不出這幾張。與其丟一句
-    // 讓人自己猜的通用錯誤，不如講清楚該按哪裡，而且要說明重建不用錢。
-    const staleIcons = selectedPlan.filter((item, index) =>
-      !selectedSpecs[index] && item.assetSubtype.startsWith("benefit-icon") && !item.benefitIconConcept);
-    if (staleIcons.length) {
-      return {
-        ok: false,
-        status: 409,
-        error: "這份清單是賣點圖示更新前建立的，請按「重新選擇主題」再建立一次建議清單（不會扣款）。",
-      };
-    }
     return { ok: false, status: 409, error: "儲存的套圖角色或素材變化已失效，請重新規劃。" };
   }
   const roles = selectedSpecs.filter((spec): spec is NonNullable<typeof spec> => !!spec);

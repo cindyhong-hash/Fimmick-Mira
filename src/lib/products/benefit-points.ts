@@ -194,3 +194,67 @@ export async function extractBenefitPoints(
     return ruleBased;
   }
 }
+
+/**
+ * 使用者改過標題之後，圖也要跟著換。
+ *
+ * icon 畫什麼是由 iconConcept（英文）決定的，不是標題。所以把標題從
+ * 「溫和去角質」改成「保濕」卻不動 concept，畫出來的還是刷子——使用者
+ * 看到的是「我明明打了保濕」。改過的標題一律重新要一次英文描述。
+ *
+ * 一次問完所有改過的標題，不要一個標題打一次 LLM。
+ */
+export function buildIconConceptPrompt(titles: string[]): string {
+  return [
+    "以下每一行是一個產品賣點。請為每一個賣點想一個適合畫成極簡圖示的畫面。",
+    "",
+    ...titles.map((title, index) => `${index + 1}. ${title}`),
+    "",
+    "規則：",
+    "1. 用英文描述具體的物件或畫面，只能有純英文字母與空格，例如 two overlapping water droplets。",
+    "2. 不要出現中文、品牌名、產品名，也不要描述任何要寫進畫面的文字。",
+    "3. 描述要簡單到可以用幾條線畫出來，最多兩個元素。",
+    "4. 只輸出 JSON 陣列，順序與上面的編號一致，不要有其他文字或 markdown 標記。",
+    "",
+    '格式：[{"index":1,"iconConcept":"two overlapping water droplets"}]',
+  ].join("\n");
+}
+
+export function parseIconConceptsJson(raw: string | null | undefined, count: number): Record<number, string> {
+  if (!raw) return {};
+  const match = raw.match(/\[[\s\S]*\]/);
+  if (!match) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(match[0]);
+  } catch {
+    return {};
+  }
+  if (!Array.isArray(parsed)) return {};
+  const concepts: Record<number, string> = {};
+  for (const entry of parsed) {
+    if (!entry || typeof entry !== "object") continue;
+    const candidate = entry as Record<string, unknown>;
+    const index = typeof candidate.index === "number" ? candidate.index : Number.NaN;
+    const concept = typeof candidate.iconConcept === "string" ? candidate.iconConcept.trim() : "";
+    // 跟賣點整理同一條底線：夾帶中文的描述會被畫成圖上的字，不要。
+    if (!Number.isInteger(index) || index < 1 || index > count) continue;
+    if (!concept || !/^[\x20-\x7E]+$/.test(concept)) continue;
+    concepts[index - 1] = concept.slice(0, 120);
+  }
+  return concepts;
+}
+
+/** @returns 對應 titles 每一項的英文描述；想不出來的那一項會是空字串。 */
+export async function deriveIconConcepts(
+  titles: string[],
+  chat: (prompt: string) => Promise<string | null>,
+): Promise<string[]> {
+  if (!titles.length) return [];
+  try {
+    const concepts = parseIconConceptsJson(await chat(buildIconConceptPrompt(titles)), titles.length);
+    return titles.map((_, index) => concepts[index] ?? "");
+  } catch {
+    return titles.map(() => "");
+  }
+}

@@ -385,6 +385,31 @@ test("a benefit point without an english concept makes no icon at all", () => {
   assert.equal(icons[0].benefitTitle, "柔嫩平滑肌膚");
 });
 
+test("the english part of a benefit icon prompt never carries chinese product wording", () => {
+  // 上一輪只擋了「標題不要出現在提示詞」，但中文還是從另一條路進來：
+  // compileImageSetPrompt 會把商品賣點文字餵給所有 benefit 角色，而賣點圖示
+  // 也是 benefit 角色。圖示已經有自己的英文描述，不需要也不該收到中文。
+  const withBenefits = { ...product, description: "賣點： 酵素角質護理，除毛前柔嫩肌膚、帶走老廢角質。" };
+  const points = [
+    { title: "溫和去角質", description: "帶走老廢角質", iconConcept: "a soft brush sweeping over skin" },
+    { title: "保濕", description: "鎖住肌膚水分", iconConcept: "two overlapping water droplets" },
+    { title: "柔嫩肌膚", description: "提升細緻滑順感", iconConcept: "a feather touching smooth skin" },
+  ];
+  for (const style of ["plain", "framed", "soft"] as const) {
+    const roles = planImageSetRoles({ profile: skincareProfile, artDirection, benefitPoints: points, benefitIconStyle: style });
+    for (const icon of roles.filter(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"))) {
+      const prompt = compileImageSetPrompt({ product: withBenefits, profile: skincareProfile, artDirection, role: icon });
+      // 指示模型「畫什麼」的那一段完全不能有中文——中文名詞會被當成要畫的字。
+      // （[VISUAL DIRECTION] 的色彩與氛圍詞是中文但不是名詞指示，每個角色都有。）
+      const objective = prompt.split("[PRODUCT CONTEXT")[0];
+      assert.doesNotMatch(objective, /[\u4e00-\u9fff]/, `${style} 的生圖指示含有中文`);
+      // 商品賣點文字整份提示詞都不該出現——那是「賣點視覺」要演出的東西，不是圖示。
+      assert.doesNotMatch(prompt, /酵素角質護理|老廢角質/, `${style} 收到了商品賣點文字`);
+      assert.doesNotMatch(prompt, new RegExp(points[0].title), `${style} 收到了中文標題`);
+    }
+  }
+});
+
 test("no benefit icon prompt contains a raw hex colour code", () => {
   // 這個專案已經踩過：色碼送進生圖提示詞，模型會把字串本身當畫面文字描上去，
   // 而賣點圖示的整個設計前提就是「圖上不能有字」。既有的 hex 斷言只看核心角色，

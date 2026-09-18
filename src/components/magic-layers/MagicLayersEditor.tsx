@@ -131,6 +131,16 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         let canvas: HTMLCanvasElement | null = null;
         if (l.image) canvas = await loadToCanvas(l.image);
         else if (!isText && !shape) canvas = extractLayer(image, l, doc.w, doc.h)?.canvas ?? null;
+        // 圖層的框是排版位置，不是圖片尺寸。直接把圖拉去填滿框會變形——套組給
+        // icon 的框是直的，icon 本身是正方形，塞進去就被壓扁。所以圖片依原始
+        // 比例縮到框內並置中。背景例外：它本來就該滿版出血。
+        let boxW = l.width;
+        let boxH = l.height;
+        if (!isText && canvas && l.type !== "background" && canvas.width > 0 && canvas.height > 0) {
+          const scale = Math.min(l.width / canvas.width, l.height / canvas.height);
+          boxW = Math.round(canvas.width * scale);
+          boxH = Math.round(canvas.height * scale);
+        }
         const el: EL = {
           id: l.id, name: l.name, type: l.type, semanticId: l.semanticId, instanceId: l.instanceId,
           confidence: l.confidence, editable: l.editable, source: l.source, shape, fx: st?.fx ?? null, textLayout: readTextLayout(st?.layout),
@@ -141,7 +151,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           fontFamily: st?.fontFamily ?? "'Noto Sans TC',system-ui,sans-serif", fontWeight: st?.fontWeight ?? 700, align: st?.align ?? "center",
           canvas, naturalW: canvas?.width || l.width, naturalH: canvas?.height || l.height,
           src: l.image ?? null,
-          cx: l.x + l.width / 2, cy: l.y + l.height / 2, w: l.width, h: l.height, rotation: l.rotation ?? 0,
+          cx: l.x + l.width / 2, cy: l.y + l.height / 2, w: boxW, h: boxH, rotation: l.rotation ?? 0,
           // runtime flags restored from a saved 排版 (meta), else defaults
           visible: (l.meta?.visible as boolean | undefined) ?? true,
           locked: (l.meta?.locked as boolean | undefined) ?? false,

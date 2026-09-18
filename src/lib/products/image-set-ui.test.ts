@@ -224,6 +224,19 @@ test("benefit text edits are capped at the same lengths the prompt promises", ()
   assert.equal(editImageSetBenefitText(items, items[0].id, "benefitDescription", "")[0].benefitDescription, "");
 });
 
+test("clearing a benefit title keeps the field editable instead of locking the row", () => {
+  // 清單那邊曾經用 `item.benefitTitle &&` 判斷要不要給輸入框。空字串是 falsy，
+  // 所以標題一被刪光，整列就變回不可編輯，再也打不了字。
+  const items = [benefitItem()];
+  const cleared = editImageSetBenefitText(items, items[0].id, "benefitTitle", "");
+  assert.equal(cleared[0].benefitTitle, "");
+  // 欄位仍然存在（不是 undefined），畫面才知道這列是可編輯的賣點圖示。
+  assert.ok("benefitTitle" in cleared[0]);
+  // 清空之後還能再打字回去。
+  const retyped = editImageSetBenefitText(cleared, items[0].id, "benefitTitle", "重新打字");
+  assert.equal(retyped[0].benefitTitle, "重新打字");
+});
+
 test("only checked benefit items send their text, and a blank title blocks the paid confirm", () => {
   const artDirection = { concept: "c", palette: { dominant: [], accent: [] }, lighting: "l", materials: [], backgroundLanguage: "b", cameraLanguage: "c", consistencyRules: [], mood: [], decorationStyle: [] };
   const checked = benefitItem();

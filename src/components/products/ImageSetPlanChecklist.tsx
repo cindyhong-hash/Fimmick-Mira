@@ -47,7 +47,10 @@ export function ImageSetPlanChecklist({ items, maxAssets, onToggle, onEditBenefi
         const subtypeLabel = imageSetSubtypeLabel(item.assetSubtype);
         // 賣點圖示四張的子型別名稱一模一樣（都叫「賣點圖示」），得往下讀小字才分得出
         // 誰是誰。改成主標題直接顯示賣點名稱，「Benefit Icon」降成次標。
-        const label = item.benefitTitle
+        // 是不是賣點圖示看 assetSubtype，不要看標題有沒有字——標題可以被清空，
+        // 用空字串當判斷會讓那一列在清空的瞬間變回不可編輯，就再也打不了字。
+        const isBenefitIcon = item.assetSubtype.startsWith("benefit-icon");
+        const label = isBenefitIcon && item.benefitTitle
           ? { zh: item.benefitTitle, en: subtypeLabel.en, description: item.benefitDescription ?? "" }
           : subtypeLabel;
         const rowClass = `flex items-start gap-3 rounded-xl border p-3.5 transition ${item.checked ? "border-violet-500 bg-violet-50" : "border-[#e7ebf1] bg-white hover:border-violet-300"} ${disabled ? "opacity-45" : ""}`;
@@ -55,7 +58,8 @@ export function ImageSetPlanChecklist({ items, maxAssets, onToggle, onEditBenefi
 
         // 賣點圖示的文字是可編輯的，所以整列不能是 <label>——點輸入框會連帶
         // 切換勾選。改成勾選框自己是一顆按鈕，文字區塊獨立。
-        if (item.benefitTitle && onEditBenefitText) {
+        if (isBenefitIcon && onEditBenefitText) {
+          const blankTitle = !(item.benefitTitle ?? "").trim();
           return <div key={item.id} className={rowClass}>
             <button
               type="button"
@@ -68,13 +72,17 @@ export function ImageSetPlanChecklist({ items, maxAssets, onToggle, onEditBenefi
             >{box}</button>
             <span className="min-w-0 flex-1">
               <input
-                value={item.benefitTitle}
+                value={item.benefitTitle ?? ""}
                 maxLength={BENEFIT_TITLE_MAX}
                 aria-label="賣點標題"
+                aria-invalid={blankTitle && item.checked}
+                placeholder="賣點標題"
                 onChange={(event) => onEditBenefitText(item.id, "benefitTitle", event.target.value)}
-                className="w-full rounded-md border border-transparent bg-transparent px-1.5 py-0.5 text-sm font-bold text-gray-900 outline-none hover:border-[#e5e9f0] focus:border-violet-400 focus:bg-white"
+                className={`w-full rounded-md border bg-transparent px-1.5 py-0.5 text-sm font-bold text-gray-900 outline-none focus:bg-white ${blankTitle && item.checked ? "border-red-300 focus:border-red-400" : "border-transparent hover:border-[#e5e9f0] focus:border-violet-400"}`}
               />
-              <span className="mt-0.5 block px-1.5 text-[11px] leading-4 text-gray-400">{label.en}</span>
+              <span className="mt-0.5 block px-1.5 text-[11px] leading-4 text-gray-400">
+                {blankTitle && item.checked ? <span className="text-red-500">標題不能留空，這是 icon 要畫的內容</span> : label.en}
+              </span>
               <input
                 value={item.benefitDescription ?? ""}
                 maxLength={BENEFIT_DESCRIPTION_MAX}

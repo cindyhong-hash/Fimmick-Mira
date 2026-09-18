@@ -56,16 +56,46 @@ test("product roles contain identity locks", () => {
   assert.match(prompt, /\[ROLE OBJECTIVE\][\s\S]*\[PRODUCT FACTS\][\s\S]*\[MUST PRESERVE\][\s\S]*\[SHARED ART DIRECTION\][\s\S]*\[COMPOSITION AND CAMERA\][\s\S]*\[MUST NOT SHOW\]/);
 });
 
-test("abstract benefit visuals receive supplied use-case context without product identity locks", () => {
+test("benefit visuals receive the brand's own benefit wording and are told not to fall back on abstract flourishes", () => {
   const role = planImageSetRoles(beautyDeviceProfile).find(({ role }) => role === "benefit")!;
   const prompt = compileImageSetPrompt({ product, profile: beautyDeviceProfile, artDirection, role });
 
   assert.match(prompt, /Supplied use cases: 腿部日常修整/);
-  assert.match(prompt, /conceptual abstract benefit visual/i);
+  // 原本只給 use cases 又要求「抽象」，生成結果是泛用緞帶，看不出在講什麼賣點。
+  // 現在改成餵真正的賣點文字，並明確禁止泛用裝飾。
+  assert.match(prompt, /benefit legible at a glance/i);
+  assert.match(prompt, /concrete, recognisable subject matter/i);
+  assert.match(prompt, /ribbons, swooshes, light streaks, or swirls/i);
   assert.match(prompt, /actual product|Logo/i);
   assert.doesNotMatch(prompt, /Product name: 女性電動除毛刀/);
   assert.doesNotMatch(prompt, /Visible text or logos: Schick/);
   assert.doesNotMatch(prompt, /\[MUST PRESERVE\]/);
+});
+
+test("benefit prompt carries the brand's selling points, with field labels stripped", () => {
+  const role = planImageSetRoles(beautyDeviceProfile).find(({ role }) => role === "benefit")!;
+  const withDescription = {
+    ...product,
+    description: "賣點： 酵素角質護理，除毛前柔嫩肌膚、帶走老廢角質。\n定位： 專為除毛前打造的肌膚前導保養。",
+  };
+  const prompt = compileImageSetPrompt({ product: withDescription, profile: beautyDeviceProfile, artDirection, role });
+
+  // 這是整個問題的核心：使用者填的賣點原本完全沒有送進提示詞，
+  // benefit 只拿到 "Supplied use cases: ..." 幾個字，所以畫不出賣點。
+  assert.match(prompt, /酵素角質護理/);
+  assert.match(prompt, /帶走老廢角質/);
+  // 欄位標籤要剝掉——送進去的標籤會被模型當成畫面文字描上去。
+  assert.doesNotMatch(prompt, /賣點：/);
+  assert.doesNotMatch(prompt, /定位：/);
+});
+
+test("only the benefit role receives the selling-point wording", () => {
+  const withDescription = { ...product, description: "賣點： 酵素角質護理" };
+  for (const want of ["background", "detail"]) {
+    const role = planImageSetRoles(beautyDeviceProfile).find(({ role }) => role === want)!;
+    const prompt = compileImageSetPrompt({ product: withDescription, profile: beautyDeviceProfile, artDirection, role });
+    assert.doesNotMatch(prompt, /酵素角質護理/, `${want} 不該收到賣點文字`);
+  }
 });
 
 test("detail asks for a real photographic product texture while benefit stays conceptual", () => {
@@ -85,7 +115,8 @@ test("detail asks for a real photographic product texture while benefit stays co
   assert.match(detailPrompt, /campaign palette.*surroundings and background/i);
   assert.doesNotMatch(detailPrompt, /dispensed|pump|nozzle|spread on skin|dense foam/i);
   assert.match(detailPrompt, /抽象功效意象/);
-  assert.match(benefitPrompt, /conceptual|abstract/i);
+  // benefit 不再走「抽象」路線（會生出看不懂的泛用裝飾），改驗它被要求畫具體可辨識的內容。
+  assert.match(benefitPrompt, /concrete, recognisable/i);
   assert.match(benefitPrompt, /真實攝影微距的商品材質或表面質地/);
 });
 

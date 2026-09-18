@@ -130,10 +130,10 @@ function coreRoles(profile: ProductVisualProfile, themeKey: string, theme?: Imag
     }, { category: "background", assetSubtype: "primary-scene", purpose: `提供主版面合成與文案留白${themePurpose}`, core: true, themeKey }),
     withPlanMetadata({
       role: "benefit", label: "賣點視覺", usageDescription: "將產品賣點轉成視覺素材", path: "text", cutout: false,
-      sceneCn: `以抽象、藝術化且高級的廣告視覺表現已提供的產品賣點；${context}`,
-      objective: "Create a conceptual abstract benefit visual that translates only supplied use cases into artistic imagery. Never depict the actual product.",
+      sceneCn: `把已提供的賣點畫成一個看得懂的畫面：用具體、可辨識的物件、材質或情境去表現那個好處（例如柔嫩觸感、乾淨俐落、舒適放鬆），而不是只放泛用的光暈、緞帶或漩渦。畫面仍要高級且留有文案空間；${context}`,
+      objective: "Create an advertising visual that makes the stated benefit legible at a glance. Build it from concrete, recognisable subject matter — materials, surfaces, textures, or a situation that stands for that benefit. Do not fall back on generic abstract flourishes such as floating ribbons, swooshes, light streaks, or swirls. Never depict the actual product.",
       composition: "概念型抽象素材，有層次但保留可放置文案或與商品主體合成的空間。",
-      mustNotShow: ["實際商品", "瓶罐", "包裝", "Logo", "文字", "真實攝影微距的商品材質或表面質地", "未提供的成分、功效、認證或醫療宣稱"],
+      mustNotShow: ["實際商品", "瓶罐", "包裝", "Logo", "文字", "真實攝影微距的商品材質或表面質地", "泛用的飄帶、緞帶、漩渦、光束等看不出在講什麼好處的裝飾", "未提供的成分、功效、認證或醫療宣稱"],
     }, { category: "benefit", assetSubtype: "benefit-metaphor", purpose: `把已提供的賣點轉成可合成的視覺隱喻${themePurpose}`, core: true, themeKey }),
     withPlanMetadata({
       role: "decoration", label: "裝飾元素", usageDescription: "增加版面完整度的 PNG 元素", path: "text", cutout: true,

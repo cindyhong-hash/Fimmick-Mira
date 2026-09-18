@@ -5,6 +5,8 @@ import type { ImageSetRoleSpec } from "./image-set-roles.ts";
 export type ImageSetPromptProduct = {
   name: string;
   category?: string | null;
+  /** 使用者在商品頁填的賣點與定位。賣點視覺需要它才有東西可以表達。 */
+  description?: string | null;
 };
 
 export type CompileImageSetPromptInput = {
@@ -13,6 +15,23 @@ export type CompileImageSetPromptInput = {
   artDirection: ImageSetArtDirection;
   role: ImageSetRoleSpec;
 };
+
+/**
+ * 從商品說明取出可以拿去畫的賣點內容。
+ *
+ * 會把「賣點：」「定位：」這類欄位標籤剝掉——背景板那次的教訓是：
+ * 送進去的欄位標籤本身會被模型當成畫面文字描上去
+ * （實際生成出 «Supplied use cases;» 那幾個字）。
+ */
+export function imageSetBenefitStatement(description: string | null | undefined): string {
+  if (!description) return "";
+  return description
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*(賣點|定位|特色|功效|Selling points?|Positioning)\s*[:：]\s*/i, "").trim())
+    .filter(Boolean)
+    .join(" ")
+    .slice(0, 300);
+}
 
 function list(values: string[], fallback: string): string {
   return values.length ? values.join("、") : fallback;
@@ -140,12 +159,20 @@ export function compileImageSetPrompt({ product, profile, artDirection, role }: 
     // 之後，模型不但畫出一支乳液軟管，還把欄位標籤本身(«Supplied use cases;»)
     // 當成畫面文字描上去。對圖像模型而言，句中出現的名詞就是要畫的東西，
     // 後面補一句「never depict」沒有作用。背景只需要知道場景。
+    // 賣點視覺原本只拿到 "Supplied use cases: pre-shaving care" 三個英文字，
+    // 卻被要求「以抽象藝術表現賣點」——沒有東西可以表達，就只會生出
+    // 一條泛用緞帶。使用者在商品頁填的賣點（Product.description）
+    // 之前完全沒有送進來，這裡補上。
+    const benefitStatement = role.role === "benefit" ? imageSetBenefitStatement(product.description) : "";
     const context = role.role === "background"
       ? `Setting: ${list(profile.suitableScenes, "a plain, quiet interior")}`
       : [
           `Product positioning (context only; never depict the product): ${profile.productType || product.category || "unspecified"}`,
           `Supplied use cases: ${list(profile.useCases, "none supplied")}`,
           `Suitable scenes: ${list(profile.suitableScenes, "none supplied")}`,
+          ...(benefitStatement
+            ? [`The specific benefit this image must communicate, in the brand's own words: ${benefitStatement}`]
+            : []),
         ].join("\n");
     const formulaTexture = "assetSubtype" in role && role.assetSubtype === "formula-texture";
     const textExclusions = [

@@ -857,7 +857,7 @@ export async function runImageSetBatch(
         ? await loadReferenceDataUris(input.product, batchHeroImageUrl, loadAsDataUri, abortController.signal)
         : { rawImageUrls: [] as string[] };
       const prompt = compileImageSetPrompt({
-        product: { name: input.product.name, category: input.product.category },
+        product: { name: input.product.name, category: input.product.category, description: input.product.description },
         profile: input.profile,
         artDirection: input.artDirection,
         role,

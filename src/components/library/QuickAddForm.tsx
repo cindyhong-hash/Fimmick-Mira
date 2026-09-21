@@ -15,6 +15,8 @@ import { X, Upload, Sparkles, Loader2, Plus, Trash2, Check, ChevronDown } from "
 import { CATEGORY_META, PALETTE_ROLES, getColors } from "@/types/library";
 import type { PaletteRole, StyleComponent, ComponentCategory } from "@/types/library";
 import { useRotatingHint } from "@/hooks/useRotatingHint";
+import { useSidebarCollapsed } from "@/lib/useSidebarCollapsed";
+import { sidebarOffsetClass } from "@/components/layout/sidebar-metrics";
 // AI 分析（生成素材積木）loading 輪播提示
 const ANALYZE_HINTS = ["AI 分析構圖中…", "抽取配色…", "解讀風格語氣…", "整理素材積木…", "快好喇…"];
 import { ColorCards } from "./ColorCards";
@@ -44,6 +46,8 @@ const DEFAULT_PALETTE: PaletteEntry[] = PALETTE_ROLES.map((r, idx) => ({
 }));
 
 export function QuickAddForm({ initialImageUrl, editComponent, prefillComponents, libraryImageId, editClientId, onCancel, onSaved }: Props) {
+  // 底部「送出」列是 fixed 的，要跟著側邊欄目前的寬度起算，否則中間會露出灰縫。
+  const [sidebarCollapsed] = useSidebarCollapsed();
   const isEdit = !!editComponent || (!!prefillComponents && prefillComponents.length > 0);
   // ── Reference image (for AI analyze) ──
   const [imageUrl, setImageUrl] = useState<string | null>(initialImageUrl ?? null);
@@ -507,7 +511,7 @@ export function QuickAddForm({ initialImageUrl, editComponent, prefillComponents
       {/* Actions — fixed 貼實 viewport 底（唔用 sticky：外層 <main class="overflow-auto"> 令
           sticky 嘅 containing block 變咗 main 本身，而 main 又冇真係內部滾動，sticky 完全唔生效）。
           left-60 對應 side nav 闊度（w-60），令呢條 bar 淨係蓋住內容欄，唔遮埋側 nav。 */}
-      <div className="fixed bottom-0 left-60 right-0 z-30 bg-white border-t">
+      <div className={`fixed bottom-0 right-0 z-30 bg-white border-t ${sidebarOffsetClass(sidebarCollapsed)}`}>
         <div className="max-w-3xl px-6 py-3 flex items-center gap-3">
           {saveError && <p className="text-xs text-red-500 flex-1">{saveError}</p>}
           <button onClick={onCancel}

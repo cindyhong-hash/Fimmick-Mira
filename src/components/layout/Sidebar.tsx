@@ -8,6 +8,7 @@ import { SidebarNav } from "./SidebarNav";
 import { SidebarUser } from "./SidebarUser";
 import { getLastClientId } from "@/lib/lastClient";
 import { useSidebarCollapsed } from "@/lib/useSidebarCollapsed";
+import { SIDEBAR_COLLAPSED_WIDTH_CLASS, SIDEBAR_WIDTH_CLASS } from "./sidebar-metrics";
 import { useMobileNav } from "@/lib/useMobileNav";
 
 const noopSubscribe = () => () => {};
@@ -68,7 +69,7 @@ export function Sidebar() {
     return (
       <>
       {drawer}
-      <aside className="sticky top-0 hidden h-screen w-16 shrink-0 flex-col items-center self-start overflow-y-auto border-r border-gray-200 bg-white p-4 sm:flex">
+      <aside className={`sticky top-0 hidden h-screen ${SIDEBAR_COLLAPSED_WIDTH_CLASS} shrink-0 flex-col items-center self-start overflow-y-auto border-r border-gray-200 bg-white p-4 sm:flex`}>
         <Image
           src="/mira-mark.png"
           alt="MIRA"
@@ -98,7 +99,7 @@ export function Sidebar() {
   return (
     <>
     {drawer}
-    <aside className="sticky top-0 hidden h-screen w-[220px] shrink-0 flex-col self-start overflow-y-auto border-r border-gray-200 bg-white p-4 sm:flex">
+    <aside className={`sticky top-0 hidden h-screen ${SIDEBAR_WIDTH_CLASS} shrink-0 flex-col self-start overflow-y-auto border-r border-gray-200 bg-white p-4 sm:flex`}>
       <div className="mb-6 flex items-center justify-between px-1">
         <Image
           src="/mira-logo.png"

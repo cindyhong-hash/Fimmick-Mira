@@ -7,6 +7,8 @@
 
 import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import { useUndoRedo } from "@/hooks/useUndoRedo";
+import { useSidebarCollapsed } from "@/lib/useSidebarCollapsed";
+import { sidebarOffsetClass } from "@/components/layout/sidebar-metrics";
 import {
   X, Check, Sparkles, LayoutTemplate, SwatchBook, Mountain, Layers, RotateCcw, RotateCw,
   Loader2, Upload, Trash2, Wand2, ChevronDown, HelpCircle,
@@ -149,6 +151,8 @@ function BlockCard({
 // ─── Main ────────────────────────────────────────────────────────────────────
 export const PromptComposer = forwardRef<PromptComposerHandle, Props>(function PromptComposer(
   { slots, onClearSlot, onPickSlot, clientId, onGenerated, onStarted, prefill, prefillNonce, onDirtyChange }, ref) {
+  // 底部「送出」列是 fixed 的，要跟著側邊欄目前的寬度起算，否則中間會露出灰縫。
+  const [sidebarCollapsed] = useSidebarCollapsed();
   // 統一設計描述——主體／構圖／配色／背景／其他注意事項全部喺呢一個 textarea 度，
   // 由頭到尾都可編輯（唔再有「唯讀預覽」／「潤色先解鎖」兩個階段）。積木揀選會將
   // `構圖：...` 呢類一行插入呢個文字（冇方括號，睇落自然啲；同 ActivityForm.tsx 嘅 applyBlock 概念一致）。
@@ -993,7 +997,7 @@ export const PromptComposer = forwardRef<PromptComposerHandle, Props>(function P
 
       {/* Actions — fixed 貼實 viewport 底（跟 QuickAddForm/GenerateAssetForm 同一套處理，
           因為外層 <main class="overflow-auto"> 令 sticky 失效，見 QuickAddForm 註解）。 */}
-      <div className="fixed bottom-0 left-60 right-0 z-30 bg-white border-t">
+      <div className={`fixed bottom-0 right-0 z-30 bg-white border-t ${sidebarOffsetClass(sidebarCollapsed)}`}>
         <div className="max-w-3xl ml-6 py-3 flex items-center gap-3">
           {!drafts ? (
             <div className="flex flex-col items-center pt-2 w-full">

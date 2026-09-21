@@ -313,21 +313,34 @@ export const PromptComposer = forwardRef<PromptComposerHandle, Props>(function P
   // #2 潤色寫手：擴寫目前 designText → 直接覆寫（唔再係獨立 state）；覆寫前推一步落 undo 棧。
   async function polishBrief() {
     const source = buildPolishSource();
-    if (!source.trim()) return;
+    // 合成模式扣掉「主體：…」之後可能就空了——只上傳產品、還沒想到場景的時候就是這樣。
+    // 原本這裡直接 return：按鈕看起來可以按，撳落去完全冇反應（冇 spinner、冇錯誤）。
+    // 而呢一刻正正係最需要 AI 嘅時候，所以改成請佢淨係寫場景，主體照樣唔郁——
+    // 唔可以直接攞「主體：…」做 brief，否則潤色會連產品外觀一齊擴寫，
+    // 擺返落 sceneOverride 就會叫生圖模型重畫產品。
+    const subject = designText.match(/^主體：(.*)$/m)?.[1]?.trim() ?? "";
+    const effectiveSource = source.trim()
+      || (composite && subject
+        ? `為「${subject}」設計拍攝場景：描述背景、光線、氛圍與道具，不要描述產品本身的外觀。`
+        : "");
+    if (!effectiveSource) {
+      setGenError("請先輸入一些設計描述再優化");
+      return;
+    }
     setPolishing(true);
     setGenError(null);
     try {
       const res = await fetch("/api/library/polish", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          brief: source,
+          brief: effectiveSource,
           clientId,
           ...(productUrls.length > 0 ? { productImageUrls: productUrls } : {}),
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "潤色失敗");
-      const polished = (data.brief ?? source).trim();
+      const polished = (data.brief ?? effectiveSource).trim();
       if (composite) {
         // 合成模式：source 冇包主體，攞返原本「主體：...」嗰行補返喺前面。
         const subjectTag = designText.match(/^主體：.*$/m)?.[0];

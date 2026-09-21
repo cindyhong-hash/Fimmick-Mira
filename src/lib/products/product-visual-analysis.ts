@@ -230,9 +230,15 @@ export function buildImageSetArtDirection(
     palette: { dominant, accent },
     lighting: visual ? `${visual.season}；柔和、乾淨且跨素材一致的高級廣告光線` : "柔和、乾淨且跨素材一致的高級廣告光線",
     materials: profile.appearance.materials,
-    // 背景語言只吃場景與時節，不吃道具——背景板要求檯面淨空，
-    // 主題感要表現在「場景與光線」而不是在檯面上堆東西。
-    backgroundLanguage: visual ? `${visual.setting}（${visual.season}）` : scene,
+    // 背景語言吃場景、時節與色調，但**不吃道具**——背景板要求檯面淨空，
+    // 主題感要表現在「場景、光線與顏色」，不是在檯面上堆東西。
+    //
+    // 色調原本也被排除，結果選 520 告白日生出來的背景還是商品的淡藍色，
+    // 整組素材看不出跟主題有關。色調不是道具：它只影響牆面與光線的顏色，
+    // 檯面一樣淨空，所以不該跟道具一起被擋掉。
+    backgroundLanguage: visual
+      ? `${visual.setting}（${visual.season}）；環境色調以 ${visual.palette.join("、")} 為主，牆面與光線都要看得出這個色調，但檯面仍然完全淨空`
+      : scene,
     cameraLanguage: "清晰、高級且便於後續廣告合成的視覺語言",
     consistencyRules: [
       "所有畫面視為同一產品的不同視角。",

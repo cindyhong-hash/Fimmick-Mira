@@ -122,10 +122,21 @@ export function compileImageSetPrompt({ product, profile, artDirection, role }: 
     ...profile.prohibitedChanges,
     ...artDirection.consistencyRules,
   ].join("\n");
-  const palette = [
-    `dominant palette: ${paletteText(artDirection.palette.dominant, "product-visible colors only")}`,
-    `accent palette: ${paletteText(artDirection.palette.accent, "none")}; accent only, never dominant.`,
-  ].join("\n");
+  // 背景板不印商品主色。
+  //
+  // 實測：選 520 告白日，背景語言已經寫了「環境色調以櫻粉為主」，但同一份提示詞
+  // 上面還有一行 `dominant palette: light blue`（商品的顏色）。「dominant」字面上
+  // 就是主色，模型聽它的，所以背景生出來仍是淡藍，看不出檔期。
+  //
+  // 背景上本來就不會有商品（商品是後製合成上去的），商品顏色對它沒有意義；
+  // 「維持商品顏色」是靠 consistencyRules 保證的，不是靠這一行。與其再補一句去
+  // 跟它拉扯，不如把矛盾的來源拿掉，讓背景語言自己說了算。
+  const palette = (role.role === "background"
+    ? [`accent palette: ${paletteText(artDirection.palette.accent, "none")}; accent only, never dominant.`]
+    : [
+      `dominant palette: ${paletteText(artDirection.palette.dominant, "product-visible colors only")}`,
+      `accent palette: ${paletteText(artDirection.palette.accent, "none")}; accent only, never dominant.`,
+    ]).join("\n");
   const sharedDirection = [
     `Mood: ${list(artDirection.mood, "clean and consistent")}`,
     ...(role.role === "decoration" ? [`Decoration style: ${list(artDirection.decorationStyle, "minimal non-typographic accents")}`] : []),

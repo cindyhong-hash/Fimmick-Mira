@@ -423,6 +423,47 @@ test("the english part of a benefit icon prompt never carries chinese product wo
   }
 });
 
+test("a themed background carries the theme colours while the surface stays empty", () => {
+  // 選 520 告白日，背景卻還是商品的淡藍色——因為 backgroundLanguage 只帶了
+  // 場景與時節，沒帶色調。色調不是道具，不該跟道具一起被擋掉。
+  const theme = imageSetThemeCatalog().find(({ label }) => label === "520 告白日")!;
+  const themed = buildImageSetArtDirection(skincareProfile, { primaryColor: "#ffeb85", toneLabels: [] }, theme);
+  assert.match(themed.backgroundLanguage, /櫻粉/, "背景語言沒有帶到檔期色調");
+  // 但檯面仍然要淨空——這是背景板能被合成的前提。
+  assert.match(themed.backgroundLanguage, /檯面仍然完全淨空/);
+  // 道具不進背景語言，否則檯面會被堆滿。
+  assert.doesNotMatch(themed.backgroundLanguage, /花瓣|緞帶/);
+
+  const role = planImageSetRoles({ profile: skincareProfile, artDirection: themed, theme })
+    .find(({ role }) => role === "background")!;
+  const prompt = compileImageSetPrompt({ product, profile: skincareProfile, artDirection: themed, role });
+  assert.match(prompt, /櫻粉/);
+  assert.match(prompt, /完全淨空|nothing resting on it/);
+});
+
+test("the background prompt drops the product palette so the theme colour can win", () => {
+  // 背景語言寫了「環境色調以櫻粉為主」，但同一份提示詞裡的
+  // `dominant palette: light blue`（商品色）字面上更強勢，模型聽它的，
+  // 結果背景還是淡藍。背景上不會有商品，商品色對它沒有意義，所以不印。
+  const theme = imageSetThemeCatalog().find(({ label }) => label === "520 告白日")!;
+  const themed = buildImageSetArtDirection(skincareProfile, { primaryColor: "#ffeb85", toneLabels: [] }, theme);
+  const roles = planImageSetRoles({ profile: skincareProfile, artDirection: themed, theme });
+
+  const background = compileImageSetPrompt({
+    product, profile: skincareProfile, artDirection: themed,
+    role: roles.find(({ role }) => role === "background")!,
+  });
+  assert.doesNotMatch(background, /dominant palette/i, "背景仍然印了商品主色");
+  assert.match(background, /櫻粉/, "背景沒有拿到檔期色");
+
+  // 其他角色照舊——商品主體與質地本來就要跟著商品顏色走。
+  const hero = compileImageSetPrompt({
+    product, profile: skincareProfile, artDirection: themed,
+    role: roles.find(({ role }) => role === "hero")!,
+  });
+  assert.match(hero, /dominant palette/i, "商品角色不該被連帶拿掉主色");
+});
+
 test("icon colours follow the chosen theme, in english only", () => {
   // 選 520 告白日跟選耶誕節不該拿到一樣的顏色——之前 icon 完全不吃檔期，
   // 不管選什麼檔期都是同一個品牌色。

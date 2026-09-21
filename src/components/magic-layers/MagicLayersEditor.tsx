@@ -111,7 +111,19 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null);
   const [zoomPct, setZoomPct] = useState(100);
   // 橡皮擦工具（局部擦掉圖片圖層）
-  const [tool, setTool] = useState<"select" | "erase">("select");
+  const [tool, setTool] = useState<"select" | "erase" | "marquee">("select");
+  // 生成式填色：在畫布上框一塊，只有那一塊交給 AI 重畫（補東西或移除東西）。
+  // marqueeRef 是拖曳中的即時矩形（給 render 畫虛線框用，不觸發 re-render）；
+  // marquee 是放開滑鼠後定案的那一塊，有值才會跳出輸入框。
+  const marqueeRef = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [genFillPrompt, setGenFillPrompt] = useState("");
+  const [genFillBusy, setGenFillBusy] = useState(false);
+  const [genFillResult, setGenFillResult] = useState<string[] | null>(null);
+  /** 目前預覽第幾個版本；結果一回來就直接套在畫布上，用 ‹ › 換著看。 */
+  const [genFillIndex, setGenFillIndex] = useState(0);
+  /** 預覽期間被蓋住的圖層；按取消要還原回去。 */
+  const hiddenByPreview = useRef<string[]>([]);
   const [brush, setBrush] = useState(28);   // 筆刷半徑（文件座標 px）
   const toolRef = useRef(tool); toolRef.current = tool;
   const brushRef = useRef(brush); brushRef.current = brush;
@@ -246,6 +258,18 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       }
       ctx.restore();
     }
+    // 生成式填色的選取框（虛線，跟 PS 的行進螞蟻同一個意思）
+    const mq = marqueeRef.current;
+    if (mq) {
+      ctx.save();
+      ctx.setLineDash([6 / view.current.zoom, 4 / view.current.zoom]);
+      ctx.lineWidth = 1.5 / view.current.zoom; ctx.strokeStyle = "#7c3aed";
+      ctx.fillStyle = "rgba(124,58,237,.10)";
+      const x = Math.min(mq.x0, mq.x1), y = Math.min(mq.y0, mq.y1);
+      ctx.fillRect(x, y, Math.abs(mq.x1 - mq.x0), Math.abs(mq.y1 - mq.y0));
+      ctx.strokeRect(x, y, Math.abs(mq.x1 - mq.x0), Math.abs(mq.y1 - mq.y0));
+      ctx.restore();
+    }
     // 橡皮擦筆刷游標圈
     if (toolRef.current === "erase" && erasePt.current) {
       ctx.beginPath();
@@ -255,7 +279,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     }
     ctx.restore();
 
-    if (toolRef.current !== "erase") for (const id of selectedIds) { const s = layersRef.current.find((l) => l.id === id); if (s?.visible) drawSelection(ctx, s, id === selectedId); }
+    if (toolRef.current === "select") for (const id of selectedIds) { const s = layersRef.current.find((l) => l.id === id); if (s?.visible) drawSelection(ctx, s, id === selectedId); }
   }, [doc.w, doc.h, selectedId, selectedIds]);
   // 局部擦除：文件座標 → 圖層像素 → destination-out 挖透明
   const eraseAt = (l: EL, dx: number, dy: number) => {
@@ -364,6 +388,14 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         }
         return;
       }
+      // 框選模式：只畫框，不碰圖層
+      if (!wantPan && toolRef.current === "marquee") {
+        marqueeRef.current = { x0: d.x, y0: d.y, x1: d.x, y1: d.y };
+        setMarquee(null); setGenFillResult(null);
+        drag.current = { mode: "marquee" };
+        render();
+        return;
+      }
       if (!wantPan) {
         const h = hitHandle(s.x, s.y);
         if (h) { const l = sel()!; drag.current = h.type === "rotate" ? { mode: "rotate", l, orot: l.rotation, grab: Math.atan2(d.y - l.cy, d.x - l.cx) } : { mode: "scale", l, ow: l.w, oh: l.h, handle: h }; return; }
@@ -395,6 +427,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         for (let i = 1; i <= n; i++) eraseAt(g.l, lx + (d.x - lx) * (i / n), ly + (d.y - ly) * (i / n));
         g.lx = d.x; g.ly = d.y; erasePt.current = d; render();
       }
+      else if (g.mode === "marquee") {
+        if (marqueeRef.current) { marqueeRef.current.x1 = d.x; marqueeRef.current.y1 = d.y; render(); }
+      }
       else if (g.mode === "move") {
         const dx = d.x - g.sx, dy = d.y - g.sy;
         for (const item of g.moving) { item.l.cx = item.ocx + dx; item.l.cy = item.ocy + dy; }
@@ -412,7 +447,16 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       else if (g.mode === "rotate") { const now = Math.atan2(d.y - g.l.cy, d.x - g.l.cx); let r = g.orot + (now - g.grab); if (e.shiftKey) r = Math.round(r / (Math.PI / 12)) * (Math.PI / 12); g.l.rotation = r; render(); }
       else if (g.mode === "pan") { view.current.panX = g.opx + (s.x - g.sx); view.current.panY = g.opy + (s.y - g.sy); render(); }
     };
-    const up = () => { if (drag.current && drag.current.l) { for (const item of drag.current.moving ?? [{ l: drag.current.l }]) item.l.thumb = makeThumb(item.l); if (drag.current.mode !== "pan") markDirty(); } drag.current = null; refresh(); render(); };
+    const up = () => {
+      if (drag.current?.mode === "marquee") {
+        const m = marqueeRef.current;
+        const w = m ? Math.abs(m.x1 - m.x0) : 0, h = m ? Math.abs(m.y1 - m.y0) : 0;
+        // 太小的框當成誤點，直接取消——不然會跳出輸入框擋畫面。
+        if (m && w >= 12 && h >= 12) setMarquee({ x: Math.min(m.x0, m.x1), y: Math.min(m.y0, m.y1), w, h });
+        else { marqueeRef.current = null; setMarquee(null); }
+        drag.current = null; render(); return;
+      }
+      if (drag.current && drag.current.l) { for (const item of drag.current.moving ?? [{ l: drag.current.l }]) item.l.thumb = makeThumb(item.l); if (drag.current.mode !== "pan") markDirty(); } drag.current = null; refresh(); render(); };
     const hover = (s: { x: number; y: number }) => {
       if (space.current) { cv.style.cursor = "grab"; return; }
       const h = hitHandle(s.x, s.y); if (h) { cv.style.cursor = h.type === "rotate" ? "crosshair" : h.type === "resize" ? (h.axis === "x" ? "ew-resize" : "ns-resize") : "nwse-resize"; return; }
@@ -728,6 +772,75 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     bg.thumb = makeThumb(bg); layersRef.current.unshift(bg); setMagicFillResult(null); selectOnly(bg.id); markDirty(); refresh(); render();
   }, [doc.w, doc.h, markDirty, refresh, render]);
 
+  const PREVIEW_ID = "genfill_preview";
+
+  /**
+   * 把某個版本直接套上畫布預覽。
+   *
+   * 不用彈窗列縮圖給使用者挑——那樣要瞇著眼睛比對小圖。改成直接蓋在畫布上，
+   * 用 ‹ › 原地切換，看到滿意的再按完成。第一次呼叫時把現有圖層藏起來並記下來，
+   * 按取消才還原得回去。
+   */
+  const previewGenFill = useCallback(async (url: string) => {
+    const canvas = await loadToCanvas(url); if (!canvas) return;
+    const existing = layersRef.current.find((l) => l.id === PREVIEW_ID);
+    if (existing) {
+      existing.canvas = canvas; existing.src = url; existing.thumb = makeThumb(existing);
+    } else {
+      hiddenByPreview.current = layersRef.current.filter((l) => l.visible).map((l) => l.id);
+      layersRef.current.forEach((l) => { l.visible = false; });
+      const bg: EL = { id: PREVIEW_ID, name: "生成式填色", type: "background", semanticId: "background", instanceId: null, confidence: 1, editable: true, source: "generated", isText: false, text: "", color: "#000", fontSize: 24, fontFamily: FONT, fontWeight: 700, align: "center", shape: null, canvas, naturalW: canvas.width, naturalH: canvas.height, src: url, cx: doc.w / 2, cy: doc.h / 2, w: doc.w, h: doc.h, rotation: 0, visible: true, locked: false, opacity: 1, embeddedText: [], thumb: null };
+      bg.thumb = makeThumb(bg); layersRef.current.unshift(bg);
+    }
+    refresh(); render();
+  }, [doc.w, doc.h, refresh, render]);
+
+  /** 留下目前預覽的版本。 */
+  const commitGenFill = useCallback(() => {
+    const l = layersRef.current.find((x) => x.id === PREVIEW_ID);
+    if (l) l.id = `genfill_${Date.now()}`;
+    hiddenByPreview.current = [];
+    setGenFillResult(null); setGenFillIndex(0); setMarquee(null); marqueeRef.current = null;
+    setGenFillPrompt(""); setTool("select");
+    if (l) selectOnly(l.id);
+    markDirty(); refresh(); render();
+  }, [markDirty, refresh, render, selectOnly]);
+
+  /** 丟掉預覽，畫面回到按生成之前。 */
+  const cancelGenFill = useCallback(() => {
+    layersRef.current = layersRef.current.filter((l) => l.id !== PREVIEW_ID);
+    const back = new Set(hiddenByPreview.current);
+    layersRef.current.forEach((l) => { if (back.has(l.id)) l.visible = true; });
+    hiddenByPreview.current = [];
+    setGenFillResult(null); setGenFillIndex(0);
+    refresh(); render();
+  }, [refresh, render]);
+
+  /**
+   * 生成式填色：只重畫框選的那一塊。
+   *
+   * 來源是整張攤平的畫布（模型要看得到周圍才接得起來），遮罩則只有框選區是白的。
+   * 沒填字就是「把這塊接回周圍的場景」＝移除東西；填了字就是在那塊畫指定的內容。
+   */
+  const generateFillInMarquee = useCallback(async (mode: "fill" | "remove") => {
+    if (!marquee || genFillBusy) return;
+    setGenFillBusy(true); setGenFillResult(null);
+    try {
+      const m = document.createElement("canvas"); m.width = doc.w; m.height = doc.h;
+      const mg = m.getContext("2d")!;
+      mg.fillStyle = "#000"; mg.fillRect(0, 0, doc.w, doc.h);
+      mg.fillStyle = "#fff"; mg.fillRect(marquee.x, marquee.y, marquee.w, marquee.h);
+      const r = await fetch("/api/magic-layers/magic-fill", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageDataUrl: flattenToDataUrl(), maskDataUrl: m.toDataURL("image/png"), prompt: mode === "fill" ? genFillPrompt.trim() || undefined : undefined, mode, variants: 2 }),
+      });
+      const d = await r.json(); if (!r.ok) throw new Error(d.error ?? "生成失敗");
+      setGenFillResult(d.variants); setGenFillIndex(0);
+      if (d.variants?.[0]) await previewGenFill(d.variants[0]);
+    } catch (e) { alert("生成式填色失敗：" + (e instanceof Error ? e.message : String(e))); }
+    finally { setGenFillBusy(false); }
+  }, [marquee, genFillBusy, doc.w, doc.h, flattenToDataUrl, genFillPrompt, previewGenFill]);
+
   const generateOutpaint = useCallback(async () => {
     if (outpaintBusy) return; setOutpaintBusy(true); setOutpaintResult(null);
     try {
@@ -776,6 +889,13 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   useEffect(() => {
     const saveShortcut = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") { e.preventDefault(); void doSave(false); }
+      // ⌘G 群組／⌘⇧G 解散，跟設計工具一致。要 preventDefault——瀏覽器的 ⌘G 是「找下一個」。
+      // 放在這個 effect 而不是上面那個鍵盤 effect：groupSelected 宣告在那之後。
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "g"
+        && !/INPUT|TEXTAREA/.test((e.target as HTMLElement).tagName)) {
+        e.preventDefault();
+        if (e.shiftKey) ungroupSelected(); else groupSelected();
+      }
     };
     window.addEventListener("keydown", saveShortcut);
     return () => window.removeEventListener("keydown", saveShortcut);
@@ -919,8 +1039,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           <option value="1:1">1:1</option><option value="4:5">4:5</option><option value="9:16">9:16</option><option value="16:9">16:9</option>
         </select>
         <span style={S.divider} />
-        {selectedIds.length >= 2 && !selectedIds.some((id) => !!layersRef.current.find((l) => l.id === id)?.groupId) && <button style={S.tbtn} onClick={groupSelected} title="將選取的物件設為一組">群組</button>}
-        {selectedIds.some((id) => !!layersRef.current.find((l) => l.id === id)?.groupId) && <button style={S.tbtn} onClick={ungroupSelected} title="解除目前群組">解散群組</button>}
+        {selectedIds.length >= 2 && !selectedIds.some((id) => !!layersRef.current.find((l) => l.id === id)?.groupId) && <button style={S.tbtn} onClick={groupSelected} title="將選取的物件設為一組（⌘G）">群組</button>}
+        {selectedIds.some((id) => !!layersRef.current.find((l) => l.id === id)?.groupId) && <button style={S.tbtn} onClick={ungroupSelected} title="解除目前群組（⌘⇧G）">解散群組</button>}
         {selectedIsImage && (
           <button style={S.tbtn} onClick={() => void cutoutSelected()} disabled={adding} title="移除這個圖層的背景（會呼叫付費去背服務）">
             {adding ? "去背中…" : "去背"}
@@ -974,6 +1094,22 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
               <button style={S.tool} onClick={() => { setOutpaintResult(null); setShowOutpaint(true); }}><Maximize2 size={16} />擴圖／改尺寸</button>
               {SHOW_MAGIC_FILL && (
                 <button style={S.tool} onClick={generateMagicFill} disabled={magicFillBusy}><WandSparkles size={16} />{magicFillBusy ? "偵測並延伸中…" : "魔術棒補空白"}</button>
+              )}
+              <button
+                style={{ ...S.tool, ...(tool === "marquee" ? { border: "1px solid #7c3aed", color: "#7c3aed", background: "#f5f3ff" } : {}) }}
+                onClick={() => {
+                  setTool((t) => (t === "marquee" ? "select" : "marquee"));
+                  marqueeRef.current = null; setMarquee(null); setGenFillResult(null);
+                  if (canvasRef.current) canvasRef.current.style.cursor = "default";
+                  render();
+                }}
+                title="在畫布上框一塊，讓 AI 只重畫那一塊（補東西或移除東西）">
+                <WandSparkles size={16} />生成式填色{tool === "marquee" ? "（開）" : ""}
+              </button>
+              {tool === "marquee" && (
+                <div style={{ fontSize: 11, color: "#6b7280", padding: "2px 4px 6px" }}>
+                  在圖上拖出一個框。要清掉東西按「移除」；要畫東西就打字再按「生成」。
+                </div>
               )}
               <button
                 style={{ ...S.tool, ...(tool === "erase" ? { border: "1px solid #7c3aed", color: "#7c3aed", background: "#f5f3ff" } : {}) }}
@@ -1305,6 +1441,57 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
             {!outpaintResult && <button onClick={generateOutpaint} disabled={outpaintBusy} style={{ ...S.rbtn, width: "100%", marginTop: 16, height: 42, background: "#7c3aed", color: "#fff" }}>{outpaintBusy ? "擴圖生成中…" : "開始擴圖"}</button>}
             {outpaintResult && <><div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10, marginTop: 16 }}>{outpaintResult.variants.map((url, i) => <button key={url} onClick={() => applyOutpaint(url)} style={{ border: "1px solid #e5e7eb", background: "#fff", padding: 6, borderRadius: 12, cursor: "pointer" }}><img src={url} alt={`版本 ${i + 1}`} style={{ width: "100%", maxHeight: 260, objectFit: "contain" }} /><span>使用版本 {i + 1}</span></button>)}</div><button onClick={generateOutpaint} style={{ ...S.rbtn, marginTop: 12 }}>重新產生</button></>}
           </div>
+        </div>
+      )}
+
+      {/* 框好之後的輸入框：跟 PS 一樣，框選完就地問「要生成什麼」 */}
+      {marquee && !genFillResult && (
+        <div style={{ position: "fixed", left: "50%", bottom: 28, transform: "translateX(-50%)", zIndex: 92, display: "flex", gap: 8, alignItems: "center", background: "#1f2937", padding: 10, borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,.28)" }}>
+          <input
+            autoFocus
+            value={genFillPrompt}
+            onChange={(e) => setGenFillPrompt(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !genFillBusy && genFillPrompt.trim()) generateFillInMarquee("fill"); if (e.key === "Escape") { setMarquee(null); marqueeRef.current = null; render(); } }}
+            placeholder="要在這塊畫什麼？（想清掉東西就按右邊的「移除」）"
+            style={{ width: 340, fontSize: 13, padding: "8px 10px", borderRadius: 8, border: "1px solid #4b5563", background: "#111827", color: "#f9fafb", outline: "none" }} />
+          <button onClick={() => generateFillInMarquee("fill")} disabled={genFillBusy || !genFillPrompt.trim()}
+            title={genFillPrompt.trim() ? "在框選的那塊畫出你打的東西" : "先打字說要畫什麼"}
+            style={{ ...S.rbtn, background: "#7c3aed", color: "#fff", border: "none", opacity: (genFillBusy || !genFillPrompt.trim()) ? .5 : 1, whiteSpace: "nowrap" }}>
+            {genFillBusy ? "生成中…" : "生成"}
+          </button>
+          {/* 移除獨立一顆，不靠關鍵字猜意圖——打「把花瓣移除」時模型會照著畫花瓣。 */}
+          <button onClick={() => generateFillInMarquee("remove")} disabled={genFillBusy}
+            title="把框選的東西清掉，補成乾淨的表面"
+            style={{ ...S.rbtn, background: "transparent", color: "#f9fafb", border: "1px solid #4b5563", opacity: genFillBusy ? .6 : 1, whiteSpace: "nowrap" }}>
+            移除
+          </button>
+          {genFillBusy && (
+            // 不定量進度條：這一步要 15–40 秒，沒有東西在動會讓人以為當掉了。
+            <span aria-hidden style={{ width: 90, height: 4, borderRadius: 2, background: "#374151", overflow: "hidden", display: "inline-block" }}>
+              <span style={{ display: "block", width: "40%", height: "100%", background: "#7c3aed", animation: "genfill-progress 1.1s ease-in-out infinite" }} />
+            </span>
+          )}
+          <style>{"@keyframes genfill-progress{0%{transform:translateX(-100%)}100%{transform:translateX(250%)}}"}</style>
+          <button onClick={() => { setMarquee(null); marqueeRef.current = null; render(); }}
+            style={{ ...S.rbtn, background: "transparent", color: "#d1d5db", border: "1px solid #4b5563", whiteSpace: "nowrap" }}>
+            取消
+          </button>
+        </div>
+      )}
+
+      {/* 結果直接套在畫布上，用 ‹ › 原地換版本——不要彈窗擺一排小縮圖給人瞇著眼比。 */}
+      {genFillResult && genFillResult.length > 0 && (
+        <div style={{ position: "fixed", left: "50%", bottom: 28, transform: "translateX(-50%)", zIndex: 93, display: "flex", gap: 10, alignItems: "center", background: "#1f2937", padding: "10px 14px", borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,.28)", color: "#f9fafb" }}>
+          <span style={{ fontSize: 12, color: "#9ca3af" }}>只有框選的那塊被換掉</span>
+          <button
+            onClick={() => { const i = (genFillIndex - 1 + genFillResult.length) % genFillResult.length; setGenFillIndex(i); void previewGenFill(genFillResult[i]); }}
+            style={{ ...S.rbtn, background: "transparent", color: "#f9fafb", border: "1px solid #4b5563", padding: "4px 10px" }}>‹</button>
+          <span style={{ fontSize: 13, fontVariantNumeric: "tabular-nums" }}>{genFillIndex + 1}/{genFillResult.length}</span>
+          <button
+            onClick={() => { const i = (genFillIndex + 1) % genFillResult.length; setGenFillIndex(i); void previewGenFill(genFillResult[i]); }}
+            style={{ ...S.rbtn, background: "transparent", color: "#f9fafb", border: "1px solid #4b5563", padding: "4px 10px" }}>›</button>
+          <button onClick={commitGenFill} style={{ ...S.rbtn, background: "#7c3aed", color: "#fff", border: "none", whiteSpace: "nowrap" }}>完成</button>
+          <button onClick={cancelGenFill} style={{ ...S.rbtn, background: "transparent", color: "#d1d5db", border: "1px solid #4b5563", whiteSpace: "nowrap" }}>取消</button>
         </div>
       )}
 

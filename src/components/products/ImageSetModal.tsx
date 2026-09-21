@@ -13,7 +13,7 @@ import { DEFAULT_BENEFIT_ICON_STYLE, type BenefitIconStyle, type ImageSetPlanIte
  */
 const BENEFIT_ICON_STYLE_OPTIONS: { value: BenefitIconStyle; label: string; hint: string }[] = [
   { value: "plain", label: "極簡線稿", hint: "單色細線圖形，沒有外框" },
-  { value: "framed", label: "圓框線稿", hint: "線稿外加一圈細圓框，適合排成功效四格" },
+  { value: "framed", label: "圓底徽章", hint: "實心圓底＋白色圖形，整組同一個色系" },
   { value: "soft", label: "柔和色塊", hint: "柔和填色圖形，保留品牌藍黃，細節少、一眼看得懂" },
 ];
 import type { ImageSetTheme } from "@/lib/products/image-set-roles";

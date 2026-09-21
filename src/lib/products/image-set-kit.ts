@@ -9,7 +9,7 @@ export type StoredAssetRole = "hero" | "detail" | "background" | "benefit" | "de
  * 三種都是中性的、可套用品牌色的，因為同一組 icon 要能用在任何產品上。
  *
  * `plain`  極簡線稿：單色細線，沒有外框（預設）
- * `framed` 圓框線稿：線稿外加一圈細圓框，適合排成功效四格
+ * `framed` 圓底徽章：實心圓底＋白色剪影，整組同一個色系，適合排成功效四格
  * `soft`   柔和色塊：柔和填色圖示，保留品牌藍黃與插畫感，但細節壓到最少
  */
 export type BenefitIconStyle = "plain" | "framed" | "soft";

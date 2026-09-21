@@ -298,10 +298,13 @@ test("benefit icons are one-per-point, text-free, flat white, and visually consi
   assert.match(prompt, /任何文字、字母、數字/);
   // 整組風格要一致——靠的是「每張都畫同一個外框」這個機械性約束，
   // 不是叫模型自己記住前幾張（每張是獨立一次呼叫，它看不到同組其他張）。
-  assert.match(prompt, /circular frame/i);
-  assert.match(prompt, /identical across the set/i);
+  // 外框改成實心圓底徽章：白色剪影放在填滿的圓裡，整組同一個顏色。
+  assert.match(prompt, /solid circular badge/i);
+  assert.match(prompt, /plain white silhouette/i);
+  assert.match(prompt, /same single colour for every badge/i);
   // 元素數量要釘死，否則會疊成一團而不是 icon。
-  assert.match(prompt, /at most two elements/i);
+  // 元素上限由共用規則統一講：整張只畫主體＋一個輔助元素。
+  assert.match(prompt, /Draw exactly two things/i);
   // 不要變成情境照或抽象裝飾——那是另外兩個角色的工作。
   assert.match(prompt, /情境照、背景場景、人物/);
   assert.match(prompt, /Emoji、卡通角色/);
@@ -321,7 +324,7 @@ test("the soft icon style swaps the visual language but keeps every benefit-icon
   assert.match(prompt, /do not add interior lines, seams or texture/i);
   assert.match(prompt, /插畫感的切面拼貼/);
   assert.match(prompt, /45% of the canvas/i);
-  assert.doesNotMatch(prompt, /circular frame/i);
+  assert.doesNotMatch(prompt, /solid circular badge/i);
   // 三種風格都必須是中性可換色的——顏色寫死在圖裡的話，換個品牌就整組報廢。
   // 藍黃配色保留，但是平塗單色，不是拼貼。
   assert.match(prompt, /brand blue/i);
@@ -344,7 +347,7 @@ test("benefit icons default to the frameless plain style, which is the recoloura
 
   const prompt = compileImageSetPrompt({ product, profile: skincareProfile, artDirection, role: icons[0] });
   assert.match(prompt, /no frame, no container/i);
-  assert.doesNotMatch(prompt, /circular frame/i);
+  assert.doesNotMatch(prompt, /solid circular badge/i);
   assert.doesNotMatch(prompt, /sphere/i);
   // 單色、無填色＝之後可以整組換成品牌色，所以同一組 icon 能套到任何產品。
   assert.match(prompt, /recoloured to any brand palette/i);

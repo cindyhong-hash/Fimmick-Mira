@@ -10,6 +10,8 @@
  * src/app/api/components/analyze/route.ts.
  */
 
+import { describeHexCodesInText } from "./color-words.ts";
+
 const PROVIDER = process.env.GEN_PROVIDER ?? "inapp";
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 // Copy uses a cheap, reliable OpenRouter model (same family as the vision model).
@@ -164,7 +166,10 @@ export function compileChineseBrief(i: ChineseBriefInput): string {
  * Falls back to the raw brief if no OpenRouter key (so generation still works).
  */
 export async function translateBriefToEnglishPrompt(brief: string): Promise<string> {
-  const text = brief.trim();
+  // 色碼在這裡就換成顏色文字，不是交給翻譯器處理——下面每條失敗路徑都會直接
+  // 回傳這個 text（沒有 API key、OpenRouter 出錯、逾時），漏一條就等於色碼原封
+  // 不動送進生圖模型，而模型會把它當成畫面上要寫的字描出來。
+  const text = describeHexCodesInText(brief.trim());
   if (!text) return "";
   if (!OPENROUTER_API_KEY || OPENROUTER_API_KEY === "your-openrouter-api-key-here") {
     return text; // graceful fallback
@@ -173,7 +178,9 @@ export async function translateBriefToEnglishPrompt(brief: string): Promise<stri
     "You are an expert prompt engineer for the FLUX text-to-image model. " +
     "You convert marketing-image design briefs (often written in Traditional Chinese) into a single, " +
     "concise, vivid ENGLISH image-generation prompt. Preserve every concrete detail: subject, composition, " +
-    "background, mood, and exact color hex codes. Do NOT add people or text unless the brief asks. " +
+    "background, and mood. Describe colours in plain words (e.g. 'soft blush pink'); never write a hex code " +
+    "or any other code — the model paints those into the picture as literal text. " +
+    "Do NOT add people or text unless the brief asks. " +
     "Output ONLY the final English prompt — no quotes, no explanation, no line breaks.";
   const user = `Design brief:\n${text}\n\nEnglish FLUX prompt:`;
   try {
@@ -200,7 +207,8 @@ export async function translateBriefToEnglishPrompt(brief: string): Promise<stri
       return text; // fallback to raw brief
     }
     const data = await res.json();
-    const out = (data.choices?.[0]?.message?.content ?? "").trim().replace(/^["']|["']$/g, "");
+    // 翻譯器自己也可能生出色碼（潤色模型就做過），所以輸出再過一次。
+    const out = describeHexCodesInText((data.choices?.[0]?.message?.content ?? "").trim().replace(/^["']|["']$/g, ""));
     return out || text;
   } catch (err) {
     console.error("[translateBrief] failed:", err instanceof Error ? err.message : err);

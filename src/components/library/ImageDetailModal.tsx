@@ -401,14 +401,46 @@ export function ImageDetailModal({
       <div className="relative w-full max-w-5xl max-h-[92vh] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b shrink-0 gap-3 min-w-0">
-          {/* 標題只 show 類別（唔再用生成文字 / 唔可改名）*/}
+          {/* 類別 + 可改的名字。類別維持固定字樣（之前把整段生成文字當標題，header 會爆），
+              名字另外一格：畫廊卡片顯示的就是它，沒有這格就只能一直叫「未命名素材」。 */}
           <h2 className="text-sm font-semibold flex items-center gap-1.5 min-w-0">
             {genType === "reference" || !libraryImageId ? (
               <Paperclip className="h-4 w-4 shrink-0 text-blue-500" />
             ) : (
               <Package className="h-4 w-4 shrink-0 text-[#C9A227]" />
             )}
-            <span>{genType === "reference" || !libraryImageId ? "參考圖" : "產品成圖"}</span>
+            <span className="shrink-0">{genType === "reference" || !libraryImageId ? "參考圖" : "產品成圖"}</span>
+            {libraryImageId && (editingTitle ? (
+              <span className="flex items-center gap-1 min-w-0">
+                <input
+                  autoFocus
+                  value={titleDraft}
+                  onChange={(e) => setTitleDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") { e.preventDefault(); saveTitle(); }
+                    if (e.key === "Escape") setEditingTitle(false);
+                  }}
+                  maxLength={80}
+                  placeholder="幫這張圖取個名字"
+                  className="w-48 text-xs font-normal px-2 py-1 rounded-md border border-violet-300 focus:outline-none focus:ring-1 focus:ring-violet-400" />
+                <button onClick={saveTitle} disabled={savingTitle}
+                  className="text-xs px-2 py-1 rounded-md bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 whitespace-nowrap">
+                  {savingTitle ? "儲存中…" : "儲存"}
+                </button>
+                <button onClick={() => setEditingTitle(false)}
+                  className="text-xs px-2 py-1 rounded-md border border-gray-200 text-gray-500 hover:border-gray-400 whitespace-nowrap">
+                  取消
+                </button>
+              </span>
+            ) : (
+              <button
+                onClick={() => { setTitleDraft(displaySubject ?? ""); setEditingTitle(true); }}
+                title="重新命名"
+                className="group flex items-center gap-1 min-w-0 text-xs font-normal text-gray-500 hover:text-violet-600 transition-colors">
+                <span className="truncate">{displaySubject || "未命名素材"}</span>
+                <Pencil className="h-3 w-3 shrink-0 opacity-50 group-hover:opacity-100" />
+              </button>
+            ))}
           </h2>
           <div className="flex items-center gap-1.5 shrink-0">
             {/* header 順序統一（IMG_02）：[重新生成][調整]│[下載]│[刪除][✕]

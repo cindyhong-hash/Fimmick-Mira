@@ -40,7 +40,7 @@ const artDirection: ImageSetArtDirection = {
   materials: ["霧面塑膠", "金屬刀網"],
   backgroundLanguage: "明亮浴室",
   cameraLanguage: "清晰產品攝影，保留真實比例",
-  consistencyRules: ["所有畫面視為同一產品的不同視角。"],
+  consistencyRules: ["所有畫面視為同一產品的不同視角。", "品牌調性：清新"],
   mood: ["清新", "可信賴"],
   decorationStyle: ["細緻冰藍線框", "柔和光點"],
 };
@@ -209,9 +209,13 @@ test("every role receives confirmed mood, campaign consistency, and text safety 
   for (const role of planImageSetRoles(beautyDeviceProfile)) {
     const prompt = compileImageSetPrompt({ product, profile: beautyDeviceProfile, artDirection, role });
     assert.match(prompt, /Mood: 清新、可信賴/);
-    assert.match(prompt, /Campaign consistency rules: 所有畫面視為同一產品的不同視角。/);
+    // 品牌與檔期的規則每個角色都收；商品身分的規則只有真的畫到商品的角色收
+    // （見「product-free assets get no product-identity rules at all」）。
+    assert.match(prompt, /Campaign consistency rules:.*品牌調性：清新/);
     assert.match(prompt, /Do not render new words, letters, numbers, captions, badges with text, or typographic marks\./);
-    assert.match(prompt, /Preserve genuine logo and packaging label details visible on the supplied product reference\./);
+    if (role.path !== "text") {
+      assert.match(prompt, /Preserve genuine logo and packaging label details visible on the supplied product reference\./);
+    }
     if (role.role === "decoration") assert.match(prompt, /Decoration style: 細緻冰藍線框、柔和光點/);
   }
 });
@@ -439,6 +443,42 @@ test("a themed background carries the theme colours while the surface stays empt
   const prompt = compileImageSetPrompt({ product, profile: skincareProfile, artDirection: themed, role });
   assert.match(prompt, /櫻粉/);
   assert.match(prompt, /完全淨空|nothing resting on it/);
+});
+
+test("product-free assets get no product-identity rules at all", () => {
+  // 實測：520 的背景長出一支不存在的按壓瓶，即使 MUST NOT SHOW 已經寫了
+  // 「任何商品／瓶罐」。原因是同一份提示詞上面還有三處在講商品——
+  // 一致性規則第一條字面上就是「這張是同一個商品的另一個角度」、
+  // 「保留商品既有的 Logo 與包裝標籤」、以及場景後面掛的「使用／賣點參考」。
+  // 對生圖模型來說句子裡的名詞就是要畫的東西，後面補負面句沒有用。
+  const roles = planImageSetRoles(beautyDeviceProfile);
+  const textRoles = roles.filter(({ path }) => path === "text");
+  assert.ok(textRoles.length >= 3, "應該有多個不含商品的素材角色");
+
+  for (const role of textRoles) {
+    const prompt = compileImageSetPrompt({ product, profile: beautyDeviceProfile, artDirection, role });
+    assert.doesNotMatch(prompt, /同一產品的不同視角/, `${role.assetSubtype} 仍被告知這是商品的另一個角度`);
+    assert.doesNotMatch(prompt, /維持產品的外型/, `${role.assetSubtype} 仍收到商品身分規則`);
+    assert.doesNotMatch(prompt, /Preserve genuine logo/i, `${role.assetSubtype} 仍被要求保留包裝標籤`);
+    // 檔期與品牌調性要留著，不能連同商品規則一起被濾掉。
+    assert.match(prompt, /Campaign consistency rules:/);
+  }
+
+  // 背景不收商品用途，只收場景——用途名詞會把商品擺回淨空的檯面。
+  const background = compileImageSetPrompt({
+    product, profile: beautyDeviceProfile, artDirection,
+    role: roles.find(({ role }) => role === "background")!,
+  });
+  assert.doesNotMatch(background, /使用／賣點參考/, "背景仍收到商品用途");
+  assert.match(background, /場景參考/);
+
+  // 真的有商品入鏡的角色照舊，身分鎖不能被弱化。
+  const hero = compileImageSetPrompt({
+    product, profile: beautyDeviceProfile, artDirection,
+    role: roles.find(({ role }) => role === "hero")!,
+  });
+  assert.match(hero, /同一產品的不同視角/, "商品角色不該被連帶拿掉身分規則");
+  assert.match(hero, /Preserve genuine logo/i);
 });
 
 test("the background prompt drops the product palette so the theme colour can win", () => {

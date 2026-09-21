@@ -1,4 +1,4 @@
-import type { ImageSetArtDirection } from "./product-visual-analysis.ts";
+import { PRODUCT_IDENTITY_RULES, type ImageSetArtDirection } from "./product-visual-analysis.ts";
 import type { ProductVisualProfile } from "./product-visual-profile.ts";
 import type { ImageSetRoleSpec } from "./image-set-roles.ts";
 
@@ -137,10 +137,17 @@ export function compileImageSetPrompt({ product, profile, artDirection, role }: 
       `dominant palette: ${paletteText(artDirection.palette.dominant, "product-visible colors only")}`,
       `accent palette: ${paletteText(artDirection.palette.accent, "none")}; accent only, never dominant.`,
     ]).join("\n");
+  const productIdentityRules = new Set([...PRODUCT_IDENTITY_RULES, ...profile.prohibitedChanges]);
+  // path === "text" 的素材畫面裡沒有商品（商品是後製合成上去的），所以只給檔期與
+  // 品牌調性，不給商品身分規則——留著的話等於一邊說「這張是同一個商品的另一個
+  // 角度、要維持它的 Logo」，一邊叫它不要畫商品，而負面句對生圖模型沒有作用。
+  const campaignRules = role.path === "text"
+    ? artDirection.consistencyRules.filter((rule) => !productIdentityRules.has(rule))
+    : artDirection.consistencyRules;
   const sharedDirection = [
     `Mood: ${list(artDirection.mood, "clean and consistent")}`,
     ...(role.role === "decoration" ? [`Decoration style: ${list(artDirection.decorationStyle, "minimal non-typographic accents")}`] : []),
-    `Campaign consistency rules: ${list(artDirection.consistencyRules, "use the confirmed shared art direction")}`,
+    `Campaign consistency rules: ${list(campaignRules, "use the confirmed shared art direction")}`,
   ].join("\n");
   const textSafety = [
     "Do not render new words, letters, numbers, captions, badges with text, or typographic marks.",
@@ -203,7 +210,9 @@ export function compileImageSetPrompt({ product, profile, artDirection, role }: 
           : "不得出現任何商品、瓶罐、包裝、Logo 或文字",
       "不得加入未提供的成分、功效、認證、安全或醫療宣稱",
       "不得加入任何色碼（hex）、數字、標籤或浮水印",
-      ...textSafety,
+      // 只留「不要生字」那條。text-path 沒有商品參考圖，「保留商品既有的 Logo 與
+      // 包裝標籤」在這裡是憑空多出來的商品名詞，等於暗示畫面上該有一個有標籤的包裝。
+      textSafety[0],
     ];
     return [
       "[ROLE OBJECTIVE]",

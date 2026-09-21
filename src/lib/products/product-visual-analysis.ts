@@ -34,6 +34,20 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
+/**
+ * 只跟「商品本身」有關的一致性規則。
+ *
+ * 沒有商品入鏡的素材（背景、裝飾、賣點視覺、賣點圖示）不能收到這幾條：
+ * 對生圖模型來說，句子裡出現的名詞就是要畫的東西，而第一條字面上就是
+ * 「這張是同一個商品的另一個角度」。實測 520 背景因此長出一支不存在的
+ * 按壓瓶，即使 MUST NOT SHOW 已經寫了「任何商品／瓶罐」。
+ * 過濾在 image-set-prompts 做，靠字串相等比對，舊批次存下來的規則也對得上。
+ */
+export const PRODUCT_IDENTITY_RULES = [
+  "所有畫面視為同一產品的不同視角。",
+  "維持產品的外型、比例、顏色、結構與可見 Logo／文字。",
+];
+
 export function parseImageSetArtDirection(raw: unknown): ImageSetArtDirection | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const value = raw as Record<string, unknown>;
@@ -241,8 +255,7 @@ export function buildImageSetArtDirection(
       : scene,
     cameraLanguage: "清晰、高級且便於後續廣告合成的視覺語言",
     consistencyRules: [
-      "所有畫面視為同一產品的不同視角。",
-      "維持產品的外型、比例、顏色、結構與可見 Logo／文字。",
+      ...PRODUCT_IDENTITY_RULES,
       ...profile.prohibitedChanges,
       ...(brand.toneLabels?.filter(Boolean).map((tone) => `品牌調性：${tone}`) ?? []),
       ...(theme ? [`整批素材一致呼應「${theme.label}」，但不可自行生成主題文字、日期或促銷字樣。`] : []),

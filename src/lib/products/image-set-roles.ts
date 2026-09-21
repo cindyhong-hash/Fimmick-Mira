@@ -44,6 +44,18 @@ function productContext(profile: ProductVisualProfile): string {
   ].filter(Boolean).join("；") || "依產品定位建立可合成的廣告素材，不臆測未提供資訊";
 }
 
+/**
+ * 背景只需要知道場景。
+ *
+ * 帶上「使用／賣點參考：pre-shaving care」這類商品用途名詞，模型就會把對應的
+ * 商品擺回淨空的檯面上——實測 520 背景長出一支按壓瓶。場景（bathroom）是背景
+ * 本來就要畫的東西，用途不是。
+ */
+function sceneOnlyContext(profile: ProductVisualProfile): string {
+  const scene = first(profile.suitableScenes);
+  return scene ? `場景參考：${scene}` : "素面的室內角落，不臆測未提供資訊";
+}
+
 function normalizedKey(value: string): string {
   return value.normalize("NFKC").trim().toLowerCase().replace(/[^\p{Letter}\p{Number}]+/gu, "-").replace(/^-|-$/g, "") || "evergreen";
 }
@@ -149,7 +161,7 @@ function coreRoles(profile: ProductVisualProfile, themeKey: string, theme?: Imag
     withPlanMetadata(detail, { category: "texture", assetSubtype: detail.subtype, purpose: detail.purpose, core: true, themeKey }),
     withPlanMetadata({
       role: "background", label: "情境背景", usageDescription: "後續合成用純背景", path: "text", cutout: false,
-      sceneCn: `一個空景：可放置商品的檯面或平面完全淨空，表面上什麼都沒有放，是刻意留空等後製再放入商品的。畫面保留連續文字留白——大片素面牆面或背景，沒有圖案也沒有字樣；${context}`,
+      sceneCn: `一個空景：可放置商品的檯面或平面完全淨空，表面上什麼都沒有放，是刻意留空等後製再放入商品的。畫面保留連續文字留白——大片素面牆面或背景，沒有圖案也沒有字樣；${sceneOnlyContext(profile)}`,
       objective: "Photograph an empty set: a bare, completely clear tabletop or surface with nothing resting on it, and a large uninterrupted plain wall or backdrop behind it. The surface is deliberately vacant because a product will be composited in later. Every object in frame is plain and unmarked.",
       composition: "保留連續文案區與清楚商品擺放平面；畫面有乾淨留白與平穩重心，供後續廣告合成。",
       mustNotShow: ["任何商品", "瓶罐", "產品包裝", "Logo", "文字", "人物手持產品", "左右切半畫面", "搶戲的鏡子、水槽或道具"],

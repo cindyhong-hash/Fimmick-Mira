@@ -29,6 +29,11 @@ MIRA（原名 Content／行銷圖文工具）。Next.js 16 + Prisma 7.8 + Turso(
 
 核心流程：品牌設定 → 建立圖文（單／多圖）→ 素材庫 → 產品套圖（AI 建立商品套圖）→ 自由畫布排版。
 
+「AI 幫我排版」（產品素材包自動排成可編輯設計稿）程式碼已在 `main`，但正式站關閉中，
+用 `?adlayout=1` 可測。交接給 Codex 的開工須知見
+[`docs/CODEX-AI-LAYOUT-KICKOFF.md`](CODEX-AI-LAYOUT-KICKOFF.md)，功能設計見
+[`docs/AI-LAYOUT-HANDOFF.md`](AI-LAYOUT-HANDOFF.md)。
+
 ---
 
 ## 2. 環境

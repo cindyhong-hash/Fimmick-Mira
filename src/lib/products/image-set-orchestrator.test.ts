@@ -489,6 +489,99 @@ test("an old draft with no icon idea heals itself instead of making the user reb
   assert.doesNotMatch(String(rows[0].prompt), /酵素角質護理/, "中文標題不能進提示詞");
 });
 
+test("a benefit the user typed in gets an icon idea and joins the batch", async () => {
+  // 自己加的賣點不在草稿的計畫裡，所以不能走 selectedItemIds；它只有中文標題，
+  // 圖示描述要現想，而且要沿用這一組已經在用的主體才會成套。
+  const imageProduct = { ...input().product, description: "賣點： 酵素角質護理，除毛前柔嫩肌膚、帶走老廢角質。" };
+  const storedProduct = {
+    ...imageProduct,
+    visualProfileJson: JSON.stringify(profile),
+    visualProfileSourceHash: computeProductVisualSourceHash(imageProduct),
+    rawImageUrls: JSON.stringify(imageProduct.rawImageUrls),
+  };
+  const points = deriveBenefitPoints(storedProduct.description, profile.useCases)
+    .map((point) => ({ ...point, iconConcept: "a leg with a few small particles" }));
+  const planned = planImageSetRoles({ profile, artDirection, benefitPoints: points });
+  const icon = planned.find(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"))!;
+
+  let askedFor = "";
+  let persisted: Record<string, unknown> | undefined;
+  const result = await confirmAndScheduleProductImageSet({
+    product: storedProduct,
+    client: null,
+    batchId: "kit-added",
+    selectedItemIds: [icon.id],
+    artDirection,
+    addedBenefits: [{ title: "隨身好攜帶", description: "旅行也能用" }],
+    execution: createImageSetExecution(10_000, "kit-lease"),
+  }, {
+    loadDraft: async () => ({
+      id: "kit-added", productId: "product-1", status: "DRAFT", themeKey: null, themeLabel: null,
+      artDirectionJson: JSON.stringify(artDirection), planJson: JSON.stringify(planned),
+    }),
+    chatText: async (prompt) => { askedFor = prompt; return '[{"index":1,"subject":"a leg","hint":"a small pouch"}]'; },
+    claimProductLease: async () => true,
+    releaseProductLease: async () => true,
+    persistConfirmedBatch: async (data) => { persisted = data as unknown as Record<string, unknown>; return [{ id: "r1" }, { id: "r2" }]; },
+    scheduleAfter: () => {},
+    runBatch: async () => ({ statuses: {}, params: {} }),
+    readBatchStatuses: async () => ["DONE", "DONE"],
+    updateKitStatus: async () => {},
+  });
+
+  assert.equal(result.ok, true, result.ok ? "" : result.error);
+  assert.match(askedFor, /隨身好攜帶/, "沒有拿新增的標題去想圖");
+  assert.match(askedFor, /主體固定是 a leg/, "新增的那張沒有沿用同一組的主體");
+  // 原本選的那張 ＋ 新增的那張，兩張都要進批次。
+  const rows = persisted?.rows as Array<Record<string, unknown>>;
+  assert.equal(rows.length, 2);
+  assert.ok(rows.some(({ prompt }) => /a leg with a small pouch/.test(String(prompt))), "新增的賣點沒有用到新想的圖");
+  // 中文標題一樣不能進提示詞。
+  assert.ok(rows.every(({ prompt }) => !/隨身好攜帶/.test(String(prompt))));
+});
+
+test("an added benefit with no workable icon idea blocks the paid run instead of drawing a blob", async () => {
+  const imageProduct = { ...input().product, description: "賣點： 酵素角質護理，除毛前柔嫩肌膚、帶走老廢角質。" };
+  const storedProduct = {
+    ...imageProduct,
+    visualProfileJson: JSON.stringify(profile),
+    visualProfileSourceHash: computeProductVisualSourceHash(imageProduct),
+    rawImageUrls: JSON.stringify(imageProduct.rawImageUrls),
+  };
+  const points = deriveBenefitPoints(storedProduct.description, profile.useCases)
+    .map((point) => ({ ...point, iconConcept: "a leg with a few small particles" }));
+  const planned = planImageSetRoles({ profile, artDirection, benefitPoints: points });
+  const icon = planned.find(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"))!;
+
+  let leaseClaimed = false;
+  const result = await confirmAndScheduleProductImageSet({
+    product: storedProduct,
+    client: null,
+    batchId: "kit-added-bad",
+    selectedItemIds: [icon.id],
+    artDirection,
+    addedBenefits: [{ title: "說不清楚的東西", description: "" }],
+    execution: createImageSetExecution(10_000, "kit-lease"),
+  }, {
+    loadDraft: async () => ({
+      id: "kit-added-bad", productId: "product-1", status: "DRAFT", themeKey: null, themeLabel: null,
+      artDirectionJson: JSON.stringify(artDirection), planJson: JSON.stringify(planned),
+    }),
+    chatText: async () => null,
+    claimProductLease: async () => { leaseClaimed = true; return true; },
+    releaseProductLease: async () => true,
+    persistConfirmedBatch: async () => [{ id: "r1" }],
+    scheduleAfter: () => {},
+    runBatch: async () => ({ statuses: {}, params: {} }),
+    readBatchStatuses: async () => ["DONE"],
+    updateKitStatus: async () => {},
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.ok ? "" : result.error, /說不清楚的東西/, "錯誤訊息要講出是哪一個賣點");
+  assert.equal(leaseClaimed, false, "擋在付費關卡之前");
+});
+
 test("invalid confirmation snapshots are rejected before claiming the paid lease", async () => {
   const imageProduct = input().product;
   const storedProduct = {

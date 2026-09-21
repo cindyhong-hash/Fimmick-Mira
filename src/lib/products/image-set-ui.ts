@@ -25,7 +25,45 @@ export type ImageSetResumeRow = SavedImageSetBatch["items"][number] & {
 
 export type ImageSetStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
-export type ImageSetPlanSelection = ImageSetPlanItem & { checked: boolean };
+export type ImageSetPlanSelection = ImageSetPlanItem & {
+  checked: boolean;
+  /**
+   * 使用者自己加的賣點。它不在伺服器的計畫裡，所以不能混進 selectedItemIds
+   * （會被判定為「未知素材」），要另外送。
+   */
+  addedByUser?: boolean;
+};
+
+/** 一組賣點圖示最多 5 個，跟 deriveBenefitPoints 的上限一致。 */
+export const MAX_BENEFIT_ICONS = 5;
+
+/** 新增一個空白賣點，標題留給使用者自己打。 */
+export function addImageSetBenefit(items: ImageSetPlanSelection[]): ImageSetPlanSelection[] {
+  const icons = items.filter(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"));
+  if (icons.length >= MAX_BENEFIT_ICONS) return items;
+  const added: ImageSetPlanSelection = {
+    // 這個 id 只在前端用來辨識與編輯；送出時不會當成計畫項目 id。
+    id: `benefit-added-${Date.now()}-${icons.length + 1}`,
+    category: "benefit",
+    assetRole: "benefit",
+    assetSubtype: `benefit-icon-added-${icons.length + 1}`,
+    purpose: "",
+    core: false,
+    defaultSelected: false,
+    checked: true,
+    addedByUser: true,
+    benefitTitle: "",
+    benefitDescription: "",
+  };
+  const lastIcon = items.map(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon")).lastIndexOf(true);
+  // 接在既有賣點後面，不要跑到清單最下方。
+  return lastIcon < 0 ? [...items, added] : [...items.slice(0, lastIcon + 1), added, ...items.slice(lastIcon + 1)];
+}
+
+/** 移除使用者自己加的賣點；AI 推薦的不能刪，取消勾選就好。 */
+export function removeImageSetBenefit(items: ImageSetPlanSelection[], itemId: string): ImageSetPlanSelection[] {
+  return items.filter((item) => !(item.id === itemId && item.addedByUser));
+}
 
 export function initializeImageSetPlanSelection(items: ImageSetPlanItem[]): ImageSetPlanSelection[] {
   return items.map((item) => ({ ...item, checked: item.core && item.defaultSelected }));
@@ -67,7 +105,8 @@ export function collectImageSetBenefitTexts(
 ): Record<string, { title: string; description: string }> {
   const texts: Record<string, { title: string; description: string }> = {};
   for (const item of items) {
-    if (!item.checked || !item.benefitTitle) continue;
+    // 自己加的賣點走 addedBenefits，不走這裡——伺服器的計畫裡沒有它的 id。
+    if (!item.checked || item.addedByUser || !item.benefitTitle) continue;
     texts[item.id] = {
       title: item.benefitTitle.trim().slice(0, BENEFIT_TITLE_MAX),
       description: (item.benefitDescription ?? "").trim().slice(0, BENEFIT_DESCRIPTION_MAX),
@@ -91,13 +130,20 @@ export function buildImageSetConfirmationPayload(input: {
     artDirection: ImageSetArtDirection;
     benefitIconStyle?: BenefitIconStyle;
     benefitTexts?: Record<string, { title: string; description: string }>;
+    addedBenefits?: { title: string; description: string }[];
   };
 } | { ok: false; error: string } {
-  const selectedItemIds = input.items.filter(({ checked }) => checked).map(({ id }) => id);
-  if (!selectedItemIds.length) return { ok: false, error: "至少要選擇一項素材" };
+  const selectedItemIds = input.items.filter(({ checked, addedByUser }) => checked && !addedByUser).map(({ id }) => id);
+  const addedBenefits = input.items
+    .filter(({ checked, addedByUser }) => checked && addedByUser)
+    .map((item) => ({
+      title: (item.benefitTitle ?? "").trim().slice(0, BENEFIT_TITLE_MAX),
+      description: (item.benefitDescription ?? "").trim().slice(0, BENEFIT_DESCRIPTION_MAX),
+    }));
+  if (!selectedItemIds.length && !addedBenefits.length) return { ok: false, error: "至少要選擇一項素材" };
   const blankTitle = input.items.find((item) => item.checked && item.benefitTitle !== undefined && !item.benefitTitle.trim());
   if (blankTitle) return { ok: false, error: "賣點標題不能留空" };
-  if (selectedItemIds.length > (input.maxAssets ?? IMAGE_SET_MAX_ASSETS)) {
+  if (selectedItemIds.length + addedBenefits.length > (input.maxAssets ?? IMAGE_SET_MAX_ASSETS)) {
     return { ok: false, error: `單批最多只能生成 ${input.maxAssets ?? IMAGE_SET_MAX_ASSETS} 項素材` };
   }
   const benefitTexts = collectImageSetBenefitTexts(input.items);
@@ -109,6 +155,7 @@ export function buildImageSetConfirmationPayload(input: {
       artDirection: input.artDirection,
       ...(input.benefitIconStyle ? { benefitIconStyle: input.benefitIconStyle } : {}),
       ...(Object.keys(benefitTexts).length ? { benefitTexts } : {}),
+      ...(addedBenefits.length ? { addedBenefits } : {}),
     },
   };
 }

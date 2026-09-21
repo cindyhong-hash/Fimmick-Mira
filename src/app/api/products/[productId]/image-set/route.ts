@@ -49,6 +49,18 @@ export const POST = protectPaidRoute(async (
 
   // 只收得懂的形狀；內容長度與空白由 orchestrator 驗（那裡才是付費生成的關卡）。
   const rawTexts = body.benefitTexts;
+  // 使用者自己加的賣點：只收得懂的形狀，長度與空白由 orchestrator 驗。
+  const rawAdded = body.addedBenefits;
+  const addedBenefits = Array.isArray(rawAdded)
+    ? rawAdded
+      .filter((entry: unknown): entry is Record<string, unknown> => !!entry && typeof entry === "object")
+      .filter((entry) => typeof entry.title === "string")
+      .map((entry) => ({
+        title: entry.title as string,
+        description: typeof entry.description === "string" ? entry.description : "",
+      }))
+    : [];
+
   const benefitTexts: Record<string, { title: string; description: string }> = {};
   if (rawTexts && typeof rawTexts === "object" && !Array.isArray(rawTexts)) {
     for (const [id, value] of Object.entries(rawTexts as Record<string, unknown>)) {
@@ -72,6 +84,7 @@ export const POST = protectPaidRoute(async (
     artDirection: body.artDirection,
     benefitIconStyle: benefitIconStyle ?? undefined,
     ...(Object.keys(benefitTexts).length ? { benefitTexts } : {}),
+    ...(addedBenefits.length ? { addedBenefits } : {}),
     execution,
   }, {
     loadDraft: (ownerProductId, batchId) => db.productImageSet.findFirst({ where: { id: batchId, productId: ownerProductId } }),

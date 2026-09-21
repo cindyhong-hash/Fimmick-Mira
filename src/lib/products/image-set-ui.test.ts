@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  MAX_BENEFIT_ICONS,
+  addImageSetBenefit,
   clearSavedImageSetBatch,
+  removeImageSetBenefit,
   editImageSetBenefitText,
   dialogFocusTargetIndex,
   imageSetBatchProgress,
@@ -249,6 +252,43 @@ test("only checked benefit items send their text, and a blank title blocks the p
 
   // 標題就是這張 icon 要畫的東西，空白不能放行。
   const blank = buildImageSetConfirmationPayload({ batchId: "b1", items: [benefitItem({ benefitTitle: "   " })], artDirection });
+  assert.equal(blank.ok, false);
+  assert.match(blank.ok ? "" : blank.error, /賣點標題不能留空/);
+});
+
+test("a benefit you add yourself travels separately from the server's plan", () => {
+  const artDirection = { concept: "c", palette: { dominant: [], accent: [] }, lighting: "l", materials: [], backgroundLanguage: "b", cameraLanguage: "c", consistencyRules: [], mood: [], decorationStyle: [] };
+  const withAdded = addImageSetBenefit([benefitItem()]);
+  assert.equal(withAdded.length, 2);
+  const added = withAdded[1];
+  assert.equal(added.addedByUser, true);
+  assert.equal(added.checked, true, "自己加的預設就是要生的");
+  assert.equal(added.benefitTitle, "", "標題留空給使用者自己打");
+
+  const named = editImageSetBenefitText(withAdded, added.id, "benefitTitle", "隨身好攜帶");
+  const payload = buildImageSetConfirmationPayload({ batchId: "b1", items: named, artDirection });
+  assert.equal(payload.ok, true);
+  if (!payload.ok) return;
+  // 自己加的沒有伺服器的計畫 id，混進 selectedItemIds 會被判成「未知素材」。
+  assert.deepEqual(payload.payload.selectedItemIds, [benefitItem().id]);
+  assert.deepEqual(payload.payload.addedBenefits, [{ title: "隨身好攜帶", description: "" }]);
+  // 也不該混進 benefitTexts——那是用來覆寫既有計畫項目的。
+  assert.deepEqual(Object.keys(payload.payload.benefitTexts ?? {}), [benefitItem().id]);
+});
+
+test("added benefits are capped, removable, and still need a title", () => {
+  let items = [benefitItem()];
+  for (let i = 0; i < 10; i += 1) items = addImageSetBenefit(items);
+  assert.equal(items.filter(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon")).length, MAX_BENEFIT_ICONS);
+
+  // 只有自己加的可以刪，AI 推薦的刪不掉。
+  const added = items.find(({ addedByUser }) => addedByUser)!;
+  assert.equal(removeImageSetBenefit(items, added.id).length, items.length - 1);
+  assert.equal(removeImageSetBenefit(items, benefitItem().id).length, items.length);
+
+  // 空標題一樣擋下來——它就是 icon 要畫的東西。
+  const artDirection = { concept: "c", palette: { dominant: [], accent: [] }, lighting: "l", materials: [], backgroundLanguage: "b", cameraLanguage: "c", consistencyRules: [], mood: [], decorationStyle: [] };
+  const blank = buildImageSetConfirmationPayload({ batchId: "b1", items: addImageSetBenefit([benefitItem()]), artDirection });
   assert.equal(blank.ok, false);
   assert.match(blank.ok ? "" : blank.error, /賣點標題不能留空/);
 });

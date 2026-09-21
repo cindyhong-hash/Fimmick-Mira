@@ -607,6 +607,37 @@ function isBenefitBadge(role: ImageSetRoleSpec): boolean {
   return !!saved.assetSubtype?.startsWith("benefit-icon") && saved.benefitIconStyle === "framed";
 }
 
+/**
+ * 把使用者自己加的賣點轉成可以生成的賣點點位。
+ *
+ * 他們只打了中文標題，圖示描述得現想——中文不能進提示詞（會被畫成圖上的字），
+ * 而且要沿用這一組已經在用的主體，新加的那張才會跟其他張成套。
+ *
+ * @returns 轉好的點位，以及它們會對應到的 assetSubtype（用來挑出對應角色）。
+ */
+async function buildAddedBenefitPoints(
+  added: { title: string; description: string }[],
+  existing: BenefitPoint[],
+  chat: (prompt: string) => Promise<string | null>,
+): Promise<{ ok: true; points: BenefitPoint[]; subtypes: string[] } | { ok: false; error: string }> {
+  if (!added.length) return { ok: true, points: [], subtypes: [] };
+  const sharedSubject = iconConceptSubject(existing.find(({ iconConcept }) => iconConcept)?.iconConcept ?? "");
+  const concepts = await deriveIconConcepts(added.map(({ title }) => title), chat, sharedSubject);
+  const missing = added.filter((_, index) => !concepts[index]);
+  if (missing.length) {
+    const names = missing.map(({ title }) => `「${title}」`).join("、");
+    return { ok: false, error: `想不出 ${names} 要畫成什麼圖，請換一個說法再試一次。` };
+  }
+  const points = added.map((item, index) => ({
+    title: item.title,
+    description: item.description,
+    iconConcept: concepts[index],
+  }));
+  // 賣點圖示的子型別是依整份清單的順序編號的，新增的接在既有的後面。
+  const subtypes = points.map((_, index) => `benefit-icon-${existing.length + index + 1}`);
+  return { ok: true, points, subtypes };
+}
+
 function storedBenefitPoints(plan: ImageSetPlanItem[]): BenefitPoint[] | undefined {
   const icons = plan.filter(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"));
   if (!icons.length || !icons.every(({ benefitTitle }) => benefitTitle)) return undefined;
@@ -1384,13 +1415,28 @@ export async function confirmAndScheduleProductImageSet(
     benefitIconStyle?: BenefitIconStyle;
     /** 使用者在清單上改過的賣點文字，key 是計畫項目 id。AI 抓的不一定對。 */
     benefitTexts?: Record<string, { title: string; description: string }>;
+    /**
+     * 使用者自己加的賣點。它不在草稿的計畫裡，所以不能走 selectedItemIds
+     * （會被判成未知素材）；這裡收進來後接到賣點清單後面，一律視為已選。
+     */
+    addedBenefits?: { title: string; description: string }[];
     execution: ImageSetExecution;
   },
   dependencies: ConfirmProductImageSetDependencies,
 ): Promise<ConfirmProductImageSetResult> {
   if (!request.batchId.trim()) return { ok: false, status: 400, error: "缺少套圖批次" };
-  if (!request.selectedItemIds.length) return { ok: false, status: 400, error: "至少要選擇一項素材" };
-  if (request.selectedItemIds.length > IMAGE_SET_MAX_ASSETS) {
+  const addedBenefits = (request.addedBenefits ?? [])
+    .map(({ title, description }) => ({
+      title: typeof title === "string" ? title.trim().slice(0, BENEFIT_TITLE_MAX) : "",
+      description: typeof description === "string" ? description.trim().slice(0, BENEFIT_DESCRIPTION_MAX) : "",
+    }));
+  if (addedBenefits.some(({ title }) => !title)) {
+    return { ok: false, status: 400, error: "賣點標題不能留空" };
+  }
+  if (!request.selectedItemIds.length && !addedBenefits.length) {
+    return { ok: false, status: 400, error: "至少要選擇一項素材" };
+  }
+  if (request.selectedItemIds.length + addedBenefits.length > IMAGE_SET_MAX_ASSETS) {
     return { ok: false, status: 400, error: `單批最多只能生成 ${IMAGE_SET_MAX_ASSETS} 項素材` };
   }
   if (new Set(request.selectedItemIds).size !== request.selectedItemIds.length) {
@@ -1451,13 +1497,24 @@ export async function confirmAndScheduleProductImageSet(
     ? imageSetThemeCatalog().find(({ key, label }) => key === draft.themeKey && label === draft.themeLabel) ?? null
     : null;
   if (draft.themeKey && !theme) return { ok: false, status: 409, error: "儲存的套圖主題已失效，請重新規劃。" };
+  // 規劃時 LLM 整理好的賣點存在 planJson 上，這裡讀回來，不重新問一次 LLM——
+  // 重問會得到不同的賣點，跟使用者在清單上看到的對不起來。
+  const storedPoints = storedBenefitPoints(refreshed.plan)
+    ?? deriveBenefitPoints(request.product.description, profile.useCases);
+  // 使用者自己加的賣點接在後面，並沿用這一組已經在用的主體去想圖。
+  const addedPoints = await buildAddedBenefitPoints(
+    addedBenefits,
+    storedPoints,
+    dependencies.chatText ?? chatTextOpenRouter,
+  );
+  if (!addedPoints.ok) return { ok: false, status: 400, error: addedPoints.error };
+  const benefitPoints = [...storedPoints, ...addedPoints.points];
+
   const currentSpecs = planImageSetRoles({
     profile,
     artDirection,
     theme: theme ?? undefined,
-    // 規劃時 LLM 整理好的賣點存在 planJson 上，這裡讀回來，不重新問一次 LLM——
-    // 重問會得到不同的賣點，跟使用者在清單上看到的對不起來。
-    benefitPoints: storedBenefitPoints(refreshed.plan) ?? deriveBenefitPoints(request.product.description, profile.useCases),
+    benefitPoints,
     benefitIconStyle: benefitIconStyle ?? undefined,
   });
   const specsById = new Map(currentSpecs.map((spec) => [spec.id, spec]));
@@ -1469,7 +1526,14 @@ export async function confirmAndScheduleProductImageSet(
   if (selectedSpecs.some((spec) => !spec)) {
     return { ok: false, status: 409, error: "儲存的套圖角色或素材變化已失效，請重新規劃。" };
   }
-  const roles = selectedSpecs.filter((spec): spec is NonNullable<typeof spec> => !!spec);
+  // 新增的賣點沒有計畫項目可以比對，直接取它們對應的角色——它們是使用者
+  // 當場打進去的，本來就等於已選。
+  const addedSpecs = currentSpecs.filter(({ assetSubtype }) =>
+    addedPoints.subtypes.includes(assetSubtype));
+  if (addedSpecs.length !== addedPoints.points.length) {
+    return { ok: false, status: 409, error: "新增的賣點無法建立對應素材，請重新規劃。" };
+  }
+  const roles = [...selectedSpecs.filter((spec): spec is NonNullable<typeof spec> => !!spec), ...addedSpecs];
   const imageProduct = asImageSetProduct(request.product);
   if (roles.some(({ path }) => path === "cutout") && !imageProduct.rawImageUrls.some(Boolean)) {
     return { ok: false, status: 400, error: "需要至少一張原始商品照，才能建立商品主體去背 PNG。" };

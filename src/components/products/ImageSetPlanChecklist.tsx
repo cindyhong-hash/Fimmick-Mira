@@ -1,8 +1,8 @@
 "use client";
 
-import { Check, Sparkles } from "lucide-react";
+import { Check, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
-import type { ImageSetPlanSelection } from "@/lib/products/image-set-ui";
+import { MAX_BENEFIT_ICONS, type ImageSetPlanSelection } from "@/lib/products/image-set-ui";
 import { imageSetSubtypeLabel } from "@/lib/products/image-set-subtype-labels";
 
 const CATEGORY_LABELS: Record<ImageSetPlanSelection["category"], string> = {
@@ -17,7 +17,7 @@ const CATEGORY_LABELS: Record<ImageSetPlanSelection["category"], string> = {
 const BENEFIT_TITLE_MAX = 8;
 const BENEFIT_DESCRIPTION_MAX = 16;
 
-export function ImageSetPlanChecklist({ items, maxAssets, onToggle, onEditBenefitText, benefitIconStyleControl }: {
+export function ImageSetPlanChecklist({ items, maxAssets, onToggle, onEditBenefitText, benefitIconStyleControl, onAddBenefit, onRemoveBenefit }: {
   items: ImageSetPlanSelection[];
   maxAssets: number;
   onToggle: (id: string) => void;
@@ -25,6 +25,10 @@ export function ImageSetPlanChecklist({ items, maxAssets, onToggle, onEditBenefi
   onEditBenefitText?: (id: string, field: "benefitTitle" | "benefitDescription", value: string) => void;
   /** 賣點圖示的風格選擇；就近接在那幾個項目下面，勾選時才需要決定。 */
   benefitIconStyleControl?: ReactNode;
+  /** AI 推薦的賣點不一定涵蓋使用者想講的，所以可以自己加。 */
+  onAddBenefit?: () => void;
+  /** 只有自己加的賣點可以刪；AI 推薦的取消勾選就好。 */
+  onRemoveBenefit?: (id: string) => void;
 }) {
   const selectedCount = items.filter(({ checked }) => checked).length;
   // 賣點圖示自成一區：混在「賣點視覺」那一組裡，跟功效視覺長得一模一樣，
@@ -134,7 +138,9 @@ export function ImageSetPlanChecklist({ items, maxAssets, onToggle, onEditBenefi
               className={`rounded-xl border p-3.5 transition ${item.checked ? "border-violet-400 bg-violet-50/50" : "border-[#e7ebf1] bg-white"} ${disabled ? "opacity-45" : ""}`}
             >
               <div className="flex items-start justify-between gap-2">
-                <span className="min-w-0 flex-1">
+                <span className="relative min-w-0 flex-1">
+                  {/* 鉛筆只是提示「這行可以點著改」，輸入框本身沒有邊框，不講就看不出來。 */}
+                  {onEditBenefitText && <Pencil className="pointer-events-none absolute right-2 top-2.5 h-3 w-3 text-gray-300" aria-hidden="true" />}
                   {onEditBenefitText ? <input
                     value={item.benefitTitle ?? ""}
                     maxLength={BENEFIT_TITLE_MAX}
@@ -142,7 +148,7 @@ export function ImageSetPlanChecklist({ items, maxAssets, onToggle, onEditBenefi
                     aria-invalid={blankTitle && item.checked}
                     placeholder="賣點標題"
                     onChange={(event) => onEditBenefitText(item.id, "benefitTitle", event.target.value)}
-                    className={`w-full rounded-md border bg-transparent px-1.5 py-0.5 text-sm font-bold text-gray-900 outline-none focus:bg-white ${blankTitle && item.checked ? "border-red-300 focus:border-red-400" : "border-transparent hover:border-[#e5e9f0] focus:border-violet-400"}`}
+                    className={`w-full rounded-md border bg-transparent py-0.5 pl-1.5 pr-6 text-sm font-bold text-gray-900 outline-none focus:bg-white ${blankTitle && item.checked ? "border-red-300 focus:border-red-400" : "border-transparent hover:border-[#e5e9f0] focus:border-violet-400"}`}
                   /> : <span className="block px-1.5 text-sm font-bold text-gray-900">{item.benefitTitle}</span>}
                 </span>
                 <button
@@ -166,9 +172,32 @@ export function ImageSetPlanChecklist({ items, maxAssets, onToggle, onEditBenefi
                 className="mt-1 w-full rounded-md border border-transparent bg-transparent px-1.5 py-0.5 text-xs leading-5 text-gray-500 outline-none placeholder:text-gray-300 hover:border-[#e5e9f0] focus:border-violet-400 focus:bg-white"
               /> : <span className="mt-1 block px-1.5 text-xs leading-5 text-gray-500">{item.benefitDescription}</span>}
               {blankTitle && item.checked && <span className="mt-1 block px-1.5 text-[11px] leading-4 text-red-500">標題不能留空，這是 icon 要畫的內容</span>}
+              {item.addedByUser && onRemoveBenefit && (
+                <button
+                  type="button"
+                  onClick={() => onRemoveBenefit(item.id)}
+                  className="mt-2 inline-flex items-center gap-1 px-1.5 text-[11px] font-bold text-gray-400 hover:text-red-600"
+                >
+                  <Trash2 className="h-3 w-3" />移除
+                </button>
+              )}
             </div>;
           })}
         </div>
+
+        {onAddBenefit && (
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={onAddBenefit}
+              disabled={benefitIcons.length >= MAX_BENEFIT_ICONS}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-dashed border-[#d5d9e2] px-4 py-2.5 text-sm font-bold text-gray-700 hover:border-violet-300 hover:text-violet-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Plus className="h-4 w-4" />新增賣點
+            </button>
+            <span className="text-xs text-gray-400">最多 {MAX_BENEFIT_ICONS} 個賣點</span>
+          </div>
+        )}
 
         {benefitIconStyleControl}
       </section>

@@ -11,10 +11,38 @@ import { DEFAULT_BENEFIT_ICON_STYLE, type BenefitIconStyle, type ImageSetPlanIte
  * 只有無框線稿與線稿加框是中性單色、可跟著品牌色換色，所以能套到任何產品；
  * 藍色圓球把顏色畫死在圖裡，換品牌就得重生，說明文字要讓使用者看得出這個差別。
  */
+/**
+ * 風格用縮圖呈現，不要只給文字。使用者要選的是「長什麼樣」，讀三行說明
+ * 比不上直接看到一眼。縮圖用 SVG 內嵌，不依賴任何圖檔。
+ */
+const STYLE_PREVIEWS: Record<BenefitIconStyle, ReactNode> = {
+  plain: (
+    <svg viewBox="0 0 64 64" className="h-14 w-14" aria-hidden="true">
+      <path d="M26 14 v18 q0 6 -4 10 l-4 6 h16 q3 0 3 -3 v-6 q0 -5 2 -9 V14" fill="none" stroke="#3C3C3C" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M46 20 l1.6 4 4 1.6 -4 1.6 -1.6 4 -1.6 -4 -4 -1.6 4 -1.6z" fill="#7BA7D4" />
+      <path d="M48 33 l1 2.6 2.6 1 -2.6 1 -1 2.6 -1 -2.6 -2.6 -1 2.6 -1z" fill="#7BA7D4" />
+    </svg>
+  ),
+  framed: (
+    <svg viewBox="0 0 64 64" className="h-14 w-14" aria-hidden="true">
+      <circle cx="32" cy="32" r="21" fill="#A8C8E8" />
+      <path d="M27 18 v16 q0 5 -3.4 8.6 L21 46 h14 q2.4 0 2.4 -2.6 v-5 q0 -4 1.6 -7.6 V18z" fill="#ffffff" />
+      <path d="M43 25 l1.3 3.2 3.2 1.3 -3.2 1.3 -1.3 3.2 -1.3 -3.2 -3.2 -1.3 3.2 -1.3z" fill="#ffffff" />
+    </svg>
+  ),
+  soft: (
+    <svg viewBox="0 0 64 64" className="h-14 w-14" aria-hidden="true">
+      <path d="M26 14 v18 q0 6 -4 10 l-4 6 h16 q3 0 3 -3 v-6 q0 -5 2 -9 V14z" fill="#FBE0C4" />
+      <path d="M46 18 l1.8 4.4 4.4 1.8 -4.4 1.8 -1.8 4.4 -1.8 -4.4 -4.4 -1.8 4.4 -1.8z" fill="#F5C86A" />
+      <path d="M48 33 l1.2 3 3 1.2 -3 1.2 -1.2 3 -1.2 -3 -3 -1.2 3 -1.2z" fill="#F5C86A" />
+    </svg>
+  ),
+};
+
 const BENEFIT_ICON_STYLE_OPTIONS: { value: BenefitIconStyle; label: string; hint: string }[] = [
-  { value: "plain", label: "極簡線稿", hint: "單色細線圖形，沒有外框" },
-  { value: "framed", label: "圓底徽章", hint: "實心圓底＋白色圖形，整組同一個色系" },
-  { value: "soft", label: "柔和色塊", hint: "柔和填色圖形，保留品牌藍黃，細節少、一眼看得懂" },
+  { value: "plain", label: "極簡線稿", hint: "簡單俐落、清晰易懂" },
+  { value: "framed", label: "圓底徽章", hint: "柔和可愛、適合社群" },
+  { value: "soft", label: "柔和色塊", hint: "溫柔質感、品牌感強" },
 ];
 import type { ImageSetTheme } from "@/lib/products/image-set-roles";
 import { ImageSetDirectionEditor } from "@/components/products/ImageSetDirectionEditor";
@@ -527,23 +555,34 @@ export function ImageSetModal({ clientId, productId, onClose, onFinished }: {
                 onToggle={(id) => setItems((current) => toggleImageSetPlanItem(current, id, maxAssets))}
                 onEditBenefitText={(id, field, value) => setItems((current) => editImageSetBenefitText(current, id, field, value))}
                 benefitIconStyleControl={
-                  <div className="mt-2 rounded-xl border border-[#e7ebf1] bg-[#fbfcfe] p-3.5">
-                    <div className="flex items-center gap-2"><Shapes className="h-3.5 w-3.5 text-violet-600" /><span className="text-xs font-bold text-gray-800">賣點圖示風格</span></div>
-                    <p className="mt-1 text-[11px] leading-4 text-gray-500">所有賣點將套用同一套圖示風格與品牌色。</p>
-                    <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                  <div className="mt-5 border-t border-[#eef1f6] pt-5">
+                    <div className="flex items-center gap-2.5">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-violet-50"><Shapes className="h-4 w-4 text-violet-600" /></span>
+                      <span className="text-sm font-bold text-gray-900">Icon 視覺風格</span>
+                    </div>
+                    <p className="mt-2 text-xs leading-5 text-gray-500">此風格會套用到所有已選的賣點 Icon，並使用品牌色。</p>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-3">
                       {BENEFIT_ICON_STYLE_OPTIONS.map(({ value, label, hint }) => (
                         <button
                           key={value}
                           type="button"
-                          aria-pressed={iconStyle === value}
+                          role="radio"
+                          aria-checked={iconStyle === value}
                           onClick={() => setIconStyle(value)}
-                          className={`rounded-lg border p-2.5 text-left transition ${iconStyle === value ? "border-violet-400 bg-violet-50/60 ring-2 ring-violet-100" : "border-[#e5e9f0] bg-white hover:bg-gray-50"}`}
+                          className={`rounded-xl border p-3 text-left transition ${iconStyle === value ? "border-violet-400 bg-violet-50/50" : "border-[#e7ebf1] bg-white hover:bg-gray-50"}`}
                         >
-                          <span className="block text-xs font-bold text-gray-800">{label}</span>
-                          <span className="mt-0.5 block text-[10px] leading-3.5 text-gray-500">{hint}</span>
+                          <span className="flex items-start justify-between gap-2">
+                            <span className="flex h-16 w-full items-center justify-center rounded-lg bg-[#f7f8fb]">{STYLE_PREVIEWS[value]}</span>
+                            <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${iconStyle === value ? "border-violet-600" : "border-gray-300"}`}>
+                              {iconStyle === value && <span className="h-2 w-2 rounded-full bg-violet-600" />}
+                            </span>
+                          </span>
+                          <span className="mt-2 block text-sm font-bold text-gray-900">{label}</span>
+                          <span className="mt-0.5 block text-[11px] leading-4 text-gray-500">{hint}</span>
                         </button>
                       ))}
                     </div>
+                    <p className="mt-3 rounded-lg bg-[#f7f8fb] px-3 py-2 text-[11px] leading-4 text-gray-500">生成後仍可在編輯頁面調整 Icon 圖像與文字。</p>
                   </div>
                 }
               />

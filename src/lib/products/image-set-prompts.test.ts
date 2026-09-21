@@ -328,9 +328,9 @@ test("the soft icon style swaps the visual language but keeps every benefit-icon
   assert.match(prompt, /45% of the canvas/i);
   assert.doesNotMatch(prompt, /solid circular badge/i);
   // 三種風格都必須是中性可換色的——顏色寫死在圖裡的話，換個品牌就整組報廢。
-  // 藍黃配色保留，但是平塗單色，不是拼貼。
-  assert.match(prompt, /brand blue/i);
+  // 顏色跟著檔期走（沒檔期才用品牌色），但仍是平塗單色，不是拼貼。
   assert.match(prompt, /a single solid fill/i);
+  assert.match(prompt, /both drawn from/i);
   // 換風格不能換掉任何一條底線：不含文字、元素數量有上限、不出現商品。
   assert.match(prompt, /No lettering of any kind/i);
   assert.match(prompt, /任何文字、字母、數字/);
@@ -351,8 +351,9 @@ test("benefit icons default to the frameless plain style, which is the recoloura
   assert.match(prompt, /no frame, no container/i);
   assert.doesNotMatch(prompt, /single dark silhouette/i);
   assert.doesNotMatch(prompt, /sphere/i);
-  // 單色、無填色＝之後可以整組換成品牌色，所以同一組 icon 能套到任何產品。
-  assert.match(prompt, /recoloured to any brand palette/i);
+  // 單色、無填色，顏色由色系決定（沒選檔期時是中性深灰）。
+  assert.match(prompt, /Monochrome strokes in one single colour/i);
+  assert.match(prompt, /neutral dark grey/i);
   // 一致性靠寫死的比例，不靠形容詞。
   assert.match(prompt, /45% of the canvas/i);
   assert.match(prompt, /3% of the canvas width/i);
@@ -419,6 +420,38 @@ test("the english part of a benefit icon prompt never carries chinese product wo
       assert.doesNotMatch(prompt, /酵素角質護理|老廢角質/, `${style} 收到了商品賣點文字`);
       assert.doesNotMatch(prompt, new RegExp(points[0].title), `${style} 收到了中文標題`);
     }
+  }
+});
+
+test("icon colours follow the chosen theme, in english only", () => {
+  // 選 520 告白日跟選耶誕節不該拿到一樣的顏色——之前 icon 完全不吃檔期，
+  // 不管選什麼檔期都是同一個品牌色。
+  const points = [
+    { title: "溫和去角質", description: "", iconConcept: "a leg with a few small particles" },
+    { title: "保濕", description: "", iconConcept: "a leg with a water droplet" },
+    { title: "柔嫩", description: "", iconConcept: "a leg with a feather" },
+  ];
+  const valentine = imageSetThemeCatalog().find(({ label }) => label === "520 告白日")!;
+  const christmas = imageSetThemeCatalog().find(({ label }) => label === "耶誕節")!;
+
+  const promptFor = (theme: typeof valentine) => {
+    const roles = planImageSetRoles({ profile: skincareProfile, artDirection, benefitPoints: points, theme });
+    const icon = roles.find(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"))!;
+    return compileImageSetPrompt({ product, profile: skincareProfile, artDirection, role: icon });
+  };
+
+  const a = promptFor(valentine);
+  const b = promptFor(christmas);
+  assert.match(a, /cherry blossom pink/i, "520 沒有吃到檔期色");
+  assert.match(b, /deep green/i, "耶誕節沒有吃到檔期色");
+  assert.notEqual(a, b, "不同檔期應該產生不同的提示詞");
+
+  // ⚠️ 色系只能用英文進生圖指示。中文色名與色碼都會被畫成圖上的字——
+  // 這個專案踩過兩次，實作這條時我又踩了第三次，靠這個斷言擋下來。
+  for (const prompt of [a, b]) {
+    const objective = prompt.split("[PRODUCT CONTEXT")[0];
+    assert.doesNotMatch(objective, /[\u4e00-\u9fff]/, "生圖指示含有中文");
+    assert.doesNotMatch(objective, /#[0-9a-f]{3,8}\b/i, "生圖指示含有色碼");
   }
 });
 

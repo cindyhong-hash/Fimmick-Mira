@@ -106,6 +106,22 @@ const EXPLICIT: Record<string, ImageSetThemeVisual> = {
     props: ["花瓣", "緞帶", "柔焦光斑"],
     setting: "親密感的室內角落",
   },
+  // 520 是告白檔期，視覺語言跟情人節同一類。它既不在原本的明確清單裡，
+  // 也不符合購物節那條關鍵字規則（「告白日」比對不到），所以之前完全拿不到
+  // 主題詞彙——選了 520 生出來的圖跟常態素材沒兩樣。
+  // 「雙十連假檔」會被購物節規則接住，但「雙十連假」不會——差一個字。
+  雙十連假: {
+    season: "初秋明亮日光",
+    palette: ["正紅", "純白", "暖金"],
+    props: ["俐落線條", "光潔檯面", "簡約幾何"],
+    setting: "明亮的室內檯面，帶有連假出遊前的輕鬆感",
+  },
+  "520 告白日": {
+    season: "初夏午後柔光",
+    palette: ["櫻粉", "玫瑰粉", "奶油白"],
+    props: ["花瓣", "緞帶", "柔焦光斑"],
+    setting: "明亮溫柔的室內角落",
+  },
   七夕情人節: {
     season: "夏夜柔光",
     palette: ["玫瑰粉", "暖金", "夜藍"],
@@ -263,4 +279,92 @@ export function imageSetThemeVisual(label: string | null | undefined): ImageSetT
   const key = label?.trim();
   if (!key) return null;
   return EXPLICIT[key] ?? (FESTIVAL_HINT.test(key) ? SHOPPING_FESTIVAL : null);
+}
+
+/**
+ * 主題色名 → 色碼。
+ *
+ * 主題詞彙裡的顏色是給提示詞看的中文（「玫瑰粉」），但圓底徽章的圓是由程式畫的，
+ * 需要實際色碼。沒有對應到的色名會被略過，呼叫端再退回品牌色——多一個沒收錄的
+ * 色名只會讓那個主題沿用品牌色，不會壞掉。
+ */
+const THEME_COLOURS: Record<string, { hex: string; en: string }> = {
+  玫瑰粉: { hex: "#D98BA0", en: "rose pink" },
+  櫻粉: { hex: "#E8A3B8", en: "cherry blossom pink" },
+  淺粉: { hex: "#EFB8C8", en: "pale pink" },
+  粉: { hex: "#E79BB0", en: "soft pink" },
+  酒紅: { hex: "#8C2F39", en: "wine red" },
+  正紅: { hex: "#C8332F", en: "true red" },
+  朱砂: { hex: "#C4453A", en: "vermilion" },
+  南瓜橘: { hex: "#D2762E", en: "pumpkin orange" },
+  赭色: { hex: "#A9603C", en: "ochre" },
+  暖棕: { hex: "#8B5E3C", en: "warm brown" },
+  駝色: { hex: "#B08A63", en: "camel" },
+  淺駝: { hex: "#C3A184", en: "light camel" },
+  木色: { hex: "#A9805B", en: "natural wood" },
+  深木色: { hex: "#6F4E37", en: "dark walnut" },
+  沙色: { hex: "#C2A883", en: "sand" },
+  卡其: { hex: "#A79B72", en: "khaki" },
+  明黃: { hex: "#E8C23A", en: "bright yellow" },
+  檸檬黃: { hex: "#E4D35B", en: "lemon yellow" },
+  暖金: { hex: "#C9A227", en: "warm gold" },
+  淺金: { hex: "#D9BE72", en: "pale gold" },
+  金: { hex: "#C2A14D", en: "gold" },
+  玫瑰金: { hex: "#C9887C", en: "rose gold" },
+  香檳: { hex: "#D6C3A5", en: "champagne" },
+  香檳金: { hex: "#C9B18A", en: "champagne gold" },
+  嫩綠: { hex: "#8FBF6A", en: "fresh green" },
+  草綠: { hex: "#7FA95A", en: "grass green" },
+  竹綠: { hex: "#6F9E68", en: "bamboo green" },
+  薄荷綠: { hex: "#8FC9AE", en: "mint green" },
+  艾草綠: { hex: "#8A9A6B", en: "sage green" },
+  深綠: { hex: "#3F6B4A", en: "deep green" },
+  墨綠: { hex: "#2F4F43", en: "forest green" },
+  霧綠: { hex: "#9BB3A4", en: "muted sage" },
+  冰藍: { hex: "#A8CBE0", en: "ice blue" },
+  天藍: { hex: "#7FB3D9", en: "sky blue" },
+  淺藍: { hex: "#A9C9E3", en: "pale blue" },
+  海藍: { hex: "#3E7CA6", en: "ocean blue" },
+  寶藍: { hex: "#2C5FA8", en: "royal blue" },
+  深藍: { hex: "#2A4A73", en: "deep blue" },
+  墨藍: { hex: "#22374F", en: "midnight blue" },
+  夜藍: { hex: "#33415C", en: "night blue" },
+  灰藍: { hex: "#8195A8", en: "slate blue" },
+  霧藍: { hex: "#A3B6C4", en: "misty blue" },
+  紫: { hex: "#8A6BB1", en: "purple" },
+  白: { hex: "#F7F7F5", en: "white" },
+  純白: { hex: "#FFFFFF", en: "pure white" },
+  米白: { hex: "#F0E9DD", en: "off white" },
+  月白: { hex: "#F2F1EA", en: "moon white" },
+  奶白: { hex: "#F4EDE3", en: "milk white" },
+  奶油白: { hex: "#F5E9D7", en: "cream white" },
+  灰: { hex: "#9AA0A6", en: "grey" },
+  暖灰: { hex: "#A79E95", en: "warm grey" },
+  霧灰: { hex: "#B4B7B5", en: "misty grey" },
+  銀: { hex: "#B9BDC2", en: "silver" },
+  墨黑: { hex: "#2B2B2B", en: "ink black" },
+};
+
+/** @returns 這個主題的代表色碼；主題沒有可對應的色名時回 null。 */
+export function imageSetThemeHex(label: string | null | undefined): string | null {
+  const visual = imageSetThemeVisual(label);
+  if (!visual) return null;
+  for (const word of visual.palette) {
+    const entry = THEME_COLOURS[word];
+    if (entry) return entry.hex;
+  }
+  return null;
+}
+
+/**
+ * @returns 這個主題色系的英文說法，最多兩個色，例如 "cherry blossom pink and rose pink"。
+ *
+ * ⚠️ 生圖提示詞的英文段落只能用這個，不能塞中文色名，也不能塞色碼——兩者都會被
+ * 模型當成畫面文字畫出來（這個專案踩過「雙重保濕」與色碼兩次）。
+ */
+export function imageSetThemePaletteEn(label: string | null | undefined): string | null {
+  const visual = imageSetThemeVisual(label);
+  if (!visual) return null;
+  const names = visual.palette.map((word) => THEME_COLOURS[word]?.en).filter(Boolean).slice(0, 2);
+  return names.length ? names.join(" and ") : null;
 }

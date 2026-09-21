@@ -70,3 +70,17 @@ test("the badge colour is darkened until a white silhouette can be read on it", 
   assert.equal(badgeBackgroundColour(direction(["light blue"], ["#2E5E8F"])).toLowerCase(), "#2e5e8f");
   assert.match(badgeBackgroundColour(direction(["light blue"], ["navy"])), /^#[0-9a-f]{6}$/i);
 });
+
+test("the badge takes its colour from the campaign, falling back to the brand", () => {
+  // 選了檔期卻拿到一樣的金色徽章，整組素材就看不出跟主題有關。
+  const brandOnly = direction(["#ffeb85"]);
+  const withoutTheme = badgeBackgroundColour(brandOnly);
+  const valentine = badgeBackgroundColour(brandOnly, "520 告白日");
+  const christmas = badgeBackgroundColour(brandOnly, "耶誕節");
+
+  assert.notEqual(valentine, withoutTheme, "選了檔期卻還是品牌色");
+  assert.notEqual(valentine, christmas, "不同檔期應該有不同顏色");
+  // 認不得的檔期、或沒選檔期，都退回品牌色——不能因此壞掉。
+  assert.equal(badgeBackgroundColour(brandOnly, "不存在的檔期"), withoutTheme);
+  assert.equal(badgeBackgroundColour(brandOnly, null), withoutTheme);
+});

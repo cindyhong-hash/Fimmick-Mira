@@ -1,5 +1,6 @@
 import sharp from "sharp";
 import type { ImageSetArtDirection } from "./product-visual-analysis.ts";
+import { imageSetThemeHex } from "./image-set-theme-visuals.ts";
 
 /**
  * 圓底徽章由程式合成，不讓模型畫圓。
@@ -46,11 +47,21 @@ function toHex({ r, g, b }: { r: number; g: number; b: number }): string {
 /**
  * 挑徽章底色。
  *
+ * 選了檔期就用檔期的顏色——不然選 520 告白日跟選耶誕節會拿到一樣的金色徽章，
+ * 整組素材看不出跟主題有關。沒有檔期（常態品牌素材）才退回品牌色。
+ *
  * 品牌點綴色常常很淺（這個專案是 #ffeb85），白色剪影疊上去會看不見，
  * 所以壓暗到剪影讀得出來為止——寧可顏色偏離一點，也不要看不到圖形。
  */
-export function badgeBackgroundColour(artDirection: ImageSetArtDirection, fallback = "#8FB8DE"): string {
-  const candidates = [...artDirection.palette.accent, ...artDirection.palette.dominant];
+export function badgeBackgroundColour(
+  artDirection: ImageSetArtDirection,
+  themeLabel?: string | null,
+  fallback = "#8FB8DE",
+): string {
+  const themeHex = imageSetThemeHex(themeLabel);
+  const candidates = themeHex
+    ? [themeHex]
+    : [...artDirection.palette.accent, ...artDirection.palette.dominant];
   const rgb = candidates.map((value) => parseHex(value)).find((value): value is NonNullable<typeof value> => !!value)
     ?? parseHex(fallback)!;
   let current = rgb;

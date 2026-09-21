@@ -3,6 +3,7 @@ import { DEFAULT_BENEFIT_ICON_STYLE, IMAGE_SET_MAX_ASSETS, type BenefitIconStyle
 import type { ImageSetArtDirection } from "./product-visual-analysis.ts";
 import type { ProductVisualProfile } from "./product-visual-profile.ts";
 import type { BenefitPoint } from "./benefit-points.ts";
+import { imageSetThemePaletteEn, imageSetThemeVisual } from "./image-set-theme-visuals.ts";
 
 // lifestyle stays accepted for rows created by previous versions. New batches use benefit instead.
 export type ImageSetRole = "hero" | "detail" | "lifestyle" | "background" | "benefit" | "decoration";
@@ -181,13 +182,13 @@ function coreRoles(profile: ProductVisualProfile, themeKey: string, theme?: Imag
  * 同理，元素數量要釘死。放任模型自由發揮會得到「皮膚輪廓＋波浪＋星點
  * ＋葉子＋水滴」五個元素疊在一起，那已經不是 icon 了。
  */
-const BENEFIT_ICON_SPECS: Record<BenefitIconStyle, (concept: string) => Pick<ImageSetRoleSpec, "sceneCn" | "objective" | "composition"> & { mustNotShow: string[] }> = {
+const BENEFIT_ICON_SPECS: Record<BenefitIconStyle, (concept: string, palette: { cn: string; en: string }) => Pick<ImageSetRoleSpec, "sceneCn" | "objective" | "composition"> & { mustNotShow: string[] }> = {
   // 參考 flaticon「Sir.Vector Outline」那類 64px 格線圖示集：沒有外框，
   // 靠固定線寬與固定佔比成組。單色中性，排版時可以直接換成品牌色，
   // 所以同一組 icon 能套到任何產品與品牌——這是預設值的理由。
-  plain: (concept) => ({
-    sceneCn: `一張扁平向量線稿，純白底，不是照片、不是 3D、不是渲染圖。畫面正中央是一個描繪 ${concept} 的極簡輪廓圖形，沒有外框。圖形高度佔畫布的 45%，正置中；線條粗細固定為畫布寬度的 3%，端點與轉角都是圓角，整張只有這一種線寬。主體只有一個圖形，最多再加一顆小小的四角星點綴，不能更多。整張圖只有一種線條顏色，中性深灰，沒有填色、沒有陰影、沒有漸層。畫面上沒有文字、沒有商品、沒有情境。`,
-    objective: `Draw one minimal flat vector outline icon of ${concept}: no frame, no container, drawn with the even stroke weight of a professional icon set. One single pictogram centred on a pure white background, its height about 45% of the canvas. Uniform stroke width of 3% of the canvas width with rounded caps and joins, one stroke weight throughout. At most one small four-point sparkle as an accent beyond the main shape. Monochrome dark grey strokes only — no fills, shadows or gradients, so the icon can be recoloured to any brand palette later. This is line art, never a photograph, product shot or 3D render. No lettering of any kind, no product, no scene.`,
+  plain: (concept, palette) => ({
+    sceneCn: `一張扁平向量線稿，純白底，不是照片、不是 3D、不是渲染圖。畫面正中央是一個描繪 ${concept} 的極簡輪廓圖形，沒有外框。圖形高度佔畫布的 45%，正置中；線條粗細固定為畫布寬度的 3%，端點與轉角都是圓角，整張只有這一種線寬。主體只有一個圖形，最多再加一顆小小的四角星點綴，不能更多。整張圖只有一種線條顏色，${palette.cn}，沒有填色、沒有陰影、沒有漸層。畫面上沒有文字、沒有商品、沒有情境。`,
+    objective: `Draw one minimal flat vector outline icon of ${concept}: no frame, no container, drawn with the even stroke weight of a professional icon set. One single pictogram centred on a pure white background, its height about 45% of the canvas. Uniform stroke width of 3% of the canvas width with rounded caps and joins, one stroke weight throughout. At most one small four-point sparkle as an accent beyond the main shape. Monochrome strokes in one single colour (${palette.en}) — no fills, shadows or gradients. This is line art, never a photograph, product shot or 3D render. No lettering of any kind, no product, no scene.`,
     composition: "單一輪廓圖形置中，高度佔畫布 45%，無外框；固定線寬，四周均勻留白。",
     mustNotShow: [
       "任何文字、字母、數字",
@@ -205,7 +206,9 @@ const BENEFIT_ICON_SPECS: Record<BenefitIconStyle, (concept: string) => Pick<Ima
       "粗細不一的線條",
     ],
   }),
-  framed: (concept) => ({
+  // framed 只畫剪影，圓底顏色由 renderBenefitBadge() 依檔期上色，
+  // 所以這裡的剪影固定深色即可，palette 用不到。
+  framed: (concept, _palette) => ({
 // ⚠️ 這個風格只讓模型畫剪影，圓由 renderBenefitBadge() 用固定數字合成。
     // 不要在這裡叫模型畫圓——實測它每次畫出來的大小與顏色都不一樣。
     sceneCn: `一個描繪 ${concept} 的深色剪影，置中放在純白背景上。剪影是單純的實心填色形狀，深炭灰色，沒有外框線、沒有內部線條、沒有紋理、沒有陰影。形狀高度約佔畫布的一半，四周留白。畫面上只有這個剪影：沒有圓框、沒有底色、沒有文字、沒有其他圖形。`,
@@ -228,9 +231,9 @@ const BENEFIT_ICON_SPECS: Record<BenefitIconStyle, (concept: string) => Pick<Ima
       "與同組其他 icon 不同大小的外框或不同粗細的線條",
     ],
   }),
-  soft: (concept) => ({
-sceneCn: `一張柔和色塊的扁平插畫圖示，純白底，不是照片、不是 3D。畫面正中央是一個描繪 ${concept} 的圖形，高度佔畫布的 45%，正置中。用柔和的面狀色塊畫成，輪廓圓潤——保留插畫的柔和感，但簡化到一眼就看得懂：整張只有兩個元素，主體用品牌主色的柔和藍平塗，輔助元素用品牌點綴色平塗，各自都是單一純色。形狀內部不要再切割成多塊、不要疊層、不要加內部線條或紋理。畫面上沒有文字、沒有商品、沒有情境、沒有陰影、沒有漸層、沒有裝飾造型、沒有背景色塊。`,
-    objective: `Draw one soft flat colour-block icon of ${concept}. Keep the gentle illustrated feel, but simplify it hard until the meaning is obvious at a glance. One shape centred on a pure white background, its height about 45% of the canvas, built from rounded filled shapes: the subject in a soft brand blue, the supporting element in the brand accent, each one a single solid fill. Do not slice a shape into several facets, do not overlap translucent layers, and do not add interior lines, seams or texture — one shape, one colour. No gradients, gloss, drop shadows or 3D shading. No lettering of any kind, no product, no scene.`,
+  soft: (concept, palette) => ({
+sceneCn: `一張柔和色塊的扁平插畫圖示，純白底，不是照片、不是 3D。畫面正中央是一個描繪 ${concept} 的圖形，高度佔畫布的 45%，正置中。用柔和的面狀色塊畫成，輪廓圓潤——保留插畫的柔和感，但簡化到一眼就看得懂：整張只有兩個元素，兩者都用 ${palette.cn} 這一組色平塗，主體用其中較深的一階、輔助元素用較淺或對比的一階，各自都是單一純色。形狀內部不要再切割成多塊、不要疊層、不要加內部線條或紋理。畫面上沒有文字、沒有商品、沒有情境、沒有陰影、沒有漸層、沒有裝飾造型、沒有背景色塊。`,
+    objective: `Draw one soft flat colour-block icon of ${concept}. Keep the gentle illustrated feel, but simplify it hard until the meaning is obvious at a glance. One shape centred on a pure white background, its height about 45% of the canvas, built from rounded filled shapes, both drawn from ${palette.en}: the subject in the deeper tone and the supporting element in the lighter or contrasting tone, each one a single solid fill. Do not slice a shape into several facets, do not overlap translucent layers, and do not add interior lines, seams or texture — one shape, one colour. No gradients, gloss, drop shadows or 3D shading. No lettering of any kind, no product, no scene.`,
     composition: "單一柔和色塊圖形置中，高度佔畫布 45%，四周均勻留白；整組並排時簡化程度與配色一致。",
     mustNotShow: [
       "任何文字、字母、數字",
@@ -282,11 +285,17 @@ const BENEFIT_ICON_READABILITY = [
 
 const BENEFIT_ICON_TEXT_BAN = "Icon only. No text, no letters, no numbers, no words, no typography, no watermark, no signature, no measurement marks. A single isolated object on a clean, empty background, suitable for dropping into an advertising layout.";
 
-function benefitIconRoles(points: BenefitPoint[], themeKey: string, style: BenefitIconStyle): PlannedImageSetRole[] {
+function benefitIconRoles(
+  points: BenefitPoint[],
+  themeKey: string,
+  style: BenefitIconStyle,
+  /** 這一組 icon 要用的色系；中英分開，英文那份才會進生圖指示。 */
+  palette: { cn: string; en: string },
+): PlannedImageSetRole[] {
   // 沒有英文視覺描述就不做這張。中文標題絕對不能進提示詞——實測模型會把
   // 那幾個字直接畫進圖裡（「雙重保濕」被畫了兩次），寧可少一張也不要生出有字的圖。
   return points.filter(({ iconConcept }) => iconConcept.trim()).map((point, index) => {
-    const spec = BENEFIT_ICON_SPECS[style](point.iconConcept.trim());
+    const spec = BENEFIT_ICON_SPECS[style](point.iconConcept.trim(), palette);
     return withPlanMetadata({
       role: "benefit",
       // 主標題直接是賣點名稱——四張都叫「賣點圖示」的話，要往下讀小字才分得出誰是誰。
@@ -360,6 +369,18 @@ export function planImageSetRoles(input: PlanImageSetInput | ProductVisualProfil
   const core = coreRoles(profile, themeKey, theme);
   if (!configurable) return core;
   // 賣點圖示放在核心之後、其他選配之前——它是一整組，優先順序高於單張選配素材。
-  const icons = benefitIconRoles(input.benefitPoints ?? [], themeKey, input.benefitIconStyle ?? DEFAULT_BENEFIT_ICON_STYLE);
+  // 選了檔期就讓 icon 吃檔期色系——不然選 520 告白日跟選耶誕節會拿到一樣的顏色。
+  const themePalette = theme ? imageSetThemeVisual(theme.label)?.palette ?? [] : [];
+  const themePaletteEn = theme ? imageSetThemePaletteEn(theme.label) : null;
+  const icons = benefitIconRoles(
+    input.benefitPoints ?? [],
+    themeKey,
+    input.benefitIconStyle ?? DEFAULT_BENEFIT_ICON_STYLE,
+    {
+      cn: themePalette.length ? themePalette.slice(0, 2).join("、") : "品牌點綴色或商品主色",
+      // 英文段落只能用英文色名——中文色名與色碼都會被畫成圖上的字。
+      en: themePaletteEn ?? "a single neutral dark grey",
+    },
+  );
   return [...core, ...icons, ...extraRoles(input, themeKey)].slice(0, IMAGE_SET_MAX_ASSETS);
 }

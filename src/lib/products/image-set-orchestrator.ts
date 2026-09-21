@@ -151,6 +151,8 @@ export type ImageSetBatchInput = {
   artDirection: ImageSetArtDirection;
   product: ImageSetProduct;
   rows: ImageSetRow[];
+  /** 這一批的檔期名稱；圓底徽章用它決定底色。常態品牌素材是 null。 */
+  themeLabel?: string | null;
 };
 
 export type ImageSetBatchDependencies = {
@@ -1043,7 +1045,7 @@ export async function runImageSetBatch(
       // 圓底徽章的圓由程式畫：模型只負責剪影，尺寸與顏色才會整組一致。
       // 合成失敗（例如模型交了一張全白）就保留原圖，不要讓整批掛掉。
       const composed = isBenefitBadge(role)
-        ? await renderBenefitBadge(generated.buffer, badgeBackgroundColour(input.artDirection)).catch(() => null)
+        ? await renderBenefitBadge(generated.buffer, badgeBackgroundColour(input.artDirection, input.themeLabel)).catch(() => null)
         : null;
       const finalBuffer = composed ?? generated.buffer;
       const hasTransparentBackground = await inspectTransparency(finalBuffer);
@@ -1339,6 +1341,8 @@ export async function createAndScheduleImageSetBatch(
     artDirection,
     product: imageProduct,
     rows: created.map((row, index) => ({ id: row.id, role: roles[index] })),
+    // 舊流程沒有檔期概念（planImageSetRoles 不帶 theme），所以固定 null。
+    themeLabel: null,
   };
   try {
     dependencies.scheduleAfter(async () => {
@@ -1580,6 +1584,7 @@ export async function confirmAndScheduleProductImageSet(
     artDirection,
     product: imageProduct,
     rows: created.map((row, index) => ({ id: row.id, role: roles[index] })),
+    themeLabel: theme?.label ?? null,
   };
   try {
     dependencies.scheduleAfter(async () => {

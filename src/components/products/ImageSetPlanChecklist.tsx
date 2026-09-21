@@ -3,7 +3,7 @@
 import { Check, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { MAX_BENEFIT_ICONS, type ImageSetPlanSelection } from "@/lib/products/image-set-ui";
-import { imageSetSubtypeLabel } from "@/lib/products/image-set-subtype-labels";
+import { imageSetSubtypeLabel, imageSetSubtypeSample } from "@/lib/products/image-set-subtype-labels";
 
 const CATEGORY_LABELS: Record<ImageSetPlanSelection["category"], string> = {
   product: "商品主體",
@@ -61,6 +61,7 @@ export function ImageSetPlanChecklist({ items, maxAssets, onToggle, onEditBenefi
         const label = isBenefitIcon && item.benefitTitle
           ? { zh: item.benefitTitle, en: subtypeLabel.en, description: item.benefitDescription ?? "" }
           : subtypeLabel;
+        const sample = imageSetSubtypeSample(item.assetSubtype);
         const rowClass = `flex items-start gap-3 rounded-xl border p-3.5 transition ${item.checked ? "border-violet-500 bg-violet-50" : "border-[#e7ebf1] bg-white hover:border-violet-300"} ${disabled ? "opacity-45" : ""}`;
         const box = <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${item.checked ? "border-violet-600 bg-violet-600 text-white" : "border-gray-300 bg-white"}`}>{item.checked && <Check className="h-3.5 w-3.5" />}</span>;
 
@@ -111,6 +112,12 @@ export function ImageSetPlanChecklist({ items, maxAssets, onToggle, onEditBenefi
             {label.en && <span className="mt-0.5 block text-[11px] leading-4 text-gray-400">{label.en}</span>}
             <span className="mt-1 block text-xs leading-5 text-gray-500">{label.description || (item.benefitTitle ? "" : item.purpose)}</span>
           </span>
+          {/* 示意圖：讓人在勾選之前就知道這一項會生出什麼東西。 */}
+          {sample && <span className="ml-1 hidden shrink-0 text-center sm:block">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={sample} alt="" className="h-14 w-14 rounded-lg border border-[#eef1f6] object-cover" />
+            <span className="mt-1 block text-[10px] leading-3 text-gray-400">示意</span>
+          </span>}
         </label>;
       })}</div>
     </section>)}</div>

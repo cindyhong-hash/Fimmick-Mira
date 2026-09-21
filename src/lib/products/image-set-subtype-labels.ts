@@ -84,3 +84,27 @@ export function imageSetSubtypeLabel(assetSubtype: string | null | undefined): I
   const readable = key ? key.replaceAll("-", " ") : "視覺素材";
   return { zh: readable, en: "", description: "" };
 }
+
+/**
+ * 每個素材類型的示意圖，讓人在挑選之前就知道這一項會生出什麼東西。
+ *
+ * 這些是固定素材（`public/asset-samples/`），不是該品牌自己的圖——它的作用是
+ * 「這一項長這樣」，不是預覽成品。都是實際生成出來的縮圖，240px、每張幾 KB。
+ */
+const SUBTYPE_SAMPLES: Record<string, string> = {
+  "clean-cutout": "/asset-samples/clean-cutout.jpg",
+  "alternate-angle": "/asset-samples/alternate-angle.jpg",
+  "formula-texture": "/asset-samples/formula-texture.jpg",
+  "material-detail": "/asset-samples/formula-texture.jpg",
+  "fabric-detail": "/asset-samples/formula-texture.jpg",
+  "primary-scene": "/asset-samples/primary-scene.jpg",
+  "clean-plate": "/asset-samples/clean-plate.jpg",
+  "benefit-metaphor": "/asset-samples/benefit-metaphor.jpg",
+  "brand-motif": "/asset-samples/brand-motif.jpg",
+  "layout-frame": "/asset-samples/layout-frame.jpg",
+};
+
+/** @returns 示意圖網址；沒有對應圖的類型回 null（例如賣點圖示，它有自己的風格縮圖）。 */
+export function imageSetSubtypeSample(assetSubtype: string | null | undefined): string | null {
+  return SUBTYPE_SAMPLES[assetSubtype?.trim() ?? ""] ?? null;
+}

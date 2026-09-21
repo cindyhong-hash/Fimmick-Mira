@@ -133,6 +133,49 @@ export function ImageDetailModal({
     } finally { setSavingTitle(false); }
   }
 
+  /**
+   * 名字那一格。三種彈窗版面（背景素材／人像・插畫／參考圖・產品成圖）各有自己的
+   * header，所以放在這裡共用——之前只接了其中一種，人像和背景素材還是改不了名。
+   * 類別字樣維持固定，名字另外一格（把整段生成文字當標題會爆版）。
+   */
+  function renameControl() {
+    if (!libraryImageId) return null;
+    if (editingTitle) {
+      return (
+        <span className="flex items-center gap-1 min-w-0">
+          <input
+            autoFocus
+            value={titleDraft}
+            onChange={(e) => setTitleDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); saveTitle(); }
+              if (e.key === "Escape") setEditingTitle(false);
+            }}
+            maxLength={80}
+            placeholder="幫這張圖取個名字"
+            className="w-48 text-xs font-normal px-2 py-1 rounded-md border border-violet-300 focus:outline-none focus:ring-1 focus:ring-violet-400" />
+          <button onClick={saveTitle} disabled={savingTitle}
+            className="text-xs px-2 py-1 rounded-md bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 whitespace-nowrap">
+            {savingTitle ? "儲存中…" : "儲存"}
+          </button>
+          <button onClick={() => setEditingTitle(false)}
+            className="text-xs px-2 py-1 rounded-md border border-gray-200 text-gray-500 hover:border-gray-400 whitespace-nowrap">
+            取消
+          </button>
+        </span>
+      );
+    }
+    return (
+      <button
+        onClick={() => { setTitleDraft(displaySubject ?? ""); setEditingTitle(true); }}
+        title="重新命名"
+        className="group flex items-center gap-1 min-w-0 text-xs font-normal text-gray-500 hover:text-violet-600 transition-colors">
+        <span className="truncate">{displaySubject || "未命名素材"}</span>
+        <Pencil className="h-3 w-3 shrink-0 opacity-50 group-hover:opacity-100" />
+      </button>
+    );
+  }
+
   // Download the displayed image (same-origin /uploads → the `download` attribute is honored).
   // fetch → blob 先再落地：本機圖片存喺同源 /uploads，download attribute 直接生效；
   // 但 Vercel 上圖片存喺 *.public.blob.vercel-storage.com（跨域），瀏覽器會無視
@@ -213,7 +256,8 @@ export function ImageDetailModal({
           <div className="flex items-center justify-between px-5 py-3.5 border-b shrink-0 gap-3 min-w-0">
             <h2 className="text-sm font-semibold flex items-center gap-1.5 min-w-0 truncate">
               <Mountain className="h-4 w-4 text-teal-500 shrink-0" />
-              <span className="truncate">背景</span>
+              <span className="shrink-0">背景</span>
+              {renameControl()}
             </h2>
             {!loading && (
               <div className="flex items-center gap-1.5 shrink-0">
@@ -322,7 +366,8 @@ export function ImageDetailModal({
               ) : (
                 <Palette className="h-4 w-4 shrink-0 text-amber-500" />
               )}
-              <span className="truncate">{genType === "person" ? "人像" : "插畫"}</span>
+              <span className="shrink-0">{genType === "person" ? "人像" : "插畫"}</span>
+              {renameControl()}
             </h2>
             <div className="flex items-center gap-1.5 shrink-0">
               {/* 重新生成（紫）統一擺 header（IMG_02）*/}
@@ -410,37 +455,7 @@ export function ImageDetailModal({
               <Package className="h-4 w-4 shrink-0 text-[#C9A227]" />
             )}
             <span className="shrink-0">{genType === "reference" || !libraryImageId ? "參考圖" : "產品成圖"}</span>
-            {libraryImageId && (editingTitle ? (
-              <span className="flex items-center gap-1 min-w-0">
-                <input
-                  autoFocus
-                  value={titleDraft}
-                  onChange={(e) => setTitleDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") { e.preventDefault(); saveTitle(); }
-                    if (e.key === "Escape") setEditingTitle(false);
-                  }}
-                  maxLength={80}
-                  placeholder="幫這張圖取個名字"
-                  className="w-48 text-xs font-normal px-2 py-1 rounded-md border border-violet-300 focus:outline-none focus:ring-1 focus:ring-violet-400" />
-                <button onClick={saveTitle} disabled={savingTitle}
-                  className="text-xs px-2 py-1 rounded-md bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 whitespace-nowrap">
-                  {savingTitle ? "儲存中…" : "儲存"}
-                </button>
-                <button onClick={() => setEditingTitle(false)}
-                  className="text-xs px-2 py-1 rounded-md border border-gray-200 text-gray-500 hover:border-gray-400 whitespace-nowrap">
-                  取消
-                </button>
-              </span>
-            ) : (
-              <button
-                onClick={() => { setTitleDraft(displaySubject ?? ""); setEditingTitle(true); }}
-                title="重新命名"
-                className="group flex items-center gap-1 min-w-0 text-xs font-normal text-gray-500 hover:text-violet-600 transition-colors">
-                <span className="truncate">{displaySubject || "未命名素材"}</span>
-                <Pencil className="h-3 w-3 shrink-0 opacity-50 group-hover:opacity-100" />
-              </button>
-            ))}
+            {renameControl()}
           </h2>
           <div className="flex items-center gap-1.5 shrink-0">
             {/* header 順序統一（IMG_02）：[重新生成][調整]│[下載]│[刪除][✕]

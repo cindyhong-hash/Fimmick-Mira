@@ -65,9 +65,7 @@ import {
   shouldAnalyzeBeforeImageSetPicker,
   shouldNotifySettledBatch,
   shouldRenderDeterminateImageSetProgress,
-  addImageSetBenefit,
   editImageSetBenefitText,
-  removeImageSetBenefit,
   toggleImageSetPlanItem,
   writeSavedImageSetBatch,
   type ImageSetPlanSelection,
@@ -556,8 +554,9 @@ export function ImageSetModal({ clientId, productId, onClose, onFinished }: {
                 maxAssets={maxAssets}
                 onToggle={(id) => setItems((current) => toggleImageSetPlanItem(current, id, maxAssets))}
                 onEditBenefitText={(id, field, value) => setItems((current) => editImageSetBenefitText(current, id, field, value))}
-                onAddBenefit={() => setItems((current) => addImageSetBenefit(current))}
-                onRemoveBenefit={(id) => setItems((current) => removeImageSetBenefit(current, id))}
+                // 「新增賣點」先收起來：不傳 handler，清單就不會顯示那顆按鈕。
+                // 後端（addedBenefits）與 addImageSetBenefit／removeImageSetBenefit 都還在
+                // 而且有測試，要開回來就是把這兩行接上。
                 benefitIconStyleControl={
                   <div className="mt-5 border-t border-[#eef1f6] pt-5">
                     <div className="flex items-center gap-2.5">

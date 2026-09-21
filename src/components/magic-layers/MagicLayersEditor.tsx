@@ -39,6 +39,13 @@ type EL = {
   groupId?: string | null;
 };
 
+/**
+ * Feature flag：「魔術棒補空白」暫時收起。
+ * 想拿回來繼續做就改 true——按鈕、generateMagicFill 與
+ * /api/magic-layers/magic-fill 都原封不動留著。
+ */
+const SHOW_MAGIC_FILL = false;
+
 const TYPE_LABEL: Record<string, string> = { background: "背景", product: "產品", person: "人物", object: "物件", decoration: "裝飾", independent_text: "文字" };
 
 /** One serialized layer in a saved 排版 (stored in LibraryImage.paramsJson). */
@@ -965,7 +972,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
               <button style={S.tool} onClick={() => setShowIcon(true)}><Star size={16} />圖標</button>
               <button style={S.tool} onClick={addLine}><Minus size={16} />線條</button>
               <button style={S.tool} onClick={() => { setOutpaintResult(null); setShowOutpaint(true); }}><Maximize2 size={16} />擴圖／改尺寸</button>
-              <button style={S.tool} onClick={generateMagicFill} disabled={magicFillBusy}><WandSparkles size={16} />{magicFillBusy ? "偵測並延伸中…" : "魔術棒補空白"}</button>
+              {SHOW_MAGIC_FILL && (
+                <button style={S.tool} onClick={generateMagicFill} disabled={magicFillBusy}><WandSparkles size={16} />{magicFillBusy ? "偵測並延伸中…" : "魔術棒補空白"}</button>
+              )}
               <button
                 style={{ ...S.tool, ...(tool === "erase" ? { border: "1px solid #7c3aed", color: "#7c3aed", background: "#f5f3ff" } : {}) }}
                 onClick={() => { setTool((t) => (t === "erase" ? "select" : "erase")); erasePt.current = null; if (canvasRef.current) canvasRef.current.style.cursor = "default"; render(); }}

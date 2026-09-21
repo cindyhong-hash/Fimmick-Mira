@@ -32,6 +32,7 @@ import {
   type ImageSetTheme,
 } from "./image-set-roles.ts";
 import { deriveBenefitPoints, deriveIconConcepts, extractBenefitPoints, iconConceptSubject, type BenefitPoint } from "./benefit-points.ts";
+import { badgeBackgroundColour, renderBenefitBadge } from "./benefit-badge.ts";
 import { chatTextOpenRouter } from "../openrouter.ts";
 import {
   deriveImageSetKitStatus,
@@ -595,6 +596,17 @@ async function refreshEditedIconConcepts(
   };
 }
 
+/**
+ * 這個角色是不是要用程式合成圓底的徽章。
+ *
+ * 角色存進列的時候帶著完整的規劃資料（含 assetSubtype 與風格），型別上宣告成
+ * ImageSetRoleSpec，所以這裡跟檔案裡其他地方一樣用型別斷言讀那兩個欄位。
+ */
+function isBenefitBadge(role: ImageSetRoleSpec): boolean {
+  const saved = role as ImageSetRoleSpec & { assetSubtype?: string; benefitIconStyle?: BenefitIconStyle };
+  return !!saved.assetSubtype?.startsWith("benefit-icon") && saved.benefitIconStyle === "framed";
+}
+
 function storedBenefitPoints(plan: ImageSetPlanItem[]): BenefitPoint[] | undefined {
   const icons = plan.filter(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"));
   if (!icons.length || !icons.every(({ benefitTitle }) => benefitTitle)) return undefined;
@@ -997,10 +1009,17 @@ export async function runImageSetBatch(
       });
       if (!isConcreteProvider(generated.provider)) throw new Error("Image provider trace is missing or synthetic");
       if (reachedDeadline()) throw new Error("Image-set batch deadline reached");
-      const hasTransparentBackground = await inspectTransparency(generated.buffer);
+      // 圓底徽章的圓由程式畫：模型只負責剪影，尺寸與顏色才會整組一致。
+      // 合成失敗（例如模型交了一張全白）就保留原圖，不要讓整批掛掉。
+      const composed = isBenefitBadge(role)
+        ? await renderBenefitBadge(generated.buffer, badgeBackgroundColour(input.artDirection)).catch(() => null)
+        : null;
+      const finalBuffer = composed ?? generated.buffer;
+      const hasTransparentBackground = await inspectTransparency(finalBuffer);
       const imageUrl = await dependencies.saveBuffer(
-        generated.buffer,
-        extension(generated.contentType),
+        finalBuffer,
+        // 合成過的是 PNG，沒合成就沿用生成回來的型別。
+        composed ? "png" : extension(generated.contentType),
         `product-set-${role.role}-`,
         abortController.signal,
       );

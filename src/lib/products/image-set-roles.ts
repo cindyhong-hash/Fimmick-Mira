@@ -206,15 +206,16 @@ const BENEFIT_ICON_SPECS: Record<BenefitIconStyle, (concept: string) => Pick<Ima
     ],
   }),
   framed: (concept) => ({
-sceneCn: `一個實心的圓形徽章置中，純白底。圓是填滿的色塊，直徑固定為畫布寬度的 60%——這個比例不能變，整組的圓要一樣大才能並排。整組只用同一個色系：圓底用品牌色的柔和色調，同一組的每個圓都是同一個顏色，不要換色。圓內放一個描繪 ${concept} 的白色剪影圖形，高度約圓直徑的一半，完全在圓內、四周留白，不可碰到圓邊。圖形是單純的白色填色剪影，沒有外框線、沒有內部線條。圓外面完全空白：沒有文字、沒有其他圖形、沒有陰影、沒有光暈。`,
-    objective: `Draw one solid circular badge, centred on a pure white background, its diameter exactly 60% of the canvas width — this ratio is fixed so every icon in the set lines up. Fill the circle with one soft brand colour, and use that same single colour for every badge in the set so they read as one family. Inside it place a plain white silhouette of ${concept}, about half the circle's diameter tall, fully inside the circle with clear margin, never touching the edge. The silhouette is solid white with no outline and no interior lines. Outside the circle the frame is empty white: no lettering of any kind, no second shape, no drop shadow, no glow, no gradient, no 3D shading.`,
-    composition: "實心圓底徽章置中、直徑佔畫布 60%，圓內一個白色剪影且不碰邊；整組並排時圓的大小與顏色完全一致。",
+// ⚠️ 這個風格只讓模型畫剪影，圓由 renderBenefitBadge() 用固定數字合成。
+    // 不要在這裡叫模型畫圓——實測它每次畫出來的大小與顏色都不一樣。
+    sceneCn: `一個描繪 ${concept} 的深色剪影，置中放在純白背景上。剪影是單純的實心填色形狀，深炭灰色，沒有外框線、沒有內部線條、沒有紋理、沒有陰影。形狀高度約佔畫布的一半，四周留白。畫面上只有這個剪影：沒有圓框、沒有底色、沒有文字、沒有其他圖形。`,
+    objective: `Draw a single dark silhouette of ${concept}, centred on a plain pure white background. The silhouette is one solid charcoal shape — no outline, no interior lines, no texture, no shading, no gradient. It should be about half the canvas tall with clear white space around it. Nothing else is in the frame: no circle, no background colour, no lettering of any kind, no second shape.`,
+    composition: "深色實心剪影置中、高度約佔畫布一半，其餘全白；圓底與尺寸由程式合成，不由模型決定。",
     mustNotShow: [
       "任何文字、字母、數字",
-      "圓外面出現任何東西：文字、第二個圖形、散落的星點與裝飾",
-      "白色剪影穿出或碰到圓邊",
-      "同一組裡出現不同顏色的圓底",
-      "雙圈或多重外框（只有一個實心圓）",
+      "任何圓框、圓底或背景色塊（圓由程式合成，模型畫了反而會疊兩層）",
+      "剪影以外的任何東西：文字、第二個圖形、散落的星點與裝飾",
+      "剪影的外框線、內部線條、紋理或陰影",
       "Emoji、卡通角色、吉祥物",
       "只有抽象幾何、波浪色塊或膠囊形狀，看不出在講什麼",
       "商品瓶罐、軟管、包裝，或把它們當成主體",

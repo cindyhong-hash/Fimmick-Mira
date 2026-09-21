@@ -298,10 +298,12 @@ test("benefit icons are one-per-point, text-free, flat white, and visually consi
   assert.match(prompt, /任何文字、字母、數字/);
   // 整組風格要一致——靠的是「每張都畫同一個外框」這個機械性約束，
   // 不是叫模型自己記住前幾張（每張是獨立一次呼叫，它看不到同組其他張）。
-  // 外框改成實心圓底徽章：白色剪影放在填滿的圓裡，整組同一個顏色。
-  assert.match(prompt, /solid circular badge/i);
-  assert.match(prompt, /plain white silhouette/i);
-  assert.match(prompt, /same single colour for every badge/i);
+  // 徽章的圓由 renderBenefitBadge() 合成，模型只畫剪影——所以提示詞裡
+  // 反而不能叫它畫圓，否則會疊成兩層。
+  assert.match(prompt, /single dark silhouette/i);
+  assert.doesNotMatch(prompt, /solid circular badge/i);
+  assert.match(prompt, /no circle/i);
+  assert.match(prompt, /任何圓框、圓底或背景色塊/);
   // 元素數量要釘死，否則會疊成一團而不是 icon。
   // 元素上限由共用規則統一講：整張只畫主體＋一個輔助元素。
   assert.match(prompt, /Draw exactly two things/i);
@@ -347,7 +349,7 @@ test("benefit icons default to the frameless plain style, which is the recoloura
 
   const prompt = compileImageSetPrompt({ product, profile: skincareProfile, artDirection, role: icons[0] });
   assert.match(prompt, /no frame, no container/i);
-  assert.doesNotMatch(prompt, /solid circular badge/i);
+  assert.doesNotMatch(prompt, /single dark silhouette/i);
   assert.doesNotMatch(prompt, /sphere/i);
   // 單色、無填色＝之後可以整組換成品牌色，所以同一組 icon 能套到任何產品。
   assert.match(prompt, /recoloured to any brand palette/i);
@@ -441,7 +443,13 @@ test("every benefit icon style pins the size ratio, because 'keep it consistent'
     const icons = roles.filter(({ assetSubtype }) => assetSubtype.startsWith("benefit-icon"));
     assert.ok(icons.every((icon) => icon.benefitIconStyle === style), `${style} 沒有把風格寫進計畫項目`);
     const prompt = compileImageSetPrompt({ product, profile: skincareProfile, artDirection, role: icons[0] });
-    assert.match(prompt, /% of the canvas/i, `${style} 沒有釘死尺寸比例`);
+    // framed 的尺寸與顏色由 renderBenefitBadge() 合成時決定，所以它的提示詞
+    // 不需要（也不該）講比例；另外兩種仍然靠寫死的佔比維持一致。
+    if (style === "framed") {
+      assert.match(prompt, /no circle/i, "framed 應該叫模型不要畫圓，圓由程式合成");
+    } else {
+      assert.match(prompt, /% of the canvas/i, `${style} 沒有釘死尺寸比例`);
+    }
     assert.match(prompt, /No lettering of any kind/i, `${style} 少了不可有文字的底線`);
     // 圖裡不能有字是這組素材的設計前提，三種風格都要明確擋掉各種文字形式。
     assert.match(prompt, /no letters, no numbers, no words, no typography/i, `${style} 少了共用的無文字規則`);

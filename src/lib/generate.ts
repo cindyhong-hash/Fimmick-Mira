@@ -981,6 +981,55 @@ export async function falUpscale(imageDataUri: string, factor = 2): Promise<Buff
  * Analyze a reference image with the vision model and return a Traditional-Chinese style description
  * covering composition, color palette, lighting and overall visual mood. Used to enrich generation prompts.
  */
+/**
+ * 讀一張圖，回一句英文的「這是什麼場景」，給擴圖當提示詞用。
+ *
+ * 擴圖不能用祈使句當提示詞。FLUX Fill 把提示詞當成「要畫什麼」，不是「怎麼做」——
+ * 實測寫 "Extend this photograph into one larger continuous photo" 之後，它真的
+ * 在補的區域畫出一格一格的照片。同理也不能提顏色（寫 white 就補出一片白）。
+ *
+ * 所以提示詞必須只描述場景本身：地點、家具、材質、光線。模型看得到原圖，
+ * 這句話的作用是把它的注意力壓在「同一個場景」上，不要自由發揮。
+ *
+ * @returns 一句英文場景描述；沒有 key、看圖失敗或逾時都回空字串（呼叫端自備後備）。
+ */
+export async function describeSceneInEnglish(imageUrl: string, host: string): Promise<string> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return "";
+  try {
+    let dataUri: string;
+    if (imageUrl.startsWith("data:")) {
+      // 擴圖直接把畫布的 data URL 丟進來——要描述的是原圖，不是補過底的那張。
+      dataUri = imageUrl;
+    } else {
+      const abs = imageUrl.startsWith("http") ? imageUrl : `${host}${imageUrl}`;
+      const imgRes = await fetch(abs, { signal: AbortSignal.timeout(30_000) });
+      if (!imgRes.ok) return "";
+      const base64 = Buffer.from(await imgRes.arrayBuffer()).toString("base64");
+      dataUri = `data:${imgRes.headers.get("content-type") ?? "image/jpeg"};base64,${base64}`;
+    }
+    const model = process.env.OPENROUTER_VISION_MODEL ?? "openai/gpt-5.4-nano";
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", "HTTP-Referer": host, "X-Title": "Marketing Tool" },
+      body: JSON.stringify({
+        model, max_tokens: 80,
+        messages: [{ role: "user", content: [
+          { type: "image_url", image_url: { url: dataUri } },
+          { type: "text", text: "Describe the place in this image in ONE short English noun phrase: the location, its surfaces and furniture, and the light. Example: 'a bright modern cafe interior with pale wooden tables, potted plants and soft daylight from a large window'. Describe only the surroundings, not the person or product, and do not mention photography, cameras, images, borders or edges. Output the phrase only." },
+        ]}],
+      }),
+      signal: AbortSignal.timeout(45_000),
+    });
+    if (!res.ok) return "";
+    const data = await res.json();
+    return String(data.choices?.[0]?.message?.content ?? "").trim().replace(/^["']|["']$/g, "").slice(0, 300);
+  } catch (e) {
+    console.error("[describeSceneInEnglish] failed:", e instanceof Error ? e.message : e);
+    return "";
+  }
+}
+
 export async function describeReferenceStyle(imageUrl: string, host: string): Promise<string> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return "";

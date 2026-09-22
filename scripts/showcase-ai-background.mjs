@@ -10,7 +10,11 @@ import { L, S, product, PRODUCTS } from "./template-kit.mjs";
 const SANS = "'Noto Sans TC',system-ui,sans-serif";
 const SERIF = "'Noto Serif TC',serif";
 const GOLD = "#c9a95f";
-const STAGE = "https://v16uryj9gfmy6re4.public.blob.vercel-storage.com/1790067394855-ysq63pl246f.jpg";
+// 生出來的背景有四座台子（中間前方多一座），跟「三支一組」對不上。
+// 試過用生成式填色移除，但周圍全是台子，模型照著周圍又補了一座回來——
+// 跟「移除花瓣反而長出更多花瓣」是同一個失敗模式。
+// 最後用正下方的乾淨地板把它補掉（羽化邊緣＋依透視壓暗），不花錢且結果可控。
+const STAGE = "https://v16uryj9gfmy6re4.public.blob.vercel-storage.com/1790068213806-pyo5l3m4y7h.jpg";
 
 /** 金色細線 ＋ 兩端小菱形。 */
 const goldRule = (x, y, w) => [
@@ -53,7 +57,7 @@ export const FAMILY = [
       // 三支商品站在三座展示台上
       // 每支的底邊要對齊各自展示台的台面，否則會像浮在半空
       ...product(PRODUCTS.white, 290, 546, 150, 350, { shadow: false }),
-      ...product(PRODUCTS.amber, 520, 440, 160, 360, { shadow: false }),
+      ...product(PRODUCTS.amber, 520, 440, 160, 360, { shadow: false }),   // 中間台面 y≈800
       ...product(PRODUCTS.green, 765, 537, 150, 350, { shadow: false }),
 
       // 前景文字：全部可編輯

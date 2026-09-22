@@ -25,6 +25,23 @@ function layerHtml(l) {
 
   if (l.isText) {
     const fx = l.fx ?? {};
+    // 弧形藝術字：編輯器是逐字沿弧線排（drawWarpedText）。預覽也要逐字轉，
+    // 否則我在對照表上看到的是平的字，跟實際成品不一樣。
+    if (fx.warp && fx.warp !== "none") {
+      const chars = [...l.text];
+      const amount = (fx.warpAmount ?? 35) / 100;
+      const size = (l.fontSize / DOC) * 100;
+      const spans = chars.map((ch, i) => {
+        const t = chars.length > 1 ? (i / (chars.length - 1)) * 2 - 1 : 0;   // -1..1
+        const lift = (fx.warp === "arc-down" ? 1 : -1) * (1 - t * t) * amount * size * 0.9;
+        const tilt = (fx.warp === "arc-down" ? -1 : 1) * t * amount * 34;
+        return `<span style="display:inline-block;transform:translateY(${lift}cqw) rotate(${tilt}deg)">${ch === " " ? "&nbsp;" : ch}</span>`;
+      }).join("");
+      const stroke = fx.strokeW ? `-webkit-text-stroke:${size * fx.strokeW}cqw ${fx.strokeColor || "#fff"};paint-order:stroke fill;` : "";
+      const shadow = fx.shadow ? `text-shadow:0 ${size * 0.05}cqw ${size * 0.08}cqw rgba(0,0,0,.35);` : "";
+      return `<div style="${box}display:flex;align-items:center;justify-content:center;
+        font-family:${l.fontFamily};font-weight:${l.fontWeight};font-size:${size}cqw;color:${l.color};${stroke}${shadow}white-space:nowrap;">${spans}</div>`;
+    }
     const size = (l.fontSize / DOC) * 100;
     const stroke = fx.strokeW ? `-webkit-text-stroke:${size * fx.strokeW}cqw ${fx.strokeColor || "#fff"};paint-order:stroke fill;` : "";
     const shadow = fx.shadow ? `text-shadow:0 ${size * 0.06}cqw ${size * 0.1}cqw rgba(0,0,0,.4);` : "";

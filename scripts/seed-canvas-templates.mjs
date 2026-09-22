@@ -8,6 +8,7 @@ import { FAMILY as F1 } from "./family-01-editorial.mjs";
 import { FAMILY as F2 } from "./family-02-kbeauty.mjs";
 import { FAMILY as F3 } from "./family-03-y2k.mjs";
 import { FAMILY as F4 } from "./family-04-luxury.mjs";
+import { FAMILY as SHOWCASE } from "./showcase-ai-background.mjs";
 
 /**
  * 要灌進範本庫的東西。
@@ -18,7 +19,7 @@ import { FAMILY as F4 } from "./family-04-luxury.mjs";
  */
 const TEMPLATES = [
   ...LEGACY.slice(10),
-  ...[...F1, ...F2, ...F3, ...F4].map((f) => ({ name: f.art.name, layers: f.layers })),
+  ...[...F1, ...F2, ...F3, ...F4, ...SHOWCASE].map((f) => ({ name: f.art.name, layers: f.layers })),
 ];
 
 const CHROME = `${os.homedir()}/Library/Caches/ms-playwright/chromium-1234/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`;

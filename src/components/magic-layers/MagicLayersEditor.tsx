@@ -1355,7 +1355,16 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                   <>
                     <div style={S.rhead}>文字設定</div>
                     <label style={S.rlabel}>文字內容</label>
-                    <input value={selEl.text} onChange={(e) => updateText({ text: e.target.value })} style={S.rinput} />
+                    {/* 用 textarea 不用 input：單行輸入框打不出換行，使用者按 Enter 沒反應。
+                        繪製端本來就支援多行（editable-text.ts 會 split("\n")），卡住的只有輸入。
+                        Enter 換行、⌘Enter 收起鍵盤焦點。 */}
+                    <textarea
+                      value={selEl.text}
+                      onChange={(e) => updateText({ text: e.target.value })}
+                      onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) (e.target as HTMLTextAreaElement).blur(); }}
+                      rows={Math.min(6, Math.max(2, selEl.text.split("\n").length + 1))}
+                      placeholder="換行請按 Enter"
+                      style={{ ...S.rinput, height: "auto", minHeight: 62, padding: "8px 10px", lineHeight: 1.5, resize: "vertical" }} />
                     <label style={S.rlabel}>字體</label>
                     {/* 這三個家族由 app/layout.tsx 以 next/font 實際載入（見該檔註解）。
                         先前選單裡的 Manrope 根本沒被載入，選了等於沒選；
@@ -1758,12 +1767,25 @@ function drawTextEl(ctx: CanvasRenderingContext2D, l: EL) {
   if (fx?.gradient) { const g = ctx.createLinearGradient(0, -fs / 2, 0, fs / 2); g.addColorStop(0, fx.gradient[0]); g.addColorStop(1, fx.gradient[1]); fill = g; }
   const warped = fx?.warp && fx.warp !== "none";
   if (warped) { drawWarpedText(ctx, l.text, l.w, fs, fx!, fill); return; }
-  if (fx?.strokeW && fx.strokeW > 0) { ctx.lineWidth = fs * fx.strokeW; ctx.strokeStyle = fx.strokeColor || "#ffffff"; ctx.lineJoin = "round"; ctx.miterLimit = 2; if (!l.textLayout) ctx.strokeText(l.text, tx, 0); }
+  // 沒有 textLayout 的文字圖層（自己加的、範本帶來的）原本直接 fillText 整串，
+  // 所以使用者打了換行畫布上還是連成一行。這裡自己斷行並上下置中排版。
+  // 有 textLayout 的走 drawEditableText，它本來就會處理段落。
+  const lines = l.textLayout ? null : l.text.split("\n");
+  const lineHeight = fs * 1.25;
+  const firstY = lines ? -((lines.length - 1) * lineHeight) / 2 : 0;
+
+  if (fx?.strokeW && fx.strokeW > 0) {
+    ctx.lineWidth = fs * fx.strokeW; ctx.strokeStyle = fx.strokeColor || "#ffffff";
+    ctx.lineJoin = "round"; ctx.miterLimit = 2;
+    if (lines) lines.forEach((line, i) => ctx.strokeText(line, tx, firstY + i * lineHeight));
+  }
   if (fx?.shadow) { ctx.shadowColor = "rgba(0,0,0,.4)"; ctx.shadowBlur = fs * 0.1; ctx.shadowOffsetX = fs * 0.03; ctx.shadowOffsetY = fs * 0.06; }
   ctx.fillStyle = fill;
   if (l.textLayout) {
     drawEditableText(ctx, { text: l.text, width: l.w, height: l.h, fontSize: fs, align: l.align, layout: l.textLayout, stroke: Boolean(fx?.strokeW) });
-  } else ctx.fillText(l.text, tx, 0);
+  } else {
+    (lines ?? [l.text]).forEach((line, i) => ctx.fillText(line, tx, firstY + i * lineHeight));
+  }
 }
 
 function drawWarpedText(ctx: CanvasRenderingContext2D, text: string, width: number, fs: number, fx: TextFx, fill: string | CanvasGradient) {

@@ -543,8 +543,17 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     setZoomPct(Math.round(view.current.zoom * 100)); render();
   }, [doc.w, doc.h, render]);
 
-  // 畫布比例改變後，等新的 doc/render callback 生效再重新置中。
-  useEffect(() => { requestAnimationFrame(() => fit()); }, [doc.w, doc.h, fit]);
+  /**
+   * 只有畫布尺寸真的改變才重新置中。
+   *
+   * 原本相依 fit 的識別值，而 fit 相依 render、render 又相依 selectedId——
+   * 於是每選一個圖層就會重跑一次 fit()，畫面自己跳掉縮放與位置，
+   * 使用者根本看不到自己剛選中的東西。用 ref 拿最新的 fit，
+   * 相依只留畫布尺寸。
+   */
+  const fitRef = useRef(fit);
+  useEffect(() => { fitRef.current = fit; });
+  useEffect(() => { requestAnimationFrame(() => fitRef.current()); }, [doc.w, doc.h]);
 
   useEffect(() => {
     const wrap = wrapRef.current, cv = canvasRef.current; if (!wrap || !cv) return;

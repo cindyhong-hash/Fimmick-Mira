@@ -116,6 +116,15 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const [zoomPct, setZoomPct] = useState(100);
   // 橡皮擦工具（局部擦掉圖片圖層）
   const [tool, setTool] = useState<"select" | "erase" | "marquee">("select");
+  // 畫布內文字編輯：雙擊文字圖層就地打字，Enter 換行。
+  // 右側面板也能改，但要在畫面上直接看著版面打字才知道會不會爆框。
+  // 雙擊當下就把幾何算好存進 state；render 期間不再去讀 layersRef／view
+  // （那會在 render 階段讀 ref，lint 會擋，而且 pan/zoom 後座標也會失準）。
+  const [editingText, setEditingText] = useState<{
+    id: string; value: string;
+    left: number; top: number; width: number; height: number;
+    rotation: number; font: string; color: string; align: "left" | "center" | "right";
+  } | null>(null);
   // 生成式填色：在畫布上框一塊，只有那一塊交給 AI 重畫（補東西或移除東西）。
   // marqueeRef 是拖曳中的即時矩形（給 render 畫虛線框用，不觸發 re-render）；
   // marquee 是放開滑鼠後定案的那一塊，有值才會跳出輸入框。
@@ -200,7 +209,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   /* ---------- geometry ---------- */
   const s2d = (sx: number, sy: number) => ({ x: (sx - view.current.panX) / view.current.zoom, y: (sy - view.current.panY) / view.current.zoom });
   const d2s = (dx: number, dy: number) => ({ x: dx * view.current.zoom + view.current.panX, y: dy * view.current.zoom + view.current.panY });
-  const evPt = (e: PointerEvent | WheelEvent) => { const r = canvasRef.current!.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  const evPt = (e: MouseEvent) => { const r = canvasRef.current!.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
   const corners = (l: EL) => {
     const hw = l.w / 2, hh = l.h / 2, cos = Math.cos(l.rotation), sin = Math.sin(l.rotation);
     return [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([px, py]) => ({ x: l.cx + px * cos - py * sin, y: l.cy + px * sin + py * cos }));
@@ -451,6 +460,24 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       else if (g.mode === "rotate") { const now = Math.atan2(d.y - g.l.cy, d.x - g.l.cx); let r = g.orot + (now - g.grab); if (e.shiftKey) r = Math.round(r / (Math.PI / 12)) * (Math.PI / 12); g.l.rotation = r; render(); }
       else if (g.mode === "pan") { view.current.panX = g.opx + (s.x - g.sx); view.current.panY = g.opy + (s.y - g.sy); render(); }
     };
+    const dbl = (e: MouseEvent) => {
+      const s = evPt(e), d = s2d(s.x, s.y);
+      const hit = hitLayer(d.x, d.y);
+      if (hit?.isText && !hit.locked) {
+        selectOnly(hit.id);
+        const z = view.current.zoom;
+        const p = d2s(hit.cx, hit.cy);
+        const fs = hit.fontSize * (hit.w / (hit.naturalW || hit.w)) * z;
+        setEditingText({
+          id: hit.id, value: hit.text,
+          left: p.x - (hit.w * z) / 2, top: p.y - (hit.h * z) / 2,
+          width: hit.w * z, height: hit.h * z,
+          rotation: hit.rotation,
+          font: `${hit.fontWeight} ${fs}px ${hit.fontFamily}`,
+          color: hit.color, align: hit.align,
+        });
+      }
+    };
     const up = () => {
       if (drag.current?.mode === "marquee") {
         const m = marqueeRef.current;
@@ -467,10 +494,11 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       const d = s2d(s.x, s.y); cv.style.cursor = hitLayer(d.x, d.y) ? "move" : "default";
     };
     const wheel = (e: WheelEvent) => { e.preventDefault(); const s = evPt(e); setZoom(view.current.zoom * Math.pow(1.0015, -e.deltaY), s); };
+    cv.addEventListener("dblclick", dbl);
     cv.addEventListener("pointerdown", down); cv.addEventListener("pointermove", move);
     cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up);
     cv.addEventListener("wheel", wheel, { passive: false });
-    return () => { cv.removeEventListener("pointerdown", down); cv.removeEventListener("pointermove", move); cv.removeEventListener("pointerup", up); cv.removeEventListener("pointercancel", up); cv.removeEventListener("wheel", wheel); };
+    return () => { cv.removeEventListener("dblclick", dbl); cv.removeEventListener("pointerdown", down); cv.removeEventListener("pointermove", move); cv.removeEventListener("pointerup", up); cv.removeEventListener("pointercancel", up); cv.removeEventListener("wheel", wheel); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, render]);
 
@@ -1308,6 +1336,34 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
             pushImageLayer(url, "背景圖", "object", { cx: d.x, cy: d.y });
           }}>
           <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, touchAction: "none" }} />
+        {/* 畫布內文字編輯：貼合圖層位置／大小／旋轉／字級的輸入框，疊在 canvas 上。
+            打字即時更新圖層，Enter 換行，Esc 或點別處收起。
+            用 textarea 不用 contenteditable：換行行為本來就對，也不會帶進 HTML。 */}
+        {editingText && (
+          <textarea
+            key={editingText.id}
+            autoFocus
+            defaultValue={editingText.value}
+            onChange={(e) => {
+              const target = layersRef.current.find((x) => x.id === editingText.id);
+              if (!target) return;
+              target.text = e.target.value;
+              target.thumb = makeThumb(target);
+              markDirty(); render(); refresh();
+            }}
+            onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") setEditingText(null); }}
+            onBlur={() => setEditingText(null)}
+            style={{
+              position: "absolute",
+              left: editingText.left, top: editingText.top,
+              width: editingText.width, height: editingText.height,
+              transform: `rotate(${editingText.rotation}rad)`, transformOrigin: "center",
+              font: editingText.font, lineHeight: 1.25,
+              color: editingText.color, textAlign: editingText.align,
+              background: "rgba(255,255,255,.92)", border: "2px solid #7c3aed", borderRadius: 4,
+              padding: 0, margin: 0, resize: "none", outline: "none", overflow: "hidden", zIndex: 40,
+            }} />
+        )}
         </div>
 
         {selEl && (

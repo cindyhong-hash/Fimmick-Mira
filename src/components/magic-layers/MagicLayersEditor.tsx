@@ -1366,8 +1366,17 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         )}
         </div>
 
-        {selEl && (
-          <aside style={S.rpanel}>
+        {/* 右側面板常駐。原本是選到圖層才掛載，一選取畫布就從 501px 被擠到 237px，
+            縮放比例沒變、可視範圍卻少一半，操作起來就像「一點物件就放大」。
+            Figma／PS 的面板都是固定的，畫布寬度不會因為選取而變動。 */}
+        <aside style={S.rpanel}>
+          {!selEl ? (
+            <div style={{ padding: 20, fontSize: 12, color: "#9ca3af", lineHeight: 1.7 }}>
+              選一個圖層來編輯它的設定。<br />
+              雙擊文字可以直接在畫布上改字。
+            </div>
+          ) : (
+          <>
             <div style={S.rtabs}>
               <button style={{ ...S.rtab, ...(panelTab === "design" ? S.rtabOn : {}) }} onClick={() => setPanelTab("design")}>設計</button>
               <button style={{ ...S.rtab, ...(panelTab === "settings" ? S.rtabOn : {}) }} onClick={() => setPanelTab("settings")}>設定</button>
@@ -1608,8 +1617,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                 <div style={{ fontSize: 13, color: "#6b7280", marginTop: 6 }}>圖層數：{layersRef.current.length}</div>
               </div>
             )}
-          </aside>
-        )}
+          </>
+          )}
+        </aside>
       </div>
 
       {showInsert && (

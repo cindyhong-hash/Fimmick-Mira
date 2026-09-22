@@ -10,19 +10,48 @@ const PORT = 9337;
 const API = process.env.API ?? "http://localhost:3017";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// 縮圖用 HTML 重現（rect→div、ellipse→border-radius 50%、text→div），
+// 不用 SVG＋sharp 是因為中文字型在那條路上容易缺字。
+// 旋轉、描邊、陰影、漸層都要跟著畫，否則預覽會比實際成品平很多。
+const ICON_GLYPH = {
+  star: "★", heart: "♥", circle: "●", triangle: "▲", check: "✓", arrow: "→",
+  plus: "＋", bolt: "⚡", "water-drop": "💧", spring: "❀", blade: "✂", shield: "🛡",
+  sparkle: "✦", leaf: "🍃", sun: "☀", clean: "✧", repair: "✚", texture: "▦",
+};
+
 function layerHtml(l) {
-  const box = `position:absolute;left:${(l.x / DOC) * 100}%;top:${(l.y / DOC) * 100}%;width:${(l.w / DOC) * 100}%;height:${(l.h / DOC) * 100}%;opacity:${l.opacity ?? 1};`;
+  const rot = l.rotation ? `transform:rotate(${l.rotation}rad);` : "";
+  const box = `position:absolute;left:${(l.x / DOC) * 100}%;top:${(l.y / DOC) * 100}%;width:${(l.w / DOC) * 100}%;height:${(l.h / DOC) * 100}%;opacity:${l.opacity ?? 1};${rot}`;
+
   if (l.isText) {
-    return `<div style="${box}display:flex;align-items:center;justify-content:${l.align === "left" ? "flex-start" : l.align === "right" ? "flex-end" : "center"};
-      font-family:${l.fontFamily};font-weight:${l.fontWeight};font-size:${(l.fontSize / DOC) * 100}cqw;color:${l.color};white-space:pre;line-height:1.15;">${l.text}</div>`;
+    const fx = l.fx ?? {};
+    const size = (l.fontSize / DOC) * 100;
+    const stroke = fx.strokeW ? `-webkit-text-stroke:${size * fx.strokeW}cqw ${fx.strokeColor || "#fff"};paint-order:stroke fill;` : "";
+    const shadow = fx.shadow ? `text-shadow:0 ${size * 0.06}cqw ${size * 0.1}cqw rgba(0,0,0,.4);` : "";
+    const spacing = fx.letterSpacing ? `letter-spacing:${size * fx.letterSpacing}cqw;` : "";
+    const grad = fx.gradient
+      ? `background:linear-gradient(180deg,${fx.gradient[0]},${fx.gradient[1]});-webkit-background-clip:text;background-clip:text;color:transparent;`
+      : `color:${l.color};`;
+    const justify = l.align === "left" ? "flex-start" : l.align === "right" ? "flex-end" : "center";
+    return `<div style="${box}display:flex;align-items:center;justify-content:${justify};
+      font-family:${l.fontFamily};font-weight:${l.fontWeight};font-size:${size}cqw;${grad}${stroke}${shadow}${spacing}white-space:pre;line-height:1.15;">${l.text}</div>`;
   }
-  const s = l.shape ?? {};
-  const fill = s.gradient
-    ? `background:linear-gradient(${s.gradient.axis === "horizontal" ? "90deg" : "180deg"},${s.gradient.from},${s.gradient.to});`
-    : s.fill && s.fill !== "none" ? `background:${s.fill};` : "";
-  const stroke = s.stroke && s.stroke !== "none" ? `border:${(s.strokeWidth ?? 1)}px solid ${s.stroke};` : "";
-  const radius = s.kind === "ellipse" ? "border-radius:50%;" : s.radius ? `border-radius:${s.radius}px;` : "";
-  return `<div style="${box}${fill}${stroke}${radius}box-sizing:border-box;"></div>`;
+
+  if (l.image) {
+    return `<img src="${l.image}" style="${box}object-fit:contain;" />`;
+  }
+  const sh = l.shape ?? {};
+  if (sh.kind === "icon") {
+    return `<div style="${box}display:flex;align-items:center;justify-content:center;color:${sh.fill};font-size:${(l.w / DOC) * 100}cqw;line-height:1;">${ICON_GLYPH[sh.icon] ?? "✦"}</div>`;
+  }
+  const fill = sh.gradient
+    ? `background:linear-gradient(${sh.gradient.axis === "horizontal" ? "90deg" : "180deg"},${sh.gradient.from},${sh.gradient.to});`
+    : sh.fill && sh.fill !== "none" ? `background:${sh.fill};` : "";
+  const stroke = sh.stroke && sh.stroke !== "none" ? `border:${sh.strokeWidth ?? 1}px solid ${sh.stroke};` : "";
+  const radius = sh.kind === "ellipse" ? "border-radius:50%;" : sh.radius ? `border-radius:${(sh.radius / DOC) * 100}cqw;` : "";
+  // softness 是柔邊光暈，用 blur 近似
+  const soft = sh.softness ? `filter:blur(${sh.softness * 4}cqw);` : "";
+  return `<div style="${box}${fill}${stroke}${radius}${soft}box-sizing:border-box;"></div>`;
 }
 
 const page = (layers) => `<!doctype html><meta charset="utf-8">

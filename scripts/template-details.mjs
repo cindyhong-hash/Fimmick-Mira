@@ -278,3 +278,58 @@ export const arcHeadline = (text, x, y, w, h, over = {}) => {
     fx: { gradient: [from, to], strokeColor: stroke, strokeW, shadow: true, warp, warpAmount },
   })];
 };
+
+/* ── 第三批零件：社群實測／UGC 風格 ─────────────────────────────── */
+
+/** 括號強調：（ 內容 ）用大括號把一句話框起來，社群版最常見的強調手法。 */
+export const bracketPhrase = (text, x, y, w, h, over = {}) => {
+  const { fg = "#ffffff", bracket = "#ffffff", fontSize = h * 0.62 } = over;
+  return [
+    L.text("左括號", "(", x, y, h * 0.5, h, { fontSize: h * 0.95, color: bracket }),
+    L.text("括號內容", text, x + h * 0.42, y + h * 0.16, w - h * 0.84, h * 0.7, { fontSize, color: fg }),
+    L.text("右括號", ")", x + w - h * 0.5, y, h * 0.5, h, { fontSize: h * 0.95, color: bracket }),
+  ];
+};
+
+/** 斜線包夾：\ 內容 / 讓一行小標看起來像被引用。 */
+export const slashPhrase = (text, x, y, w, h, over = {}) => {
+  const { fg = "#2b2340", fontSize = h * 0.62 } = over;
+  return [
+    L.text("左斜", "＼", x, y + h * 0.1, h * 0.6, h * 0.8, { fontSize: fontSize * 0.9, color: fg }),
+    L.text("斜線內容", text, x + h * 0.6, y, w - h * 1.2, h, { fontSize, color: fg }),
+    L.text("右斜", "／", x + w - h * 0.6, y + h * 0.1, h * 0.6, h * 0.8, { fontSize: fontSize * 0.9, color: fg }),
+  ];
+};
+
+/**
+ * 照片格：影像圖層 ＋ 一圈白色外框。
+ * 圖層本身是方的（畫布不支援圓角裁切），所以用外框做出「被裱起來」的感覺。
+ */
+export const photoTile = (url, x, y, w, h, over = {}) => {
+  const { frame = "#ffffff", pad = 10, label } = over;
+  return [
+    L.shape("照片外框", x - pad, y - pad, w + pad * 2, h + pad * 2, { kind: "rect", fill: frame, radius: 14 }),
+    { ...L.shape("照片", x, y, w, h, { kind: "rect", fill: "#eee" }), shape: null, image: url,
+      name: "示意照片（換成你的）" },
+    ...(label ? [L.text("照片標", label, x, y + h + 14, w, 44, {
+      fontSize: 26, color: "#4a3f66",
+    })] : []),
+  ];
+};
+
+/** 見證卡：圓形頭像 ＋ 白色圓角卡片 ＋ 多行留言。 */
+export const testimonialCard = (who, lines, x, y, w, h, over = {}) => {
+  const { card = "#ffffff", fg = "#3b3054", dim = "#7a6f96", avatar = "#e6def7" } = over;
+  const d = Math.min(120, h * 0.55);
+  return [
+    L.shape("見證卡", x + d * 0.55, y, w - d * 0.55, h, { kind: "rect", fill: card, radius: 18 }),
+    L.shape("頭像底", x, y + (h - d) / 2, d, d, { kind: "ellipse", fill: avatar }),
+    L.text("頭像字", "👤", x, y + (h - d) / 2 + d * 0.22, d, d * 0.55, { fontSize: d * 0.45, color: "#7a6f96" }),
+    L.text("見證人", who, x + d * 0.9, y + 18, w - d * 1.2, 40, {
+      fontSize: 22, align: "left", color: dim,
+    }),
+    L.text("見證內容", lines.join("\n"), x + d * 0.9, y + 62, w - d * 1.2, h - 80, {
+      fontSize: 25, align: "left", color: fg, fontWeight: 400,
+    }),
+  ];
+};

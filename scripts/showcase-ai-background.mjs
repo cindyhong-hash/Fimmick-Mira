@@ -6,6 +6,7 @@
 //
 // 這是這個工具真正的用法：背景交給 AI，版面交給圖層。
 import { L, S, product, PRODUCTS } from "./template-kit.mjs";
+import { bracketPhrase, slashPhrase, photoTile, testimonialCard } from "./template-details.mjs";
 
 const SANS = "'Noto Sans TC',system-ui,sans-serif";
 const SERIF = "'Noto Serif TC',serif";
@@ -95,3 +96,69 @@ export const FAMILY = [
 ];
 
 export { S };
+
+/* ── 第二張示範：社群實測風（AI 紫色壓紋牆背景 ＋ 可編輯前景）────────── */
+
+const WALL = "https://v16uryj9gfmy6re4.public.blob.vercel-storage.com/1790068463179-nw4nwpshtt.jpg";
+const BEFORE = "https://v16uryj9gfmy6re4.public.blob.vercel-storage.com/product-set-benefit-1789704497564-7ohx8a5yelr.jpg";
+const AFTER = "https://v16uryj9gfmy6re4.public.blob.vercel-storage.com/product-set-benefit-1789705738405-4ebuc4dh691.jpg";
+
+FAMILY.push({
+  art: {
+    name: "社群實測｜UGC 見證（AI 背景＋可編輯前景）",
+    family: "ecommerce",
+    composition: "dense-information",
+    visualHierarchy: ["headline", "product", "supportingImage"],
+    visualWeight: { headline: 10, product: 7, supportingImage: 6, copy: 3, decoration: 1 },
+    readingDirection: "top-left→bottom-right",
+    negativeSpace: 0.30,
+    rationale:
+      "標題用括號把最關鍵的一句話框成第二個重量級，商品從左緣切進來當錨點，右側上下疊兩張實測照與一張見證卡；左重右密形成傾斜的視覺重心，視線被迫從標題斜著走到右下角的真人留言。",
+    recommendedFor: "社群實測、開箱見證、口碑導購",
+  },
+  layers: () => [
+    L.bg("#efe6fa", "#efe6fa"),
+    { ...L.shape("AI 背景場景", 0, 0, S, S, { kind: "rect", fill: "#efe6fa" }),
+      type: "background", image: WALL, shape: null, locked: true,
+      name: "AI 背景場景（可換成你自己的）" },
+
+    // 品牌
+    L.text("品牌", "MIRAE", 0, 44, S, 70, { fontSize: 54, color: "#2b2340", fontFamily: SERIF }),
+    L.text("品牌中文", "未 來 美", 0, 112, S, 44, {
+      fontSize: 26, color: "#4a3f66", fontFamily: SANS, fx: { letterSpacing: 0.3 },
+    }),
+
+    // 標題群：小標 → 大標 → 括號強調
+    L.text("小標", "！超級 A 醇精華！", 60, 180, 560, 50, {
+      fontSize: 34, align: "left", color: "#6b3fa0", fontFamily: SANS,
+    }),
+    L.text("大標", "實測抗老・煥膚", 60, 236, 620, 90, {
+      fontSize: 68, align: "left", color: "#231c38", fontFamily: SANS,
+    }),
+    ...bracketPhrase("7 天有感 ?!", 720, 228, 430, 104, { fg: "#ffffff", bracket: "#ffffff", fontSize: 60 }),
+    ...slashPhrase("Dcard 卡友真心話大聲說", 60, 350, 600, 58, { fg: "#2b2340" }),
+
+    // 商品：從左緣切進來
+    // 用細長瓶而不是寬扁霜罐：圖層依原比例縮進框，寬扁的會被放大到佔滿整個左半邊
+    ...product(PRODUCTS.amber, 60, 470, 300, 620, { shadow: false }),
+
+    // 使用前後兩張實測照
+    ...photoTile(BEFORE, 480, 440, 310, 300, { label: "使用前" }),
+    ...photoTile(AFTER, 830, 440, 310, 300, { label: "使用後" }),
+
+    // 左下補三條實測數據：商品縮小後那塊空掉，而且這種版本來就該有數字
+    ...["粗糙感 -62%", "痘疤明顯度 -48%", "保水度 +35%"].map((t, i) =>
+      L.shape(`數據底${i}`, 60, 900 + i * 92, 360, 76, { kind: "rect", fill: "#ffffff", radius: 38 }, { opacity: 0.92 })),
+    ...["粗糙感 -62%", "痘疤明顯度 -48%", "保水度 +35%"].map((t, i) =>
+      L.text(`數據${i}`, t, 60, 920 + i * 92, 360, 44, {
+        fontSize: 28, color: "#4a2f7a", fontFamily: SANS,
+      })),
+
+    // 見證卡
+    ...testimonialCard(
+      "東海大學－財務金融學系",
+      ["質地水潤、好推不厚重，吸收很快", "使用一週後膚況穩定、痘疤淡化", "真的感覺到平滑不少"],
+      470, 860, 690, 250,
+    ),
+  ],
+});

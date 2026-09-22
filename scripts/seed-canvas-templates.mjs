@@ -3,7 +3,23 @@
 // 不用 SVG＋sharp 是因為中文字型在那條路上容易缺字。
 import { spawn } from "node:child_process";
 import os from "node:os";
-import { TEMPLATES, DOC } from "./seed-canvas-templates.data.mjs";
+import { TEMPLATES as LEGACY, DOC } from "./seed-canvas-templates.data.mjs";
+import { FAMILY as F1 } from "./family-01-editorial.mjs";
+import { FAMILY as F2 } from "./family-02-kbeauty.mjs";
+import { FAMILY as F3 } from "./family-03-y2k.mjs";
+import { FAMILY as F4 } from "./family-04-luxury.mjs";
+
+/**
+ * 要灌進範本庫的東西。
+ *
+ * 舊那批只留 11–17（六張一組的系列與完整詳情頁，是使用者特別要的）；
+ * 01–10 的品質不如後來照設計系統做的家族，不再灌入。
+ * 家族版型帶 art（設計決策），名字取自 art.name。
+ */
+const TEMPLATES = [
+  ...LEGACY.slice(10),
+  ...[...F1, ...F2, ...F3, ...F4].map((f) => ({ name: f.art.name, layers: f.layers })),
+];
 
 const CHROME = `${os.homedir()}/Library/Caches/ms-playwright/chromium-1234/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`;
 const PORT = 9337;

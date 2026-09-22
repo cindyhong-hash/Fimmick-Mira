@@ -15,10 +15,12 @@ export function BrandSwitcher({ currentClientId }: { currentClientId: string }) 
   const pick = (id: string) => { setOpen(false); setLastClientId(id); router.push(`/clients/${id}`); };
   return (
     <div className="relative">
+      {/* 底色用 violet-100 而唔係 violet-50：側邊欄本身係純白，violet-50（L* 96.2）同白色
+          只差 3.8 個 L*，實際睇落幾乎融埋一齊。hover 一併推上 violet-200，唔係就會同底色撞。 */}
       <button type="button" onClick={() => setOpen(v => !v)}
-        className="flex w-full items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm hover:bg-gray-50">
+        className="flex w-full items-center justify-between rounded-lg border border-violet-300 bg-violet-100 px-3 py-2 text-sm hover:bg-violet-200">
         <span className="truncate font-medium text-gray-800">{current?.name ?? "選擇品牌"}</span>
-        <ChevronDown className="h-3 w-3 text-gray-400" />
+        <ChevronDown className="h-3 w-3 text-violet-400" />
       </button>
       {open && (
         <>

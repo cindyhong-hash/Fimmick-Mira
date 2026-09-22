@@ -306,13 +306,13 @@ export const slashPhrase = (text, x, y, w, h, over = {}) => {
  * 圖層本身是方的（畫布不支援圓角裁切），所以用外框做出「被裱起來」的感覺。
  */
 export const photoTile = (url, x, y, w, h, over = {}) => {
-  const { frame = "#ffffff", pad = 10, label } = over;
+  const { frame = "#ffffff", pad = 10, label, labelColour = "#4a3f66" } = over;
   return [
     L.shape("照片外框", x - pad, y - pad, w + pad * 2, h + pad * 2, { kind: "rect", fill: frame, radius: 14 }),
     { ...L.shape("照片", x, y, w, h, { kind: "rect", fill: "#eee" }), shape: null, image: url,
       name: "示意照片（換成你的）" },
     ...(label ? [L.text("照片標", label, x, y + h + 14, w, 44, {
-      fontSize: 26, color: "#4a3f66",
+      fontSize: 26, color: labelColour,
     })] : []),
   ];
 };

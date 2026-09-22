@@ -99,7 +99,10 @@ export { S };
 
 /* ── 第二張示範：社群實測風（AI 紫色壓紋牆背景 ＋ 可編輯前景）────────── */
 
-const WALL = "https://v16uryj9gfmy6re4.public.blob.vercel-storage.com/1790068463179-nw4nwpshtt.jpg";
+// 第一版的牆太淡，白字直接消失、紫字也糊在紫底上。重生一張飽和的深紫羅蘭。
+const WALL = "https://v16uryj9gfmy6re4.public.blob.vercel-storage.com/1790068969682-1ejqs2ku0th.jpg";
+// 紫色精華瓶（已去背並裁掉透明邊），配合這張的紫色調
+const VIOLET_BOTTLE = "https://v16uryj9gfmy6re4.public.blob.vercel-storage.com/1790069007341-en011p0rj1.png";
 const BEFORE = "https://v16uryj9gfmy6re4.public.blob.vercel-storage.com/product-set-benefit-1789704497564-7ohx8a5yelr.jpg";
 const AFTER = "https://v16uryj9gfmy6re4.public.blob.vercel-storage.com/product-set-benefit-1789705738405-4ebuc4dh691.jpg";
 
@@ -123,28 +126,29 @@ FAMILY.push({
       name: "AI 背景場景（可換成你自己的）" },
 
     // 品牌
-    L.text("品牌", "MIRAE", 0, 44, S, 70, { fontSize: 54, color: "#2b2340", fontFamily: SERIF }),
+    L.text("品牌", "MIRAE", 0, 44, S, 70, { fontSize: 54, color: "#ffffff", fontFamily: SERIF }),
     L.text("品牌中文", "未 來 美", 0, 112, S, 44, {
-      fontSize: 26, color: "#4a3f66", fontFamily: SANS, fx: { letterSpacing: 0.3 },
+      fontSize: 26, color: "#dcd2f5", fontFamily: SANS, fx: { letterSpacing: 0.3 },
     }),
 
     // 標題群：小標 → 大標 → 括號強調
     L.text("小標", "！超級 A 醇精華！", 60, 180, 560, 50, {
-      fontSize: 34, align: "left", color: "#6b3fa0", fontFamily: SANS,
+      fontSize: 34, align: "left", color: "#ffd9f0", fontFamily: SANS,
     }),
     L.text("大標", "實測抗老・煥膚", 60, 236, 620, 90, {
-      fontSize: 68, align: "left", color: "#231c38", fontFamily: SANS,
+      fontSize: 68, align: "left", color: "#ffffff", fontFamily: SANS,
+      fx: { strokeColor: "#2a1a5e", strokeW: 0.05 },
     }),
     ...bracketPhrase("7 天有感 ?!", 720, 228, 430, 104, { fg: "#ffffff", bracket: "#ffffff", fontSize: 60 }),
-    ...slashPhrase("Dcard 卡友真心話大聲說", 60, 350, 600, 58, { fg: "#2b2340" }),
+    ...slashPhrase("Dcard 卡友真心話大聲說", 60, 350, 600, 58, { fg: "#ffffff" }),
 
     // 商品：從左緣切進來
     // 用細長瓶而不是寬扁霜罐：圖層依原比例縮進框，寬扁的會被放大到佔滿整個左半邊
-    ...product(PRODUCTS.amber, 60, 470, 300, 620, { shadow: false }),
+    ...product(VIOLET_BOTTLE, 60, 470, 300, 620, { shadow: false }),
 
     // 使用前後兩張實測照
-    ...photoTile(BEFORE, 480, 440, 310, 300, { label: "使用前" }),
-    ...photoTile(AFTER, 830, 440, 310, 300, { label: "使用後" }),
+    ...photoTile(BEFORE, 480, 440, 310, 300, { label: "使用前", labelColour: "#e7dcff" }),
+    ...photoTile(AFTER, 830, 440, 310, 300, { label: "使用後", labelColour: "#ffffff" }),
 
     // 左下補三條實測數據：商品縮小後那塊空掉，而且這種版本來就該有數字
     ...["粗糙感 -62%", "痘疤明顯度 -48%", "保水度 +35%"].map((t, i) =>

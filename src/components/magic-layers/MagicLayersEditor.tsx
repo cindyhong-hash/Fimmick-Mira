@@ -12,7 +12,7 @@ import { useBrandFonts } from "@/lib/fonts/useBrandFonts";
 import type { SavedLayer, TextFx, ShapeKind, ShapeSpec } from "@/lib/magic-layers/saved-layer.ts";
 export type { SavedLayer } from "@/lib/magic-layers/saved-layer.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronUp, ChevronDown, Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowLeft, Plus, Download, Image as ImageIcon, Upload, Type, BadgeCheck, Square, Star, Minus, Pencil, Undo2, Redo2, Eraser, Maximize2, GripVertical, WandSparkles } from "lucide-react";
+import { ChevronUp, ChevronDown, Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowLeft, Plus, Download, Image as ImageIcon, Upload, Type, BadgeCheck, Square, Star, Minus, Pencil, Undo2, Redo2, Eraser, Maximize2, GripVertical, WandSparkles, Save } from "lucide-react";
 import type { LayerData, FragmentationReport } from "@/lib/magic-layers/types.ts";
 import { extractLayer } from "@/lib/magic-layers/extract-browser.ts";
 import { alphaHit } from "@/lib/magic-layers/alpha-hit-test.ts";
@@ -75,6 +75,10 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const [magicFillResult, setMagicFillResult] = useState<string[] | null>(null);
   const [toolsOpen, setToolsOpen] = useState(true);           // 左側「工具」可收合
   const [bgOpen, setBgOpen] = useState(true);                 // 左側「背景庫」可收合
+  // 範本庫（共用，全品牌看得到；目前只做 1:1）
+  const [tplOpen, setTplOpen] = useState(true);
+  const [templates, setTemplates] = useState<{ id: string; name: string; previewUrl: string | null }[]>([]);
+  const [tplSaving, setTplSaving] = useState(false);
   const [layersOpen, setLayersOpen] = useState(true);         // 左側「圖層」可收合
   const [panelTab, setPanelTab] = useState<"design" | "settings">("design");
   const [renaming, setRenaming] = useState(false);            // 重新命名這個設計
@@ -868,6 +872,103 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         : { image: l.src ?? (l.canvas ? (safeDataUrl(l.canvas) ?? undefined) : undefined), ...(l.isArt ? { isArt: true, text: l.text, ...(l.artRefImage ? { artRefImage: l.artRefImage } : {}) } : {}) }),
   })), []);
 
+  /* ---------- 範本庫（共用，1:1） ---------- */
+
+  const loadTemplates = useCallback(async () => {
+    try {
+      const r = await fetch("/api/magic-layers/templates");
+      const d = await r.json();
+      setTemplates(Array.isArray(d.templates) ? d.templates : []);
+    } catch { /* 列不出來就當沒有，不要擋住編輯器 */ }
+  }, []);
+
+  // 用 timeout 把抓清單推到 effect 的同步階段之外：直接在 effect 裡呼叫，
+  // lint 會判定成「在 effect 裡同步 setState」，而那條規則這個檔案本來就在守。
+  useEffect(() => {
+    const t = setTimeout(() => { void loadTemplates(); }, 0);
+    return () => clearTimeout(t);
+  }, [loadTemplates]);
+
+  /**
+   * 把存起來的一個圖層還原成畫布上的圖層。
+   *
+   * 跟掛載時那段還原邏輯同一套規則，特別是「框是排版位置、不是圖片尺寸」——
+   * 直接把圖拉去填滿框會變形，所以依原比例縮到框內；背景例外，它本來就要滿版。
+   */
+  const elFromSavedLayer = useCallback(async (sl: SavedLayer): Promise<EL> => {
+    const isText = !!sl.isText;
+    const canvas = !isText && sl.image ? await loadToCanvas(sl.image) : null;
+    let boxW = sl.w, boxH = sl.h;
+    if (canvas && sl.type !== "background" && canvas.width > 0 && canvas.height > 0) {
+      const scale = Math.min(sl.w / canvas.width, sl.h / canvas.height);
+      boxW = Math.round(canvas.width * scale);
+      boxH = Math.round(canvas.height * scale);
+    }
+    const el: EL = {
+      id: `${sl.id}_${Math.random().toString(36).slice(2, 7)}`,   // 同一個範本可以套多次，id 不能撞
+      name: sl.name, type: sl.type, semanticId: sl.type === "independent_text" ? "text" : sl.type,
+      instanceId: null, confidence: 1, editable: true, source: "generated",
+      isText, text: sl.text ?? "", color: sl.color ?? "#111",
+      fontSize: sl.fontSize ?? 32, fontFamily: sl.fontFamily ?? FONT, fontWeight: sl.fontWeight ?? 700,
+      align: sl.align ?? "center", fx: sl.fx ?? null, textLayout: sl.textLayout,
+      shape: (sl.shape as ShapeSpec | undefined) ?? null,
+      canvas, naturalW: canvas?.width ?? sl.w, naturalH: canvas?.height ?? sl.h,
+      src: sl.image ?? null,
+      cx: sl.x + sl.w / 2, cy: sl.y + sl.h / 2, w: boxW, h: boxH,
+      rotation: sl.rotation ?? 0, visible: sl.visible !== false, locked: !!sl.locked,
+      opacity: sl.opacity ?? 1, embeddedText: [], thumb: null, groupId: sl.groupId ?? null,
+    };
+    el.thumb = makeThumb(el);
+    return el;
+  }, []);
+
+  /** 套用範本：換掉整個畫布內容（可以用復原還原）。 */
+  const applyTemplate = useCallback(async (id: string) => {
+    try {
+      const r = await fetch(`/api/magic-layers/templates/${id}`);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? "讀取範本失敗");
+      const tpl = d.template as { docW: number; docH: number; layers: SavedLayer[] };
+      const els = await Promise.all(tpl.layers.map(elFromSavedLayer));
+      layersRef.current = els;
+      setDoc({ w: tpl.docW, h: tpl.docH });
+      applySelection([]); markDirty(); refresh(); render();
+    } catch (e) { alert("套用範本失敗：" + (e instanceof Error ? e.message : String(e))); }
+  }, [elFromSavedLayer, markDirty, refresh, render]);
+
+  /** 把目前畫布存成共用範本，連同一張縮圖。 */
+  const saveAsTemplate = useCallback(async () => {
+    if (tplSaving) return;
+    if (!layersRef.current.some((l) => l.visible)) { alert("空白畫布不能存成範本"); return; }
+    const templateName = window.prompt("範本名稱", name || "未命名範本");
+    if (templateName === null) return;
+    setTplSaving(true);
+    try {
+      // 縮圖：攤平後縮到 480px，列表用不著原尺寸。
+      const flat = flattenToDataUrl();
+      const img = await new Promise<HTMLImageElement>((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = flat; });
+      const tc = document.createElement("canvas"); tc.width = 480; tc.height = 480;
+      tc.getContext("2d")!.drawImage(img, 0, 0, 480, 480);
+      const r = await fetch("/api/magic-layers/templates", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: templateName, docW: doc.w, docH: doc.h, layers: serializeLayers(), thumbnail: tc.toDataURL("image/png") }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? "存成範本失敗");
+      await loadTemplates();
+    } catch (e) { alert("存成範本失敗：" + (e instanceof Error ? e.message : String(e))); }
+    finally { setTplSaving(false); }
+  }, [tplSaving, doc.w, doc.h, flattenToDataUrl, serializeLayers, loadTemplates, name]);
+
+  const deleteTemplate = useCallback(async (id: string, name: string) => {
+    if (!window.confirm(`刪除範本「${name}」？`)) return;
+    try {
+      const r = await fetch(`/api/magic-layers/templates/${id}`, { method: "DELETE" });
+      if (!r.ok) throw new Error((await r.json()).error ?? "刪除失敗");
+      await loadTemplates();
+    } catch (e) { alert("刪除範本失敗：" + (e instanceof Error ? e.message : String(e))); }
+  }, [loadTemplates]);
+
   const doSave = useCallback(async (download: boolean) => {
     if (!onSave || saving) return;
     setSaving(true);
@@ -1063,6 +1164,41 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
 
       <div style={S.body}>
         <aside style={S.panel}>
+          {/* 範本庫：共用（全品牌看得到），目前只做 1:1。放在背景庫上面——
+              開一張新畫布時第一件事通常是挑版，不是挑背景。 */}
+          <div style={{ borderBottom: "1px solid #e5e7eb", padding: "10px 10px 12px", flex: "0 0 auto" }}>
+            <button onClick={() => setTplOpen((v) => !v)} style={{ ...S.panelHead, height: "auto", padding: 0, marginBottom: tplOpen ? 8 : 0, border: "none", width: "100%", background: "none", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>範本庫（點擊套用）</span>{tplOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </button>
+            {tplOpen && (
+              <>
+                {templates.length === 0 ? (
+                  <div style={{ fontSize: 11, color: "#9ca3af", lineHeight: 1.6 }}>
+                    還沒有範本。排好一版之後按下面的「存成範本」，之後就能重複套用。
+                  </div>
+                ) : (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6, maxHeight: 200, overflowY: "auto" }}>
+                    {templates.map((t) => (
+                      <div key={t.id} style={{ position: "relative" }}>
+                        <button onClick={() => applyTemplate(t.id)} title={`${t.name}（點擊套用，會換掉目前畫布內容；可用復原還原）`}
+                          style={{ display: "block", width: "100%", padding: 0, border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden", background: "#fff", cursor: "pointer" }}>
+                          {t.previewUrl
+                            ? <img src={t.previewUrl} alt={t.name} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
+                            : <div style={{ width: "100%", aspectRatio: "1", display: "grid", placeItems: "center", fontSize: 10, color: "#9ca3af" }}>無縮圖</div>}
+                        </button>
+                        <button onClick={() => deleteTemplate(t.id, t.name)} title="刪除這個範本"
+                          style={{ position: "absolute", top: 2, right: 2, width: 18, height: 18, borderRadius: 9, border: "none", background: "rgba(17,24,39,.72)", color: "#fff", fontSize: 11, lineHeight: "18px", cursor: "pointer", padding: 0 }}>×</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button onClick={saveAsTemplate} disabled={tplSaving}
+                  style={{ ...S.tool, width: "100%", marginTop: 8, justifyContent: "center", opacity: tplSaving ? .6 : 1 }}>
+                  <Save size={15} />{tplSaving ? "儲存中…" : "把目前畫布存成範本"}
+                </button>
+              </>
+            )}
+          </div>
           {backgrounds && backgrounds.length > 0 && (
             <div style={{ borderBottom: "1px solid #e5e7eb", padding: "10px 10px 12px", flex: "0 0 auto" }}>
               <button onClick={() => setBgOpen((v) => !v)} style={{ ...S.panelHead, height: "auto", padding: 0, marginBottom: bgOpen ? 8 : 0, border: "none", width: "100%", background: "none", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>

@@ -3,14 +3,17 @@
 //
 // 這支存在的理由：宣告「留白 40%」很容易，畫面實際塞滿也很容易。
 // 兩者對不上就是版型沒做到自己說的事，應該在進入範本庫之前就被擋下來。
-import { FAMILY, S } from "./family-01-editorial.mjs";
+const file = process.argv[2] ?? "./family-01-editorial.mjs";
+const { FAMILY, S } = await import(file);
 import {
   assertValidArtDirection, assertFamilyIsVaried, auditTemplate,
 } from "../src/lib/magic-layers/template-design-system.ts";
 
 const arts = FAMILY.map((f) => f.art);
 arts.forEach(assertValidArtDirection);
-assertFamilyIsVaried(arts);
+// 差異不足先記下來，不要直接中斷——還是要先看到每張的實際留白才好決定怎麼分開
+let varietyError = null;
+try { assertFamilyIsVaried(arts); } catch (e) { varietyError = e.message; }
 
 let bad = 0;
 for (const f of FAMILY) {
@@ -23,5 +26,6 @@ for (const f of FAMILY) {
     a.problems.length ? `→ ${a.problems.join("；")}` : "",
   );
 }
-if (bad) { console.error(`\n${bad} 個版型沒通過檢查`); process.exit(1); }
+if (varietyError) console.error(`\n✗ ${varietyError}`);
+if (bad || varietyError) { console.error(`\n${bad} 個版型沒通過檢查`); process.exit(1); }
 console.log("\n全部通過");

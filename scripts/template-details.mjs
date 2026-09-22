@@ -213,17 +213,20 @@ export const radarPolygon = (cx, cy, r, labels, over = {}) => {
     const a = (-Math.PI / 2) + (i * 2 * Math.PI) / n;
     return [cx + Math.cos(a) * radius, cy + Math.sin(a) * radius];
   };
+  // 旋轉是繞元素中心，所以線段的 x/y 要放「中點減一半長寬」，
+  // 直接用起點座標會讓每條邊都偏移半個長度——畫出來就不是多邊形了。
+  const segment = (name, x1, y1, x2, y2, thickness, opacity) => {
+    const len = Math.hypot(x2 - x1, y2 - y1);
+    const deg = (Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI;
+    return L.shape(name, (x1 + x2) / 2 - len / 2, (y1 + y2) / 2 - thickness / 2, len, thickness,
+      { kind: "rect", fill: line }, { rotation: deg * DEG, opacity });
+  };
   const out = [];
   for (let i = 0; i < n; i += 1) {
     const [x1, y1] = pt(i, r);
     const [x2, y2] = pt((i + 1) % n, r);
-    const len = Math.hypot(x2 - x1, y2 - y1);
-    const deg = (Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI;
-    out.push(L.shape(`雷達邊${i}`, x1, y1, len, 2, { kind: "rect", fill: line }, { rotation: deg * DEG, opacity: 0.8 }));
-    // 中心到頂點
-    const clen = Math.hypot(x1 - cx, y1 - cy);
-    const cdeg = (Math.atan2(y1 - cy, x1 - cx) * 180) / Math.PI;
-    out.push(L.shape(`雷達輻${i}`, cx, cy, clen, 1, { kind: "rect", fill: line }, { rotation: cdeg * DEG, opacity: 0.45 }));
+    out.push(segment(`雷達邊${i}`, x1, y1, x2, y2, 2, 0.8));
+    out.push(segment(`雷達輻${i}`, cx, cy, x1, y1, 1, 0.45));
     out.push(L.shape(`雷達點${i}`, x1 - 7, y1 - 7, 14, 14, { kind: "ellipse", fill: dot }));
     const [lx, ly] = pt(i, r + 78);
     out.push(L.text(`雷達字${i}`, labels[i], lx - 110, ly - 22, 220, 50, { fontSize: 30, color: fg }));

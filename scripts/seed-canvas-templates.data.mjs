@@ -169,7 +169,7 @@ export const TEMPLATES = [
     // 主張：商品放到最大並裁切出血，標題壓在商品上。極端的尺寸對比。
     name: "01 巨型商品・出血裁切",
     layers: () => [
-      ...use("amber"),
+      ...pickProduct("amber"),
       bg("#f3efe8", "#e7e0d4"),
       ...product(300, 240, 900, 1100, { shadow: false }),
       text("小標", "NEW", 90, 150, 300, 60, {
@@ -188,7 +188,7 @@ export const TEMPLATES = [
     // 主張：整片深色色塊佔左半，商品跨過分界，字反白壓在色塊上。
     name: "02 色塊分割・跨界商品",
     layers: () => [
-      ...use("white"),
+      ...pickProduct("white"),
       bg("#faf7f2", "#f2ece2"),
       shape("色塊", 0, 0, 660, 1200, { kind: "rect", fill: "#1f3d34", gradient: { axis: "vertical", from: "#24463b", to: "#16302a" } }),
       text("小標", "LIMITED SET", 90, 160, 480, 50, {
@@ -208,7 +208,7 @@ export const TEMPLATES = [
     // 主張：圓形舞台在上、價格資訊橫排在下。價格與圓不要互相壓，各自佔一條。
     name: "03 圓形舞台・價格橫排",
     layers: () => [
-      ...use("amber"),
+      ...pickProduct("amber"),
       bg("#fff3d9", "#ffe4b0"),
       shape("舞台圓", 220, 110, 760, 760, { kind: "ellipse", fill: "#ffffff" }, { opacity: 0.9 }),
       text("上標", "SPECIAL OFFER", 220, 180, 760, 50, {
@@ -231,7 +231,7 @@ export const TEMPLATES = [
     // 主張：全黑、金線細框、襯線字。商品刻意小，靠留白撐起質感。
     name: "04 極致深色・金線質感",
     layers: () => [
-      ...use("white"),
+      ...pickProduct("white"),
       bg("#0d0d10", "#17171d"),
       shape("金框", 80, 80, 1040, 1040, { kind: "rect", fill: "none", stroke: "#8d7434", strokeWidth: 2 }),
       text("上標", "PREMIUM CARE", 140, 160, 920, 50, {
@@ -254,7 +254,7 @@ export const TEMPLATES = [
     // 主張：雜誌封面。刊頭橫貫全寬，商品從左下出血，右側一欄小字。
     name: "05 雜誌封面・刊頭橫貫",
     layers: () => [
-      ...use("blue"),
+      ...pickProduct("blue"),
       bg("#e8eef0", "#cfdade"),
       text("刊頭", "BEAUTY", 60, 90, 1080, 200, {
         fontSize: 196, color: "#16323c", fx: { letterSpacing: 0.06 },
@@ -278,7 +278,7 @@ export const TEMPLATES = [
     // 主張：深淺交錯的棋盤格，深格反白字。色差要夠大，不然四格會糊成一片。
     name: "06 四格賣點・深淺交錯",
     layers: () => [
-      ...use("blue"),
+      ...pickProduct("blue"),
       bg("#ffffff", "#ffffff"),
       shape("格1", 0, 0, 600, 600, { kind: "rect", fill: "#173a63" }),
       shape("格2", 600, 0, 600, 600, { kind: "rect", fill: "#e8f0fa" }),
@@ -303,7 +303,7 @@ export const TEMPLATES = [
     // 主張：整片高彩度色場，價格是主角，商品縮到角落並傾斜。
     name: "07 螢光價格・快閃",
     layers: () => [
-      ...use("white"),
+      ...pickProduct("white"),
       bg("#f5e02e", "#f2c81d"),
       text("上標", "FLASH SALE", 90, 130, 1020, 60, {
         fontSize: 32, fontWeight: 400, align: "left", color: "#6b5a00", fx: { letterSpacing: 0.4 },
@@ -326,7 +326,7 @@ export const TEMPLATES = [
     // 主張：左右分割做前後對比，左邊壓低透明度與彩度當「before」。
     name: "08 前後對比・左右分割",
     layers: () => [
-      ...use("pink"),
+      ...pickProduct("pink"),
       bg("#eef1f0", "#e2e8e6"),
       shape("右半", 600, 0, 600, 1200, { kind: "rect", fill: "#d9ece3", gradient: { axis: "vertical", from: "#e4f2ea", to: "#cbe3d7" } }),
       shape("中線", 598, 0, 4, 1200, { kind: "rect", fill: "#ffffff" }),
@@ -348,7 +348,7 @@ export const TEMPLATES = [
     // 主張：三條滿版橫帶，巨大編號當視覺主體，商品只是點綴。
     name: "09 三步驟・橫帶編號",
     layers: () => [
-      ...use("amber"),
+      ...pickProduct("amber"),
       bg("#fffaf4", "#fff3e6"),
       ...[["潔淨", "洗去一天的負擔", "#ffe7cc"], ["導入", "讓精華走進肌底", "#ffd9ab"], ["鎖水", "留住整夜的水分", "#ffc987"]]
         .flatMap(([title, desc, fill], i) => [
@@ -373,7 +373,7 @@ export const TEMPLATES = [
     // 主張：把留白做到底。商品小、字少、八成畫面是空的。
     name: "10 極簡留白・八成留空",
     layers: () => [
-      ...use("white"),
+      ...pickProduct("white"),
       bg("#f7f5f1", "#f0ece4"),
       ...product(510, 200, 180, 250),
       text("主標", "純淨", 0, 560, 1200, 180, { fontSize: 150, color: "#26241f" }),
@@ -394,7 +394,7 @@ export const TEMPLATES = [
   {
     name: "11 系列・封面",
     layers: () => [
-      ...use("green"),
+      ...pickProduct("green"),
       bg("#0e2a19", "#5f9a48"),
       ...lozenge("FOR FORMULA", 80, 150, 520, 92),
       text("主標", "祛痘攻略", 80, 280, 700, 190, {
@@ -414,7 +414,7 @@ export const TEMPLATES = [
   {
     name: "12 系列・功效實證",
     layers: () => [
-      ...use("green"),
+      ...pickProduct("green"),
       bg("#0e2a19", "#5f9a48"),
       ...glassCard(),
       ...cardTitle("功效實證", "EFFICACY\nEVIDENCE"),
@@ -428,7 +428,7 @@ export const TEMPLATES = [
   {
     name: "13 系列・核心成分",
     layers: () => [
-      ...use("green"),
+      ...pickProduct("green"),
       bg("#0e2a19", "#5f9a48"),
       ...glassCard(),
       ...cardTitle("核心成分", "CORE\nCOMPONENT"),
@@ -442,7 +442,7 @@ export const TEMPLATES = [
   {
     name: "14 系列・使用前後",
     layers: () => [
-      ...use("green"),
+      ...pickProduct("green"),
       bg("#0e2a19", "#5f9a48"),
       ...glassCard(),
       ...cardTitle("使用前後", "BEFORE\nAFTER"),
@@ -465,7 +465,7 @@ export const TEMPLATES = [
   {
     name: "15 系列・使用步驟",
     layers: () => [
-      ...use("green"),
+      ...pickProduct("green"),
       bg("#0e2a19", "#5f9a48"),
       ...glassCard(),
       ...cardTitle("使用步驟", "HOW TO\nUSE"),
@@ -486,7 +486,7 @@ export const TEMPLATES = [
   {
     name: "16 系列・立即入手",
     layers: () => [
-      ...use("green"),
+      ...pickProduct("green"),
       bg("#0e2a19", "#4f8a3c"),
       ...product(330, 160, 540, 620, { shadow: false }),
       ...lozenge("LIMITED OFFER", 340, 790, 520, 88),
@@ -507,7 +507,7 @@ export const TEMPLATES = [
     //       左下情境小圖 → 底部註腳。使用者只要改字、換商品就能用。
     name: "17 完整詳情頁・墨綠實證（一次生好所有物件）",
     layers: () => asSquare([
-      ...use("green"),
+      ...pickProduct("green"),
       bg("#0b2414", "#4e8a3a"),
 
       // 頂欄

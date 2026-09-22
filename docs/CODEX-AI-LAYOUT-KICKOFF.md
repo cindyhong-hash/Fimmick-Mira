@@ -1,6 +1,6 @@
 # 給 Codex：「AI 幫我排版」開工前須知
 
-> 寫於 2026-09-21。這份只講**開工前要先知道的事**；功能本身的設計、已完成的 P0–P4、檔案分工在
+> 寫於 2026-09-21，驗收基準線更新於 2026-09-22。這份只講**開工前要先知道的事**；功能本身的設計、已完成的 P0–P4、檔案分工在
 > [`docs/AI-LAYOUT-HANDOFF.md`](AI-LAYOUT-HANDOFF.md)，那份仍然有效，請先讀完再看這份。
 
 ---
@@ -95,10 +95,10 @@ npm run lint
 npm run build
 ```
 
-2026-09-21 在 `main` 上的實際狀況：
+2026-09-22 在 `main` 上的實際狀況：
 
 - `tsc` — 0
-- 測試 — **402 個，401 過**。唯一失敗是既有的 `src/lib/planner/content-brief.test.ts`（`subtitleText: null`），**不是你弄壞的**，不用修。
+- 測試 — **408 個，407 過**。唯一失敗是既有的 `src/lib/planner/content-brief.test.ts`（`subtitleText: null`），**不是你弄壞的**，不用修。
 - `lint` — **56 個 error、94 個 warning，全部是既有的**（集中在 `wireframes/`、舊 API route）。基準線是「不要新增」，不是「歸零」。
 - `build` — EXIT 0
 

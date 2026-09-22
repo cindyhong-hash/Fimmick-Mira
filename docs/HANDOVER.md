@@ -1,7 +1,7 @@
 # 接手就從這裡開始（MIRA / marketing-tool）
 
 > 給新 session 的 agent。讀完這一份就能直接開工，不用重新盤點。
-> 最後更新：2026-09-21
+> 最後更新：2026-09-22
 
 ---
 
@@ -15,7 +15,17 @@ git log --oneline mine/main..HEAD    # 未推的
 
 **目前主要工作區**：`.worktrees/release-kit`（分支 `release/visual-asset-kit`）
 **未推**：0 個（本地與 `mine/main` 同步）
-**正式站**：`mine/main` = `21a5f7c`（2026-09-21 推上 24 個 commit，全是賣點圖示這條線）
+**正式站**：`mine/main` = `2211ff2`（2026-09-22）
+
+**驗收基準線**（改完要比對，數字只能持平或變好）：
+
+| | |
+|---|---|
+| `npx tsc --noEmit` | 0 |
+| `npx tsx --test "src/**/*.test.ts"` | **408 個，407 過** |
+| 唯一允許的失敗 | `src/lib/planner/content-brief.test.ts`（`subtitleText: null`），既有、不用修 |
+| `npm run build` | EXIT 0 |
+| `npm run lint` | 全 repo 56 error / 94 warning，**全部既有**。基準是「不要新增」，不是歸零 |
 
 ⚠️ `mine` 這個 remote 才是正式站（`cindyhong-hash/Fimmick-Mira`）。
 `origin` 是別人的舊 repo，**不要推到 origin**。
@@ -232,6 +242,81 @@ eslint 全 repo 有既有 error（`MagicLayersEditor.tsx` 單檔 29 個），那
 - 「新增賣點」按下去真的多一張並生成——只有單元測試，UI 已收起來
 - 柔和色塊的顆粒偏小、徽章剪影內的小元素偏小，可調但要花錢試
 
+## 6.5 2026-09-22 這批（都已上線）
+
+一天內修掉六件，其中四件的根因是**同一個**：提示詞裡出現的詞，會被生圖模型當成
+「要畫的東西」畫出來。這條教訓到目前為止踩了五次，寫在最前面。
+
+### 🔴 提示詞污染（踩過五次，改任何生圖提示詞前先讀）
+
+模型看得到圖，**看不到遮罩、看不到你的意圖**。提示詞對它而言只是「畫面上該有什麼」。
+
+| 提示詞裡寫了 | 實際生出來 |
+|---|---|
+| 中文賣點標題 | 圖上出現「雙重保濕」四個字（缺筆畫） |
+| `#FFFFFF`、`#3b82f6` | 圖上出現色碼文字 |
+| `every **white** masked area` | 補出一整片白邊 |
+| `Extend this **photograph** into one larger continuous **photo**` | 補的區域畫出一格一格的照片，還自己編了停車場 |
+| 使用者打的「把花瓣**移除**」 | 那塊畫出更多花瓣（句子裡有花瓣） |
+
+**負面句一律無效**：「不要畫商品」「no text」「no border」都沒有作用。
+唯一可靠的做法是**根本不要提**。要它不畫某個東西，就不要讓那個詞出現。
+
+對應的防線（都已經在程式裡）：
+- `src/lib/color-words.ts` — 色碼進生圖前一律轉成顏色文字（`#ffeb85` → `warm light yellow`）。
+  在 `translateBriefToEnglishPrompt` **入口**就換掉，不是靠翻譯模型——那條函式有三條
+  失敗路徑會直接回傳原文，漏一條就等於色碼原封不動送出去。
+- 中文一律先翻成英文再送（`translateBriefToEnglishPrompt`）。
+- 「移除」是獨立按鈕，**完全不送使用者打的字**。
+
+### 做了什麼
+
+| 主題 | 內容 |
+|---|---|
+| 背景長出不存在的商品 | 一致性規則第一條字面上就是「這張是同一個商品的另一個視角」。抽成 `PRODUCT_IDENTITY_RULES`，`path === "text"` 的素材一律不收 |
+| 素材可以改名 | 後端 PATCH 早就支援 `subject`，UI 被拿掉變成死碼。接回 header，三種彈窗版面共用 `renameControl()` |
+| 「AI優化提示詞」沒反應 | 合成模式扣掉「主體：」那行之後是空字串，函式直接 return——按鈕是亮的卻毫無反應。改成請模型只寫場景 |
+| 送出列灰縫 | `fixed ... left-60`（240px）寫死，但側邊欄是 220px。側邊欄寬度收斂到 `sidebar-metrics.ts`，三張表單共用 |
+| 擴圖只填白色 | 見下 |
+| 生成式填色 | 見下 |
+
+### 擴圖（`/api/magic-layers/outpaint`）
+
+使用者的用法是「把背景圖縮小，讓 AI 把旁邊補成同一個場景」。原本的遮罩把
+**整個原畫布塗黑＝保留**，所以畫布裡面的白邊模型不准動——不是補出白色，是根本沒補。
+
+- `src/lib/magic-layers/blank-region.ts`：flood fill 從四邊往內找「與邊緣相連的空白」。
+  用 flood fill 而不是「只要白就補」，因為畫面中間本來就白的東西（白牆、白衣服、
+  反光）不該被重畫。附 3 個測試，含「被有色邊框包住的白色不該被重畫」。
+- 提示詞改成先看一次原圖拿一句英文場景描述（`describeSceneInEnglish`），
+  而且看的是**裁掉白邊之後**的圖，否則白邊會被描述成「白色背景」又把顏色詞餵回去。
+- 底圖從純灰改成「內容放大模糊」。
+
+✅ 已實測：照片縮到畫布中間 45%、四周留白、比例不改 → 白邊補成同一個房間
+（窗戶、窗簾、盆栽、室外街景都接得起來）。
+
+原本的「魔術棒補空白」按鈕已收起（`SHOW_MAGIC_FILL = false`），能力併進擴圖。
+
+### 生成式填色（框選局部重畫）
+
+框選一塊 → 打字或按「移除」→ 結果**直接套在畫布上** → `‹ 1/2 ›` 原地換版本 → 完成／取消。
+底層沿用既有的 `flux-pro/v1/fill`。
+
+不用彈窗排縮圖讓人挑，是因為那樣要瞇著眼比小圖；取消會移除預覽圖層並還原原本的
+圖層可見性。
+
+⚠️ **「移除」這條路徑還沒驗成功過**。第一次實測失敗（框住花瓣按移除，它畫了更多
+花瓣——因為當時的提示詞是「把周圍場景接過去」，而周圍本來就散滿花瓣）。
+已改成「乾淨、什麼都沒有的表面」＋獨立按鈕，但**沒有生圖證實**。
+
+### ⌘G 群組
+
+群組功能本來就有，只有工具列按鈕。補上 ⌘G／⌘⇧G。要 `preventDefault`（瀏覽器的
+⌘G 是「找下一個」）。放在處理 ⌘S 的那個 effect 裡，因為 `groupSelected` 宣告在
+另一個鍵盤 effect 之後（放錯地方 lint 會抓到「變數宣告前就使用」）。
+
+---
+
 ## 7. 未解 / 待辦
 
 | 優先 | 事項 |
@@ -240,16 +325,28 @@ eslint 全 repo 有既有 error（`MagicLayersEditor.tsx` 單檔 29 個），那
 | 🟡 | 公司站部署權限未穩定 |
 | 🟡 | 決定何時把使用者從 x5hn 切到 fimmick-mira（換網域＝所有人重輸密碼，只該換一次） |
 | 🟡 | 「新增賣點」只有單元測試，UI 已收起來；要開回來得先實測一次 |
-| ⚪ | 加入畫布時不會自動群組三個圖層（編輯器有群組功能，但要手動框選） |
+| 🔴 | **生成式填色的「移除」沒驗成功過**——改好了但沒生圖證實。使用者試了說不對的話，先看它是不是又照著畫要移除的東西 |
+| ⚪ | 加入畫布時不會自動群組三個圖層（編輯器有群組功能，⌘G 可手動群組） |
 | ⚪ | 示意圖「商品其他角度」是雪景耶誕版，要中性的得重生一張 |
 | ⚪ | 柔和色塊的顆粒、徽章剪影裡的小元素都偏小，可調但要花錢試 |
-| 🟡 | Codex 分支 `codex/ad-layout-composition-plan` 落後 main 34 個 commit，要繼續開發得先 merge main |
+| 🟡 | 「AI 幫我排版」要交給 Codex 繼續做：讀 **`docs/CODEX-AI-LAYOUT-KICKOFF.md`**。他的分支 `codex/ad-layout-composition-plan` 已落後 main 62 個 commit、領先 0 個（內容全進 main 了），**要從 main 重開分支**，不要沿用 |
 | 🟡 | 本機 dev 若不設 `SITE_PASSWORD`，付費端點**完全無認證**（`site-gate.ts:50` 開發環境直接放行）。曾發生過「沒人按確認卻收到 8 張 generation POST」 |
 | ⚪ | 素材背景有 AI 亂碼文字（「Eaodr Shavts」），一直沒處理 |
-| ⚪ | lint 全 repo 有既有 error（`MagicLayersEditor.tsx` 單檔 29 個），刻意不改但**不要新增**——改完比對數字有沒有變多 |
+| ⚪ | lint 全 repo 56 error（`MagicLayersEditor.tsx` 單檔 29 個），刻意不改但**不要新增**——改完比對數字有沒有變多 |
+| ⚪ | 使用者 2026-09-22 起**兩台電腦並用**。程式碼靠 git 同步；本機 `prisma/*.db` 是檔案，**兩台不會同步也無法合併**（已知、刻意）。桌面 `Mira 另一台版本/README.md` 有設定說明 |
 | ⚪ | `release-kit` worktree 與 `backup-before-strip` 標記，穩定後可清 |
 
 **已從待辦移除**：RapidAPI key 輪替（使用者 2026-09-17 決定不處理，不要再主動提）。
+
+### 備份標籤（2026-09-22）
+
+換電腦前把舊機器上**沒推過**的東西備份成 18 個標籤，全在 `backup/20260922/` 底下：
+16 個本機分支（`integrate` 109 個 commit、`feat/product-image-set` 10 個…）、
+1 個 stash（monthly-planner WIP）、1 個 `main-checkout-wip`（主 checkout 未提交的
+3 個版面修正 + 2 份文件）。
+
+用標籤而不是分支是刻意的：不會出現在合併流程裡、不會觸發 Vercel 部署。
+要取回：`git fetch mine --tags && git checkout -b <分支名> backup/20260922/<分支名>`。
 
 ---
 
@@ -272,3 +369,5 @@ eslint 全 repo 有既有 error（`MagicLayersEditor.tsx` 單檔 29 個），那
 | `docs/LOCAL-DEV-DB.md` | 本機資料庫做法、Prisma client 跨 worktree 共用的坑、Turso token 輪替 |
 | `docs/NEXT-STEPS.md` | 搬家步驟與收尾 |
 | `docs/VISUAL-ASSET-KIT-CONTINUE-HERE.md` | Codex 那條線的交接 |
+| `docs/CODEX-AI-LAYOUT-KICKOFF.md` | **「AI 幫我排版」交給 Codex 前的開工須知**（分支、旗標、守備範圍、驗收基準） |
+| `docs/AI-LAYOUT-HANDOFF.md` | 「AI 幫我排版」的功能設計與已完成的 P0–P4（第三、四節重複貼了兩次，不是你看錯） |

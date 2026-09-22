@@ -102,7 +102,10 @@ export { S };
 // 第一版的牆太淡，白字直接消失、紫字也糊在紫底上。重生一張飽和的深紫羅蘭。
 const WALL = "https://v16uryj9gfmy6re4.public.blob.vercel-storage.com/1790068969682-1ejqs2ku0th.jpg";
 // 紫色精華瓶（已去背並裁掉透明邊），配合這張的紫色調
-const VIOLET_BOTTLE = "https://v16uryj9gfmy6re4.public.blob.vercel-storage.com/1790069007341-en011p0rj1.png";
+// 瓶身有大寫 A 與英文標籤（生圖模型畫的英文會有點拼不準，當示意剛好）
+const VIOLET_BOTTLE = "https://v16uryj9gfmy6re4.public.blob.vercel-storage.com/1790069333959-xuyv4g19cnr.png";
+// 扁平插畫頭像，比通用人物圖示更像真的有人在講話
+const AVATAR = "https://v16uryj9gfmy6re4.public.blob.vercel-storage.com/1790069334860-z31090ddv9.png";
 const BEFORE = "https://v16uryj9gfmy6re4.public.blob.vercel-storage.com/product-set-benefit-1789704497564-7ohx8a5yelr.jpg";
 const AFTER = "https://v16uryj9gfmy6re4.public.blob.vercel-storage.com/product-set-benefit-1789705738405-4ebuc4dh691.jpg";
 
@@ -162,7 +165,7 @@ FAMILY.push({
     ...testimonialCard(
       "東海大學－財務金融學系",
       ["質地水潤、好推不厚重，吸收很快", "使用一週後膚況穩定、痘疤淡化", "真的感覺到平滑不少"],
-      470, 860, 690, 250,
+      470, 860, 690, 250, { avatarImage: AVATAR },
     ),
   ],
 });

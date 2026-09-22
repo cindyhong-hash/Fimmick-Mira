@@ -319,12 +319,16 @@ export const photoTile = (url, x, y, w, h, over = {}) => {
 
 /** 見證卡：圓形頭像 ＋ 白色圓角卡片 ＋ 多行留言。 */
 export const testimonialCard = (who, lines, x, y, w, h, over = {}) => {
-  const { card = "#ffffff", fg = "#3b3054", dim = "#7a6f96", avatar = "#e6def7" } = over;
+  const { card = "#ffffff", fg = "#3b3054", dim = "#7a6f96", avatar = "#e6def7", avatarImage } = over;
   const d = Math.min(120, h * 0.55);
   return [
     L.shape("見證卡", x + d * 0.55, y, w - d * 0.55, h, { kind: "rect", fill: card, radius: 18 }),
     L.shape("頭像底", x, y + (h - d) / 2, d, d, { kind: "ellipse", fill: avatar }),
-    L.text("頭像字", "👤", x, y + (h - d) / 2 + d * 0.22, d, d * 0.55, { fontSize: d * 0.45, color: "#7a6f96" }),
+    // 有插畫頭像就用圖，沒有就退回文字圖示——圖層是方的，靠底下的圓色塊做出圓形頭像的感覺
+    ...(avatarImage
+      ? [{ ...L.shape("頭像", x + d * 0.08, y + (h - d) / 2 + d * 0.02, d * 0.84, d * 0.96, { kind: "rect", fill: "#0000" }),
+           shape: null, image: avatarImage, name: "見證人頭像（可換）" }]
+      : [L.text("頭像字", "👤", x, y + (h - d) / 2 + d * 0.22, d, d * 0.55, { fontSize: d * 0.45, color: "#7a6f96" })]),
     L.text("見證人", who, x + d * 0.9, y + 18, w - d * 1.2, 40, {
       fontSize: 22, align: "left", color: dim,
     }),

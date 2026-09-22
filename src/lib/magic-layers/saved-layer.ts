@@ -3,6 +3,17 @@ import type { TextLayout } from "./editable-text.ts";
 export type ShapeKind = "rect" | "ellipse" | "line" | "icon" | "triangle" | "polygon" | "star" | "diamond";
 export type ShapeSpec = { kind: ShapeKind; fill: string; stroke: string; strokeWidth: number; radius?: number; icon?: string; sides?: number; gradient?: { axis: "horizontal" | "vertical"; from: string; to: string }; softness?: number };
 
+/**
+ * 文字的分段樣式：用字元索引標出哪一段要換字級／顏色／字重。
+ *
+ * 之前一個文字圖層只有一組樣式，整串字共用，所以「只把某個字放大」做不到。
+ * 用區間而不是逐字存，是因為使用者改字之後索引要跟著移動，區間比較好維護，
+ * 也不會讓每個字都帶一份樣式把 JSON 撐大。
+ *
+ * start／end 是半開區間 [start, end)，對應 text 的字元索引。
+ */
+export type TextRun = { start: number; end: number; fontSize?: number; color?: string; fontWeight?: number };
+
 export type TextFx = { gradient?: [string, string] | null; strokeColor?: string; strokeW?: number; shadow?: boolean; italic?: boolean; letterSpacing?: number;
   warp?: "none" | "arc-up" | "arc-down" | "wave"; warpAmount?: number; waveCount?: number };
 export type SavedLayer = {
@@ -14,6 +25,7 @@ export type SavedLayer = {
   isText?: boolean; text?: string; color?: string; fontSize?: number; fontFamily?: string; fontWeight?: number; align?: "left" | "center" | "right";
   fx?: TextFx | null;
   textLayout?: TextLayout;
+  runs?: TextRun[];                   // 分段樣式（只把某幾個字放大／換色）
   shape?: { kind: ShapeKind; fill: string; stroke: string; strokeWidth: number; radius?: number; icon?: string; sides?: number; gradient?: { axis: "horizontal" | "vertical"; from: string; to: string }; softness?: number };
   groupId?: string | null;
 };
@@ -28,7 +40,7 @@ export function savedToLayerData(sl: SavedLayer): LayerData {
     embeddedText: [], children: [],
     meta: {
       visible: sl.visible, locked: sl.locked, opacity: sl.opacity, groupId: sl.groupId ?? null,
-      ...(sl.isText ? { style: { text: sl.text, fontSizePx: sl.fontSize, fontWeight: sl.fontWeight, color: sl.color, align: sl.align, fontFamily: sl.fontFamily, fx: sl.fx ?? null, ...(sl.textLayout ? { layout: sl.textLayout } : {}) }, textObject: { text: sl.text } } : {}),
+      ...(sl.isText ? { style: { text: sl.text, fontSizePx: sl.fontSize, fontWeight: sl.fontWeight, color: sl.color, align: sl.align, fontFamily: sl.fontFamily, fx: sl.fx ?? null, ...(sl.textLayout ? { layout: sl.textLayout } : {}), ...(sl.runs ? { runs: sl.runs } : {}) }, textObject: { text: sl.text } } : {}),
       ...(sl.isArt ? { isArt: true, artText: sl.text ?? "", ...(sl.artRefImage ? { artRefImage: sl.artRefImage } : {}) } : {}),
       ...(sl.shape ? { shape: sl.shape } : {}),
     },

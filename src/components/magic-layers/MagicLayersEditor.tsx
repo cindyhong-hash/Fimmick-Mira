@@ -9,7 +9,7 @@ import { drawEditableShape, drawIcon, EDITABLE_ICON_NAMES } from "@/lib/magic-la
    ============================================================ */
 import { drawEditableText, readTextLayout, DEFAULT_TEXT_LAYOUT, type TextLayout } from "@/lib/magic-layers/editable-text.ts";
 import { useBrandFonts } from "@/lib/fonts/useBrandFonts";
-import type { SavedLayer, TextFx, ShapeKind, ShapeSpec } from "@/lib/magic-layers/saved-layer.ts";
+import type { SavedLayer, TextFx, TextRun, ShapeKind, ShapeSpec } from "@/lib/magic-layers/saved-layer.ts";
 export type { SavedLayer } from "@/lib/magic-layers/saved-layer.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronUp, ChevronDown, Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowLeft, Plus, Download, Image as ImageIcon, Upload, Type, BadgeCheck, Square, Star, Minus, Pencil, Undo2, Redo2, Eraser, Maximize2, GripVertical, WandSparkles, Save } from "lucide-react";
@@ -27,6 +27,7 @@ type EL = {
   confidence: number; editable: boolean; source: string;
   isText: boolean; text: string; color: string; fontSize: number; fontFamily: string; fontWeight: number; align: "left" | "center" | "right";
   textLayout?: TextLayout;
+  runs?: TextRun[];          // 分段樣式：只把某幾個字放大／換色
   fx?: TextFx | null;        // 文字特效（選用；null/undefined = 純文字）
   isArt?: boolean;           // 由 AI 文字藝術字生成的圖片圖層（可再用 AI 微調）
   artRefImage?: string | null;   // 生成時用的風格參考圖（data URL；供 reload 後續編/微調）
@@ -120,6 +121,11 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   // 右側面板也能改，但要在畫面上直接看著版面打字才知道會不會爆框。
   // 雙擊當下就把幾何算好存進 state；render 期間不再去讀 layersRef／view
   // （那會在 render 階段讀 ref，lint 會擋，而且 pan/zoom 後座標也會失準）。
+  // 畫布內編輯時，textarea 裡被選起來的字元範圍。有範圍才顯示分段樣式工具列。
+  const [textSel, setTextSel] = useState<{ start: number; end: number } | null>(null);
+  const readSel = useCallback((t: HTMLTextAreaElement) => {
+    setTextSel(t.selectionStart === t.selectionEnd ? null : { start: t.selectionStart, end: t.selectionEnd });
+  }, []);
   const [editingText, setEditingText] = useState<{
     id: string; value: string;
     left: number; top: number; width: number; height: number;
@@ -181,6 +187,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           isText, text: isText ? String(st?.text ?? (l.meta?.textObject as { text?: string } | undefined)?.text ?? l.name) : String((l.meta?.artText as string | undefined) ?? ""),
           color: st?.color ?? "#241f47", fontSize: st?.fontSizePx ?? Math.max(10, Math.round(l.height * 0.8)),
           fontFamily: st?.fontFamily ?? "'Noto Sans TC',system-ui,sans-serif", fontWeight: st?.fontWeight ?? 700, align: st?.align ?? "center",
+          runs: (l.meta?.style as { runs?: TextRun[] } | undefined)?.runs,
           canvas, naturalW: canvas?.width || l.width, naturalH: canvas?.height || l.height,
           src: l.image ?? null,
           cx: l.x + l.width / 2, cy: l.y + l.height / 2, w: boxW, h: boxH, rotation: l.rotation ?? 0,
@@ -804,6 +811,30 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     bg.thumb = makeThumb(bg); layersRef.current.unshift(bg); setMagicFillResult(null); selectOnly(bg.id); markDirty(); refresh(); render();
   }, [doc.w, doc.h, markDirty, refresh, render]);
 
+  /**
+   * 把樣式套到目前選起來的字上。
+   *
+   * 區間會重疊（使用者可能先放大三個字、再只把中間那個換色），所以先把跟新
+   * 區間相交的舊區間切開，再把新的疊上去；drawRunText 讀的時候後定義的優先。
+   */
+  const applyRunStyle = useCallback((patch: Partial<TextRun>) => {
+    if (!editingText || !textSel) return;
+    const target = layersRef.current.find((x) => x.id === editingText.id);
+    if (!target) return;
+    const { start, end } = textSel;
+    const kept: TextRun[] = [];
+    for (const r of target.runs ?? []) {
+      if (r.end <= start || r.start >= end) { kept.push(r); continue; }
+      if (r.start < start) kept.push({ ...r, end: start });
+      if (r.end > end) kept.push({ ...r, start: end });
+    }
+    const existing = (target.runs ?? []).find((r) => r.start <= start && r.end >= end);
+    kept.push({ ...(existing ?? {}), start, end, ...patch });
+    target.runs = kept.sort((a, b) => a.start - b.start);
+    target.thumb = makeThumb(target);
+    markDirty(); render(); refresh();
+  }, [editingText, textSel, markDirty, render, refresh]);
+
   const PREVIEW_ID = "genfill_preview";
 
   /**
@@ -894,7 +925,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     x: l.cx - l.w / 2, y: l.cy - l.h / 2, w: l.w, h: l.h, rotation: l.rotation,
     visible: l.visible, opacity: l.opacity, locked: l.locked, groupId: l.groupId ?? null,
     ...(l.isText
-      ? { isText: true, text: l.text, color: l.color, fontSize: l.fontSize * (l.w / (l.naturalW || l.w)), fontFamily: l.fontFamily, fontWeight: l.fontWeight, align: l.align, ...(l.fx ? { fx: l.fx } : {}), ...(l.textLayout ? { textLayout: { ...l.textLayout, letterSpacing: l.textLayout.letterSpacing * (l.w / (l.naturalW || l.w)) } } : {}) }
+      ? { isText: true, text: l.text, color: l.color, fontSize: l.fontSize * (l.w / (l.naturalW || l.w)), fontFamily: l.fontFamily, fontWeight: l.fontWeight, align: l.align, ...(l.fx ? { fx: l.fx } : {}), ...(l.textLayout ? { textLayout: { ...l.textLayout, letterSpacing: l.textLayout.letterSpacing * (l.w / (l.naturalW || l.w)) } } : {}),
+          // 分段樣式的字級跟著圖層縮放一起換算，否則存檔重開會跑掉
+          ...(l.runs?.length ? { runs: l.runs.map((r) => ({ ...r, ...(r.fontSize ? { fontSize: r.fontSize * (l.w / (l.naturalW || l.w)) } : {}) })) } : {}) }
       : l.shape
         ? { shape: { ...l.shape } }
         : { image: l.src ?? (l.canvas ? (safeDataUrl(l.canvas) ?? undefined) : undefined), ...(l.isArt ? { isArt: true, text: l.text, ...(l.artRefImage ? { artRefImage: l.artRefImage } : {}) } : {}) }),
@@ -1336,6 +1369,50 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
             pushImageLayer(url, "背景圖", "object", { cx: d.x, cy: d.y });
           }}>
           <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, touchAction: "none" }} />
+        {/* 選起某幾個字之後才出現的分段樣式工具列。
+            按鈕帶 data-run-tool，textarea 的 onBlur 會據此判斷不要收起編輯框，
+            否則點按鈕的當下選取範圍就沒了。 */}
+        {editingText && textSel && (
+          <div style={{
+            position: "absolute",
+            left: Math.max(8, editingText.left),
+            top: Math.max(8, editingText.top - 52),
+            zIndex: 45, display: "flex", gap: 6, alignItems: "center",
+            background: "#1f2937", padding: "6px 8px", borderRadius: 10,
+            boxShadow: "0 6px 18px rgba(0,0,0,.25)",
+          }}>
+            <span style={{ fontSize: 11, color: "#9ca3af", paddingInline: 4 }}>選取的字</span>
+            {[1.4, 0.75].map((factor) => (
+              <button key={factor} data-run-tool="1" onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  const target = layersRef.current.find((x) => x.id === editingText.id);
+                  const current = target?.runs?.find((r) => r.start <= textSel.start && r.end >= textSel.end)?.fontSize
+                    ?? target?.fontSize ?? 40;
+                  applyRunStyle({ fontSize: Math.round(current * factor) });
+                }}
+                style={{ height: 28, padding: "0 10px", borderRadius: 6, border: "1px solid #4b5563", background: "#111827", color: "#f9fafb", fontSize: 13, cursor: "pointer" }}>
+                {factor > 1 ? "放大" : "縮小"}
+              </button>
+            ))}
+            <input type="color" data-run-tool="1" onMouseDown={(e) => e.preventDefault()}
+              defaultValue="#ffffff"
+              onChange={(e) => applyRunStyle({ color: e.target.value })}
+              title="這幾個字的顏色"
+              style={{ width: 30, height: 28, border: "1px solid #4b5563", borderRadius: 6, padding: 0, background: "#111827", cursor: "pointer" }} />
+            <button data-run-tool="1" onMouseDown={(e) => e.preventDefault()}
+              onClick={() => applyRunStyle({ fontWeight: 900 })}
+              style={{ height: 28, padding: "0 10px", borderRadius: 6, border: "1px solid #4b5563", background: "#111827", color: "#f9fafb", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>粗</button>
+            <button data-run-tool="1" onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                const target = layersRef.current.find((x) => x.id === editingText.id);
+                if (!target) return;
+                target.runs = (target.runs ?? []).filter((r) => r.end <= textSel.start || r.start >= textSel.end);
+                target.thumb = makeThumb(target); markDirty(); render(); refresh();
+              }}
+              style={{ height: 28, padding: "0 10px", borderRadius: 6, border: "1px solid #4b5563", background: "transparent", color: "#d1d5db", fontSize: 13, cursor: "pointer" }}>還原</button>
+          </div>
+        )}
+
         {/* 畫布內文字編輯：貼合圖層位置／大小／旋轉／字級的輸入框，疊在 canvas 上。
             打字即時更新圖層，Enter 換行，Esc 或點別處收起。
             用 textarea 不用 contenteditable：換行行為本來就對，也不會帶進 HTML。 */}
@@ -1351,8 +1428,14 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
               target.thumb = makeThumb(target);
               markDirty(); render(); refresh();
             }}
-            onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") setEditingText(null); }}
-            onBlur={() => setEditingText(null)}
+            onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") { setEditingText(null); setTextSel(null); } }}
+            // onSelect 在某些情況不會觸發（程式設定選取、部分輸入法），
+            // 所以 keyup／mouseup 也各讀一次，確保拖曳選字與 Shift＋方向鍵都抓得到。
+            onSelect={(e) => readSel(e.target as HTMLTextAreaElement)}
+            onKeyUp={(e) => readSel(e.target as HTMLTextAreaElement)}
+            onMouseUp={(e) => readSel(e.target as HTMLTextAreaElement)}
+            // 不在 blur 收起：點上方工具列會先觸發 blur，範圍就沒了。改成點畫布別處才收。
+            onBlur={(e) => { if (!(e.relatedTarget as HTMLElement | null)?.dataset?.runTool) { setEditingText(null); setTextSel(null); } }}
             style={{
               position: "absolute",
               left: editingText.left, top: editingText.top,
@@ -1849,9 +1932,70 @@ function drawTextEl(ctx: CanvasRenderingContext2D, l: EL) {
   ctx.fillStyle = fill;
   if (l.textLayout) {
     drawEditableText(ctx, { text: l.text, width: l.w, height: l.h, fontSize: fs, align: l.align, layout: l.textLayout, stroke: Boolean(fx?.strokeW) });
+  } else if (l.runs?.length) {
+    drawRunText(ctx, l, lines ?? [l.text], fs, lineHeight, firstY, fill);
   } else {
     (lines ?? [l.text]).forEach((line, i) => ctx.fillText(line, tx, firstY + i * lineHeight));
   }
+}
+
+/**
+ * 逐段畫文字：讓同一個圖層裡的某幾個字有自己的字級／顏色／字重。
+ *
+ * 不能整行 fillText 之後再蓋——字寬不同，位置會對不上。所以先把每一行依
+ * 分段切成小片，量出整行實際寬度來決定對齊起點，再一片一片往右推。
+ * 每片的基線都對齊同一條（textBaseline 用 alphabetic 手動算），
+ * 否則放大的字會上下亂跳。
+ */
+function drawRunText(
+  ctx: CanvasRenderingContext2D, l: EL, lines: string[],
+  baseFs: number, lineHeight: number, firstY: number, fill: string | CanvasGradient,
+) {
+  const runs = l.runs ?? [];
+  const scale = l.w / (l.naturalW || l.w);
+  const fx = l.fx;
+  // 某個字元屬於哪一段（後定義的優先，方便重複套用）
+  const styleAt = (i: number) => {
+    for (let r = runs.length - 1; r >= 0; r -= 1) {
+      if (i >= runs[r].start && i < runs[r].end) return runs[r];
+    }
+    return undefined;
+  };
+  const fontFor = (st?: TextRun) =>
+    `${fx?.italic ? "italic " : ""}${st?.fontWeight ?? l.fontWeight} ${(st?.fontSize ?? l.fontSize) * scale}px ${l.fontFamily}`;
+
+  let offset = 0;
+  lines.forEach((line, li) => {
+    // 依樣式把這一行切成連續的小片
+    const pieces: { text: string; st?: TextRun }[] = [];
+    for (let i = 0; i < line.length; i += 1) {
+      const st = styleAt(offset + i);
+      const last = pieces[pieces.length - 1];
+      if (last && last.st === st) last.text += line[i];
+      else pieces.push({ text: line[i], st });
+    }
+    const widths = pieces.map((piece) => { ctx.font = fontFor(piece.st); return ctx.measureText(piece.text).width; });
+    const total = widths.reduce((a, b) => a + b, 0);
+    let x = l.align === "left" ? -l.w / 2 : l.align === "right" ? l.w / 2 - total : -total / 2;
+    const y = firstY + li * lineHeight;
+
+    ctx.save();
+    ctx.textAlign = "left";
+    pieces.forEach((piece, pi) => {
+      ctx.font = fontFor(piece.st);
+      if (fx?.strokeW && fx.strokeW > 0) {
+        ctx.lineWidth = (piece.st?.fontSize ?? l.fontSize) * scale * fx.strokeW;
+        ctx.strokeStyle = fx.strokeColor || "#ffffff";
+        ctx.lineJoin = "round"; ctx.miterLimit = 2;
+        ctx.strokeText(piece.text, x, y);
+      }
+      ctx.fillStyle = piece.st?.color ?? fill;
+      ctx.fillText(piece.text, x, y);
+      x += widths[pi];
+    });
+    ctx.restore();
+    offset += line.length + 1;   // +1 是被 split 掉的換行字元
+  });
 }
 
 function drawWarpedText(ctx: CanvasRenderingContext2D, text: string, width: number, fs: number, fx: TextFx, fill: string | CanvasGradient) {

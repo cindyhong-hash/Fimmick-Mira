@@ -2200,7 +2200,8 @@ const S: Record<string, React.CSSProperties> = {
   divider: { width: 1, height: 24, background: "#e5e7eb" },
   tbtn: { height: 34, padding: "0 12px", border: "1px solid #e5e7eb", background: "#ffffff", color: "#374151", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 },
   body: { flex: 1, display: "flex", minHeight: 0 },
-  panel: { width: 288, flex: "0 0 auto", background: "#ffffff", borderRight: "1px solid #e5e7eb", display: "flex", flexDirection: "column", minHeight: 0 },
+  // overflowY：範本庫、背景庫都拉很高時，整欄可以捲，不會把外框撐高
+  panel: { width: 288, flex: "0 0 auto", background: "#ffffff", borderRight: "1px solid #e5e7eb", display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" },
   panelHead: { height: 44, display: "flex", alignItems: "center", padding: "0 14px", borderBottom: "1px solid #e5e7eb", fontSize: 12, letterSpacing: ".06em", textTransform: "uppercase", color: "#9ca3af", fontWeight: 700 },
   row: { display: "flex", alignItems: "center", gap: 9, padding: "8px 9px", borderRadius: 12, background: "#f9fafb", border: "1px solid transparent", cursor: "pointer" },
   rowSel: { border: "1px solid #7c3aed", background: "#f5f3ff" },

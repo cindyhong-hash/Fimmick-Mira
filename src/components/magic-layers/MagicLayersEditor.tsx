@@ -1,5 +1,5 @@
 "use client";
-import { drawEditableShape, drawIcon, EDITABLE_ICON_NAMES } from "@/lib/magic-layers/editable-shape.ts";
+import { clipToShape, drawEditableShape, drawIcon, EDITABLE_ICON_NAMES, isFillableShape } from "@/lib/magic-layers/editable-shape.ts";
 /* ============================================================
    Magic Layers — React editor
    Canvas layer editor: select / move / scale / rotate / z-order / show / lock /
@@ -38,6 +38,8 @@ type EL = {
   visible: boolean; locked: boolean; opacity: number;
   embeddedText: { text: string }[]; thumb: string | null;
   groupId?: string | null;
+  /** 剪裁遮色片：只顯示在這個形狀圖層的輪廓裡（形狀圖層的 id）。 */
+  clipTo?: string | null;
 };
 
 /**
@@ -211,6 +213,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           locked: (l.meta?.locked as boolean | undefined) ?? false,
           opacity: (l.meta?.opacity as number | undefined) ?? 1,
           groupId: (l.meta?.groupId as string | undefined) ?? null,
+          clipTo: (l.meta?.clipTo as string | undefined) ?? null,
           embeddedText: l.embeddedText.map((t) => ({ text: t.text })), thumb: null,
         };
         if (isText && !st && !canvas) el.color = sampleColor(sctx, l.x, l.y, l.width, l.height);
@@ -281,6 +284,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     for (const l of layersRef.current) {
       if (!l.visible) continue;
       ctx.save();
+      applyClip(ctx, l, layersRef.current);
       ctx.translate(l.cx, l.cy); ctx.rotate(l.rotation); ctx.globalAlpha = l.opacity;
       if (l.canvas) {
         // real original pixels (objects, cropped text, background)
@@ -390,6 +394,10 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       const l = ls[i]; if (!l.visible || l.locked) continue;
       const lp = toLocal(l, dx, dy);
       if (Math.abs(lp.x) > l.w / 2 || Math.abs(lp.y) > l.h / 2) continue;   // outside bbox
+      if (l.clipTo) {
+        const frame = ls.find((x) => x.id === l.clipTo);
+        if (frame) { const fp = toLocal(frame, dx, dy); if (Math.abs(fp.x) > frame.w / 2 || Math.abs(fp.y) > frame.h / 2) continue; }
+      }
       // pixel-perfect: image layers only hit where the cut-out is opaque
       if (l.canvas && !l.isText) {
         const u = (lp.x + l.w / 2) / l.w * l.canvas.width;
@@ -438,7 +446,10 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         if (l) {
           if (e.shiftKey) { toggleSelection(l.id); render(); return; }
           if (!selectedIdsRef.current.includes(l.id)) selectLayerOrGroup(l.id);
-          const moving = layersRef.current.filter((item) => selectedIdsRef.current.includes(item.id) && !item.locked).map((item) => ({ l: item, ocx: item.cx, ocy: item.cy }));
+          const picked = layersRef.current.filter((item) => selectedIdsRef.current.includes(item.id) && !item.locked);
+          const pickedIds = new Set(picked.map((item) => item.id));
+          const riders = layersRef.current.filter((item) => item.clipTo && pickedIds.has(item.clipTo) && !pickedIds.has(item.id) && !item.locked);
+          const moving = [...picked, ...riders].map((item) => ({ l: item, ocx: item.cx, ocy: item.cy }));
           drag.current = { mode: "move", l, moving, sx: d.x, sy: d.y }; render(); return;
         }
       }
@@ -588,7 +599,37 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
 
   /* ---------- layer ops ---------- */
   const idx = (id: string) => layersRef.current.findIndex((l) => l.id === id);
-  const del = (id: string) => { const i = idx(id); if (i < 0) return; layersRef.current.splice(i, 1); if (selectedIdsRef.current.includes(id)) { const ids = selectedIdsRef.current.filter((x) => x !== id); applySelection(ids, ids[0] ?? null); } markDirty(); refresh(); render(); };
+  /** 讓圖剛好蓋滿形狀（等比放大到兩邊都蓋住，置中），跟 Canva 把圖拖進相框一樣。 */
+  const fitIntoFrame = (imgId: string, frameId: string) => {
+    const img = layersRef.current.find((l) => l.id === imgId), frame = layersRef.current.find((l) => l.id === frameId);
+    if (!img || !frame) return;
+    const k = Math.max(frame.w / img.w, frame.h / img.h);
+    img.w *= k; img.h *= k; img.cx = frame.cx; img.cy = frame.cy;
+    img.thumb = makeThumb(img); markDirty(); refresh(); render();
+  };
+  /** 剪裁遮色片：圖只顯示在形狀裡。圖要疊在形狀上面才看得到，所以順便把它移到形狀正上方。 */
+  const putIntoFrame = (imgId: string, frameId: string) => {
+    const a = layersRef.current, img = a.find((l) => l.id === imgId), frame = a.find((l) => l.id === frameId);
+    if (!img || !frame) return;
+    img.clipTo = frame.id;
+    if (a.indexOf(img) < a.indexOf(frame)) { a.splice(a.indexOf(img), 1); a.splice(a.indexOf(frame) + 1, 0, img); }
+    fitIntoFrame(imgId, frameId);
+  };
+  const takeOutOfFrame = useCallback((id: string) => {
+    const img = layersRef.current.find((l) => l.id === id); if (!img) return;
+    img.clipTo = null; markDirty(); refresh(); render();
+  }, [markDirty, refresh, render]);
+  /** 填色切換純色／漸層：切到漸層時拿目前的顏色當起點，切回純色時拿起點當顏色，不會突然變色。 */
+  const setFillMode = useCallback((mode: "solid" | "gradient") => {
+    const l = layersRef.current.find((x) => x.id === selectedIdsRef.current[0]); const sh = l?.shape; if (!l || !sh) return;
+    // 終點預設用起點的淡色版：用固定顏色的話，剛好跟原本同色時一切換看起來完全沒變
+    if (mode === "gradient" && !sh.gradient) { const from = hexColor(sh.fill === "none" ? "#7c3aed" : toHex(sh.fill)); sh.gradient = { axis: "vertical", from, to: lighten(from, 0.7) }; }
+    else if (mode === "solid" && sh.gradient) { sh.fill = hexColor(sh.gradient.from); sh.gradient = undefined; }
+    else return;
+    l.thumb = makeThumb(l); markDirty(); render(); refresh();
+  }, [markDirty, render, refresh]);
+  const del = (id: string) => { const i = idx(id); if (i < 0) return; layersRef.current.splice(i, 1);
+    releaseClips(layersRef.current, id); if (selectedIdsRef.current.includes(id)) { const ids = selectedIdsRef.current.filter((x) => x !== id); applySelection(ids, ids[0] ?? null); } markDirty(); refresh(); render(); };
   const reorderLayer = (sourceId: string, targetId: string) => {
     if (sourceId === targetId) return;
     const a = layersRef.current, from = a.findIndex((l) => l.id === sourceId), target = a.findIndex((l) => l.id === targetId);
@@ -786,6 +827,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     for (const l of layersRef.current) {
       if (!l.visible || !keep(l)) continue;
       ctx.save();
+      applyClip(ctx, l, layersRef.current);
       ctx.translate(l.cx, l.cy); ctx.rotate(l.rotation); ctx.globalAlpha = l.opacity;
       if (l.canvas) { ctx.imageSmoothingQuality = "high"; ctx.drawImage(l.canvas, -l.w / 2, -l.h / 2, l.w, l.h); }
       else if (l.isText) {
@@ -982,6 +1024,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     id: l.id, name: l.name, type: l.type, zIndex: i,
     x: l.cx - l.w / 2, y: l.cy - l.h / 2, w: l.w, h: l.h, rotation: l.rotation,
     visible: l.visible, opacity: l.opacity, locked: l.locked, groupId: l.groupId ?? null,
+    ...(l.clipTo ? { clipTo: l.clipTo } : {}),
     ...(l.isText
       ? { isText: true, text: l.text, color: l.color, fontSize: l.fontSize * (l.w / (l.naturalW || l.w)), fontFamily: l.fontFamily, fontWeight: l.fontWeight, align: l.align, ...(l.fx ? { fx: l.fx } : {}), ...(l.textLayout ? { textLayout: { ...l.textLayout, letterSpacing: l.textLayout.letterSpacing * (l.w / (l.naturalW || l.w)) } } : {}),
           // 分段樣式的字級跟著圖層縮放一起換算，否則存檔重開會跑掉
@@ -1035,7 +1078,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       src: sl.image ?? null,
       cx: sl.x + sl.w / 2, cy: sl.y + sl.h / 2, w: boxW, h: boxH,
       rotation: sl.rotation ?? 0, visible: sl.visible !== false, locked: !!sl.locked,
-      opacity: sl.opacity ?? 1, embeddedText: [], thumb: null, groupId: sl.groupId ?? null,
+      opacity: sl.opacity ?? 1, embeddedText: [], thumb: null, groupId: sl.groupId ?? null, clipTo: sl.clipTo ?? null,
     };
     el.thumb = makeThumb(el);
     return el;
@@ -1049,6 +1092,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       if (!r.ok) throw new Error(d.error ?? "讀取範本失敗");
       const tpl = d.template as { docW: number; docH: number; layers: SavedLayer[] };
       const els = await Promise.all(tpl.layers.map(elFromSavedLayer));
+      // 套範本時每層都換了新 id（同一個範本可以套多次），遮色片指向的形狀 id 也要跟著換
+      const idMap = new Map(tpl.layers.map((sl, i) => [sl.id, els[i].id]));
+      for (const e of els) if (e.clipTo) e.clipTo = idMap.get(e.clipTo) ?? null;
       layersRef.current = els;
       setDoc({ w: tpl.docW, h: tpl.docH });
       applySelection([]); markDirty(); refresh(); render();
@@ -1173,7 +1219,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           const g = c.getContext("2d")!; g.fillStyle = "#fff"; g.fillRect(0, 0, doc.w, doc.h);
           for (const l of layersRef.current) {
             if (!l.visible || l.id === target.id) continue;
-            g.save(); g.translate(l.cx, l.cy); g.rotate(l.rotation); g.globalAlpha = l.opacity;
+            g.save(); applyClip(g, l, layersRef.current); g.translate(l.cx, l.cy); g.rotate(l.rotation); g.globalAlpha = l.opacity;
             if (l.canvas) { g.imageSmoothingQuality = "high"; g.drawImage(l.canvas, -l.w / 2, -l.h / 2, l.w, l.h); }
             else if (l.isText) drawTextEl(g, l); else if (l.shape) drawEditableShape(g, l.w, l.h, l.shape);
             g.restore();
@@ -1628,11 +1674,6 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                   </>
                 ))}
                 {selEl.textLayout && selEl.fx?.warp && selEl.fx.warp !== "none" && <p style={{padding:12,fontSize:12}}>變形文字以單行顯示；取消變形即可恢復多行排版。</p>}
-                {selEl.shape && ["rect","ellipse"].includes(selEl.shape.kind) && <div style={{padding:12}}>
-                  <label style={S.rlabel}>漸層底板 <input type="checkbox" checked={Boolean(selEl.shape.gradient)} onChange={e=>updateShape({gradient:e.target.checked?{axis:"vertical",from:"#ffffff",to:"#ffffff00"}:undefined})}/></label>
-                  {selEl.shape.gradient && <><select aria-label="漸層方向" value={selEl.shape.gradient.axis} onChange={e=>updateShape({gradient:{...selEl.shape!.gradient!,axis:e.target.value as "horizontal"|"vertical"}})}><option value="vertical">垂直</option><option value="horizontal">水平</option></select><input aria-label="漸層顏色" type="color" value={selEl.shape.gradient.from.slice(0,7)} onChange={e=>updateShape({gradient:{...selEl.shape!.gradient!,from:e.target.value,to:e.target.value+"00"}})}/></>}
-                  {selEl.shape.kind==="ellipse" && <label style={S.rlabel}>邊緣柔和度<input type="range" min={0} max={1} step={0.05} value={selEl.shape.softness??0} onChange={e=>updateShape({softness:Number(e.target.value)})}/></label>}
-                </div>}
                 {selEl.shape && (
                   <>
                     <div style={S.rhead}>{selEl.shape.kind === "icon" ? "圖標設定" : selEl.shape.kind === "line" ? "線條設定" : "形狀設定"}</div>
@@ -1647,10 +1688,29 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                         <option value="star">星形</option>
                       </select>
                       <label style={S.rlabel}>填色</label>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <input type="color" value={toHex(selEl.shape.fill === "none" ? "#7c3aed" : selEl.shape.fill)} onChange={(e) => updateShape({ fill: e.target.value })} style={{ width: 40, height: 34, border: "1px solid #e5e7eb", borderRadius: 8, padding: 0, cursor: "pointer" }} />
-                        <button style={{ ...S.rbtn, flex: 1 }} onClick={() => updateShape({ fill: "none" })}>無填色</button>
+                      <div style={{ display: "flex", gap: 4, padding: 3, background: "#f3f4f6", borderRadius: 10, marginBottom: 8 }}>
+                        {(["solid", "gradient"] as const).map((mode) => {
+                          const on = mode === "gradient" ? !!selEl.shape!.gradient : !selEl.shape!.gradient;
+                          return (
+                            <button key={mode} onClick={() => setFillMode(mode)}
+                              style={{ flex: 1, height: 30, border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", background: on ? "#fff" : "transparent", color: on ? "#7c3aed" : "#6b7280", boxShadow: on ? "0 1px 2px rgba(0,0,0,.08)" : "none" }}>
+                              {mode === "solid" ? "純色" : "漸層"}
+                            </button>
+                          );
+                        })}
                       </div>
+                      {!selEl.shape.gradient ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <input type="color" value={hexColor(toHex(selEl.shape.fill === "none" ? "#7c3aed" : selEl.shape.fill))} onChange={(e) => updateShape({ fill: e.target.value })} style={{ width: 40, height: 34, border: "1px solid #e5e7eb", borderRadius: 8, padding: 0, cursor: "pointer" }} />
+                          <button style={{ ...S.rbtn, flex: 1 }} onClick={() => updateShape({ fill: "none" })}>無填色</button>
+                        </div>
+                      ) : (
+                        <GradientEditor g={selEl.shape.gradient} onChange={(gradient) => updateShape({ gradient })} />
+                      )}
+                      {selEl.shape.kind === "ellipse" && !selEl.shape.gradient && (<>
+                        <label style={S.rlabel}>邊緣柔和度 <span style={{ float: "right", color: "#9ca3af" }}>{Math.round((selEl.shape.softness ?? 0) * 100)}%</span></label>
+                        <input type="range" min={0} max={100} value={Math.round((selEl.shape.softness ?? 0) * 100)} onChange={(e) => updateShape({ softness: Number(e.target.value) / 100 })} style={{ width: "100%", accentColor: "#7c3aed" }} />
+                      </>)}
                       {selEl.shape.kind === "rect" && (<>
                         <label style={S.rlabel}>圓角 <span style={{ float: "right", color: "#9ca3af" }}>{Math.round(selEl.shape.radius ?? 0)}</span></label>
                         <input type="range" min={0} max={Math.round(Math.min(selEl.w, selEl.h) / 2)} value={Math.round(selEl.shape.radius ?? 0)} onChange={(e) => updateShape({ radius: Number(e.target.value) })} style={{ width: "100%", accentColor: "#7c3aed" }} />
@@ -1715,6 +1775,14 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                     <div style={{ height: 1, background: "#e5e7eb", margin: "18px 0" }} />
                   </>
                 )}
+                {selEl.canvas && !selEl.isText && !selEl.shape && selEl.type !== "background" && (
+                  <ClipPanel
+                    frameName={selEl.clipTo ? (panel.find((l) => l.id === selEl.clipTo)?.name ?? null) : null}
+                    frames={panel.filter((l) => l.id !== selEl.id && isFillableShape(l.shape)).map((l) => ({ id: l.id, name: l.name, shape: l.shape! }))}
+                    onPut={(frameId) => putIntoFrame(selectedIdsRef.current[0], frameId)}
+                    onFit={() => { const id = selectedIdsRef.current[0], f = layersRef.current.find((l) => l.id === id)?.clipTo; if (f) fitIntoFrame(id, f); }}
+                    onTakeOut={() => takeOutOfFrame(selectedIdsRef.current[0])} />
+                )}
                 <div style={S.rhead}>圖層設定</div>
                 <label style={S.rlabel}>透明度 <span style={{ float: "right", color: "#9ca3af" }}>{Math.round(selEl.opacity * 100)}%</span></label>
                 <input type="range" min={0} max={100} value={Math.round(selEl.opacity * 100)} onChange={(e) => updateText({ opacity: Number(e.target.value) / 100 })} style={{ width: "100%", accentColor: "#7c3aed" }} />
@@ -1751,7 +1819,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                       {confBadge(l.confidence)}
                     </div>
                     <div style={S.sub}>
-                      {TYPE_LABEL[l.type] ?? l.type}{l.instanceId ? ` · ${l.instanceId}` : ""}
+                      {TYPE_LABEL[l.type] ?? l.type}{l.clipTo ? " · 放在形狀裡" : l.instanceId ? ` · ${l.instanceId}` : ""}
                       {l.embeddedText.length ? ` · 內嵌: ${l.embeddedText.map((t) => t.text).join(", ")}` : ""}
                     </div>
                   </div>
@@ -1959,6 +2027,19 @@ function sampleColor(sctx: CanvasRenderingContext2D, x: number, y: number, w: nu
   } catch { return "#222"; }
 }
 const lum = (p: number[]) => 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2];
+/** #rrggbb（去掉透明度）；不是 hex 就給預設紫色，color input 只吃這種格式。 */
+function hexColor(c: string): string { return /^#[0-9a-f]{6}/i.test(c) ? c.slice(0, 7) : "#7c3aed"; }
+/** 往白色混 amount（0–1）。 */
+function lighten(hex: string, amount: number): string {
+  const c = hexColor(hex);
+  return "#" + [1, 3, 5].map((i) => Math.round(parseInt(c.slice(i, i + 2), 16) + (255 - parseInt(c.slice(i, i + 2), 16)) * amount).toString(16).padStart(2, "0")).join("");
+}
+/** #rrggbbaa 的透明度（0–1）；沒帶就是不透明。 */
+function hexAlpha(c: string): number { return /^#[0-9a-f]{8}$/i.test(c) ? parseInt(c.slice(7, 9), 16) / 255 : 1; }
+function withAlpha(c: string, a: number): string {
+  const v = Math.round(Math.max(0, Math.min(1, a)) * 255);
+  return v >= 255 ? hexColor(c) : `${hexColor(c)}${v.toString(16).padStart(2, "0")}`;
+}
 function toHex(c: string): string {
   if (!c) return "#241f47";
   if (c[0] === "#") return c;
@@ -2135,6 +2216,93 @@ function loadToCanvas(url: string): Promise<HTMLCanvasElement | null> {
 }
 
 /* ---------- inline styles (self-contained; no CSS import needed) ---------- */
+/**
+ * 剪裁遮色片：畫這一層之前，先用它指定的形狀輪廓剪裁（在形狀自己的座標下描輪廓，
+ * 再把座標轉回來）。形狀被隱藏也照樣剪——這樣可以做出「只看得到裁好的圖、看不到框」。
+ */
+/** 形狀的漸層填色：起點／終點顏色與透明度、方向，上面一條即時預覽。 */
+function GradientEditor({ g, onChange }: { g: NonNullable<ShapeSpec["gradient"]>; onChange: (g: NonNullable<ShapeSpec["gradient"]>) => void }) {
+  const set = (patch: Partial<typeof g>) => onChange({ ...g, ...patch });
+  const css = g.axis === "radial" ? `radial-gradient(circle, ${g.from}, ${g.to})`
+    : `linear-gradient(${g.axis === "horizontal" ? "90deg" : g.axis === "diagonal" ? "135deg" : "180deg"}, ${g.from}, ${g.to})`;
+  const stop = (key: "from" | "to", label: string) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+      <span style={{ width: 28, fontSize: 12, color: "#6b7280" }}>{label}</span>
+      <input type="color" aria-label={`${label}顏色`} value={hexColor(g[key])} onChange={(e) => set({ [key]: withAlpha(e.target.value, hexAlpha(g[key])) })}
+        style={{ width: 36, height: 30, border: "1px solid #e5e7eb", borderRadius: 8, padding: 0, cursor: "pointer" }} />
+      <input type="range" aria-label={`${label}透明度`} min={0} max={100} value={Math.round(hexAlpha(g[key]) * 100)} onChange={(e) => set({ [key]: withAlpha(g[key], Number(e.target.value) / 100) })}
+        style={{ flex: 1, accentColor: "#7c3aed" }} />
+      <span style={{ width: 34, textAlign: "right", fontSize: 11, color: "#9ca3af", fontVariantNumeric: "tabular-nums" }}>{Math.round(hexAlpha(g[key]) * 100)}%</span>
+    </div>
+  );
+  return (<>
+    {/* 棋盤格底：看得出透明的部分 */}
+    <div aria-hidden style={{ height: 22, borderRadius: 6, marginBottom: 8, border: "1px solid #e5e7eb", background: `${css}, repeating-conic-gradient(#f3f4f6 0 25%, #fff 0 50%) 0 0 / 10px 10px` }} />
+    {stop("from", "起點")}
+    {stop("to", "終點")}
+    <div style={{ display: "flex", gap: 4, marginTop: 2 }}>
+      {([["vertical", "上→下"], ["horizontal", "左→右"], ["diagonal", "斜角"], ["radial", "放射"]] as const).map(([axis, label]) => (
+        <button key={axis} onClick={() => set({ axis })}
+          style={{ ...S.rbtn, flex: 1, padding: 0, height: 30, fontSize: 12, ...(g.axis === axis ? { border: "1px solid #7c3aed", color: "#7c3aed", background: "#f5f3ff" } : {}) }}>{label}</button>
+      ))}
+    </div>
+    <button onClick={() => set({ from: g.to, to: g.from })} style={{ ...S.rbtn, width: "100%", marginTop: 6, height: 30, fontSize: 12 }}>⇅ 對調起點與終點</button>
+  </>);
+}
+
+/** 右側面板「放進形狀（剪裁遮色片）」：選到圖片時出現。 */
+function ClipPanel({ frameName, frames, onPut, onFit, onTakeOut }: {
+  frameName: string | null;
+  frames: { id: string; name: string; shape: ShapeSpec }[];
+  onPut: (frameId: string) => void; onFit: () => void; onTakeOut: () => void;
+}) {
+  const swatch = (sh: ShapeSpec): React.CSSProperties => ({
+    width: 18, height: 18, flex: "0 0 auto", border: "1px solid #d1d5db",
+    background: sh.gradient ? `linear-gradient(180deg, ${sh.gradient.from}, ${sh.gradient.to})` : sh.fill === "none" ? "#fff" : sh.fill,
+    borderRadius: sh.kind === "ellipse" ? "50%" : sh.kind === "rect" ? Math.min(6, (sh.radius ?? 0) / 4) : 3,
+  });
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <div style={S.rhead}>放進形狀（剪裁遮色片）</div>
+      {frameName !== null ? (<>
+        <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.6, marginBottom: 8 }}>
+          已放進「{frameName}」。拖這張圖可以調整在框裡的位置；拖形狀會連圖一起移動。
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button onClick={onFit} style={{ ...S.rbtn, flex: 1 }}>填滿形狀</button>
+          <button onClick={onTakeOut} style={{ ...S.rbtn, flex: 1 }}>拿出來</button>
+        </div>
+      </>) : frames.length === 0 ? (
+        <div style={{ fontSize: 12, color: "#9ca3af", lineHeight: 1.6 }}>先用左邊「工具 → 形狀」加一個圓形、圓角方形或星形，再回來把圖放進去。</div>
+      ) : (<>
+        <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.6, marginBottom: 8 }}>選一個形狀，圖只會顯示在形狀裡面。</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 180, overflowY: "auto" }}>
+          {frames.map((f) => (
+            <button key={f.id} onClick={() => onPut(f.id)} style={{ ...S.rbtn, display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-start", height: 36 }}>
+              <span aria-hidden style={swatch(f.shape)} />
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>放進「{f.name}」</span>
+            </button>
+          ))}
+        </div>
+      </>)}
+    </div>
+  );
+}
+
+/** 形狀被刪掉時，原本放在裡面的圖解除剪裁（不然存檔會留著指向不存在的形狀）。 */
+function releaseClips(layers: EL[], frameId: string) {
+  for (const l of layers) if (l.clipTo === frameId) l.clipTo = null;
+}
+
+function applyClip(ctx: CanvasRenderingContext2D, l: EL, layers: EL[]) {
+  if (!l.clipTo) return;
+  const frame = layers.find((x) => x.id === l.clipTo);
+  if (!frame || !isFillableShape(frame.shape)) return;
+  ctx.translate(frame.cx, frame.cy); ctx.rotate(frame.rotation);
+  clipToShape(ctx, frame.w, frame.h, frame.shape);
+  ctx.rotate(-frame.rotation); ctx.translate(-frame.cx, -frame.cy);
+}
+
 /** 圖層區高度記在 localStorage 的 key。 */
 const LAYERS_H_KEY = "ml-layers-h";
 

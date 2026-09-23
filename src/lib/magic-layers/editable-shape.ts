@@ -2,54 +2,74 @@ import type { ShapeSpec } from "./saved-layer.ts";
 
 export const EDITABLE_ICON_NAMES = ["star", "heart", "circle", "triangle", "check", "arrow", "plus", "bolt", "water-drop", "spring", "blade", "shield", "sparkle", "leaf", "sun", "clean", "repair", "texture"] as const;
 
-export function drawEditableShape(ctx: CanvasRenderingContext2D, w: number, h: number, sh: ShapeSpec) {
-  const x = -w / 2, y = -h / 2;
-  if (sh.gradient && (sh.kind === "rect" || sh.kind === "ellipse")) {
-    const g = sh.gradient.axis === "horizontal" ? ctx.createLinearGradient(x, 0, -x, 0) : ctx.createLinearGradient(0, y, 0, -y);
-    g.addColorStop(0, sh.gradient.from); g.addColorStop(1, sh.gradient.to);
-    ctx.fillStyle = g;
-    if (sh.kind === "rect") ctx.fillRect(x,y,w,h);
-    else { ctx.beginPath(); ctx.ellipse(0,0,w/2,h/2,0,0,Math.PI*2); ctx.fill(); }
-    return;
+/** 可以填色、可以拿來當遮色片的形狀（線條、圖標只有筆畫，沒有「裡面」）。 */
+export const FILLABLE_SHAPE_KINDS = ["rect", "ellipse", "triangle", "diamond", "polygon", "star"] as const;
+export const isFillableShape = (sh: ShapeSpec | null | undefined): sh is ShapeSpec =>
+  !!sh && (FILLABLE_SHAPE_KINDS as readonly string[]).includes(sh.kind);
+
+/**
+ * 描出形狀的輪廓（以圖層中心為原點）。填色、漸層、剪裁遮色片都用這一條，
+ * 形狀換了、圓角改了，三者才會一致。線條、圖標沒有輪廓，回傳 false。
+ */
+export function traceShapePath(ctx: CanvasRenderingContext2D, w: number, h: number, sh: ShapeSpec): boolean {
+  const x = -w / 2, y = -h / 2, rx = w / 2, ry = h / 2;
+  const poly = (n: number, rot: number) => { for (let i = 0; i < n; i++) { const a = rot + i * (2 * Math.PI / n); const px = rx * Math.cos(a), py = ry * Math.sin(a); if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py); } ctx.closePath(); };
+  ctx.beginPath();
+  switch (sh.kind) {
+    case "rect": {
+      const r = Math.min(sh.radius ?? 0, w / 2, h / 2);
+      if (r > 0 && typeof ctx.roundRect === "function") ctx.roundRect(x, y, w, h, r); else ctx.rect(x, y, w, h);
+      return true;
+    }
+    case "ellipse": ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2); return true;
+    case "triangle": poly(3, -Math.PI / 2); return true;   // 頂點落在 w×h 外接橢圓上
+    case "diamond": poly(4, -Math.PI / 2); return true;
+    case "star": {
+      const n = Math.max(3, sh.sides ?? 5), inner = 0.42;
+      for (let i = 0; i < n * 2; i++) { const a = -Math.PI / 2 + i * (Math.PI / n); const rr = i % 2 === 0 ? 1 : inner; const px = rx * rr * Math.cos(a), py = ry * rr * Math.sin(a); if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py); }
+      ctx.closePath(); return true;
+    }
+    case "polygon": poly(Math.max(3, sh.sides ?? 6), -Math.PI / 2); return true;   // 預設六邊
+    default: return false;
   }
-  if (sh.kind === "ellipse" && sh.softness) {
+}
+
+/** 漸層的 canvas 填色（以圖層中心為原點）。 */
+export function shapeGradientFill(ctx: CanvasRenderingContext2D, w: number, h: number, g: NonNullable<ShapeSpec["gradient"]>): CanvasGradient {
+  const x = w / 2, y = h / 2;
+  const grad = g.axis === "horizontal" ? ctx.createLinearGradient(-x, 0, x, 0)
+    : g.axis === "diagonal" ? ctx.createLinearGradient(-x, -y, x, y)
+    : g.axis === "radial" ? ctx.createRadialGradient(0, 0, 0, 0, 0, Math.hypot(x, y))
+    : ctx.createLinearGradient(0, -y, 0, y);
+  grad.addColorStop(0, g.from); grad.addColorStop(1, g.to);
+  return grad;
+}
+
+/** 以形狀輪廓剪裁接下來畫的東西（剪裁遮色片）。形狀沒有輪廓時不剪、回傳 false。 */
+export function clipToShape(ctx: CanvasRenderingContext2D, w: number, h: number, sh: ShapeSpec): boolean {
+  if (!traceShapePath(ctx, w, h, sh)) return false;
+  ctx.clip();
+  return true;
+}
+
+export function drawEditableShape(ctx: CanvasRenderingContext2D, w: number, h: number, sh: ShapeSpec) {
+  if (sh.kind === "ellipse" && sh.softness && !sh.gradient) {
     ctx.save(); ctx.scale(w/2,h/2);
     const g = ctx.createRadialGradient(0,0,0,0,0,1);
     g.addColorStop(0,sh.fill); g.addColorStop(Math.max(0.05,1-sh.softness),sh.fill); g.addColorStop(1,"transparent");
     ctx.fillStyle=g; ctx.beginPath(); ctx.arc(0,0,1,0,Math.PI*2); ctx.fill(); ctx.restore(); return;
   }
-  const doFill = sh.fill && sh.fill !== "none";
+  const doFill = !!sh.gradient || (sh.fill && sh.fill !== "none");
   const doStroke = sh.stroke && sh.stroke !== "none" && sh.strokeWidth > 0;
-  if (sh.kind === "rect") {
-    ctx.beginPath();
-    const r = Math.min(sh.radius ?? 0, w / 2, h / 2);
-    if (r > 0 && typeof ctx.roundRect === "function") ctx.roundRect(x, y, w, h, r); else ctx.rect(x, y, w, h);
-    if (doFill) { ctx.fillStyle = sh.fill; ctx.fill(); }
-    if (doStroke) { ctx.lineWidth = sh.strokeWidth; ctx.strokeStyle = sh.stroke; ctx.stroke(); }
-  } else if (sh.kind === "ellipse") {
-    ctx.beginPath(); ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
-    if (doFill) { ctx.fillStyle = sh.fill; ctx.fill(); }
-    if (doStroke) { ctx.lineWidth = sh.strokeWidth; ctx.strokeStyle = sh.stroke; ctx.stroke(); }
-  } else if (sh.kind === "line") {
+  if (sh.kind === "line") {
     ctx.beginPath(); ctx.moveTo(-w / 2, 0); ctx.lineTo(w / 2, 0);
     ctx.lineWidth = Math.max(1, sh.strokeWidth); ctx.strokeStyle = sh.stroke || "#111"; ctx.lineCap = "round"; ctx.stroke();
-  } else if (sh.kind === "icon") {
-    drawIcon(ctx, Math.min(w, h), sh.icon || "star", sh.fill || "#111");
-  } else {
-    // 多邊形類：triangle/diamond/polygon/star — 頂點落在 w×h 外接橢圓上
-    const rx = w / 2, ry = h / 2;
-    const poly = (n: number, rot: number) => { ctx.beginPath(); for (let i = 0; i < n; i++) { const a = rot + i * (2 * Math.PI / n); const px = rx * Math.cos(a), py = ry * Math.sin(a); if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py); } ctx.closePath(); };
-    if (sh.kind === "triangle") poly(3, -Math.PI / 2);
-    else if (sh.kind === "diamond") poly(4, -Math.PI / 2);
-    else if (sh.kind === "star") {
-      const n = Math.max(3, sh.sides ?? 5), inner = 0.42;
-      ctx.beginPath();
-      for (let i = 0; i < n * 2; i++) { const a = -Math.PI / 2 + i * (Math.PI / n); const rr = i % 2 === 0 ? 1 : inner; const px = rx * rr * Math.cos(a), py = ry * rr * Math.sin(a); if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py); }
-      ctx.closePath();
-    } else poly(Math.max(3, sh.sides ?? 6), -Math.PI / 2);   // polygon（預設六邊）
-    if (doFill) { ctx.fillStyle = sh.fill; ctx.fill(); }
-    if (doStroke) { ctx.lineWidth = sh.strokeWidth; ctx.strokeStyle = sh.stroke; ctx.lineJoin = "round"; ctx.stroke(); }
+    return;
   }
+  if (sh.kind === "icon") { drawIcon(ctx, Math.min(w, h), sh.icon || "star", sh.fill || "#111"); return; }
+  if (!traceShapePath(ctx, w, h, sh)) return;
+  if (doFill) { ctx.fillStyle = sh.gradient ? shapeGradientFill(ctx, w, h, sh.gradient) : sh.fill; ctx.fill(); }
+  if (doStroke) { ctx.lineWidth = sh.strokeWidth; ctx.strokeStyle = sh.stroke; ctx.lineJoin = "round"; ctx.stroke(); }
 }
 
 /** Draw a text layer (with optional 文字特效). ctx already translated to layer centre + rotated.
@@ -87,6 +107,6 @@ export function normalizeShape(value: unknown): ShapeSpec | null {
   const v = value as ShapeSpec;
   if (!["rect","ellipse","line","icon","triangle","polygon","star","diamond"].includes(v.kind) || typeof v.fill !== "string" || typeof v.stroke !== "string" || !Number.isFinite(v.strokeWidth) || v.strokeWidth < 0) return null;
   if (v.softness !== undefined && (!Number.isFinite(v.softness) || v.softness < 0 || v.softness > 1)) return null;
-  if (v.gradient && (!["horizontal","vertical"].includes(v.gradient.axis) || !/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(v.gradient.from) || !/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(v.gradient.to))) return null;
+  if (v.gradient && (!["horizontal","vertical","diagonal","radial"].includes(v.gradient.axis) || !/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(v.gradient.from) || !/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(v.gradient.to))) return null;
   return { ...v, ...(v.gradient ? { gradient: { ...v.gradient } } : {}) };
 }

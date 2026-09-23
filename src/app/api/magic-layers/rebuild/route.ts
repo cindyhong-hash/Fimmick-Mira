@@ -5,10 +5,12 @@
    Returns: RebuildResult（見 lib/magic-layers/reference-rebuild/types.ts）| { error }
 
    每次會打視覺模型一次、去背一次、LaMa 一到兩次（約 NT$1–2、30–60 秒），
-   所以掛在付費閘後面。文字的字級與位置由瀏覽器用實際字體算（fit-text.ts）。
+   所以掛在付費閘後面：有設網站密碼要登入；沒設密碼就用每日上限（paid-quota.ts）。
+   文字的字級與位置由瀏覽器用實際字體算（fit-text.ts）。
    ============================================================ */
 import { NextResponse } from "next/server";
 import { protectPaidRoute } from "@/lib/site-gate";
+import { dailyQuota } from "@/lib/paid-quota";
 import { rebuildReference } from "@/lib/magic-layers/reference-rebuild/rebuild.ts";
 import { rebuildServices } from "@/lib/magic-layers/reference-rebuild/services.ts";
 
@@ -38,4 +40,4 @@ export const POST = protectPaidRoute(async (request: Request) => {
   } finally {
     clearTimeout(timer);
   }
-});
+}, { quota: dailyQuota("rebuild") });

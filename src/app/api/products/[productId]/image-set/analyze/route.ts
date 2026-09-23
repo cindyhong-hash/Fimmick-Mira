@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db";
 import { protectPaidRoute } from "@/lib/site-gate";
+import { dailyQuota } from "@/lib/paid-quota";
 import {
   analyzeImageSetProduct,
   claimProductPaidOperationLease,
@@ -48,4 +49,4 @@ export const POST = protectPaidRoute(async (
   } finally {
     clearTimeout(timer);
   }
-});
+}, { quota: dailyQuota("image-set-analyze") });

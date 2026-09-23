@@ -59,11 +59,24 @@ export function authorizePaidRequest(
 
 export type PaidRouteExecution = { invocationStartedAt: number };
 
+/**
+ * 每日用量上限的檢查結果。ok 時會先佔掉一次額度；release 用來把這次還回去
+ * （請求本身有問題、根本沒花到錢時）。
+ */
+export type PaidQuotaResult =
+  | { ok: true; release: () => Promise<void> }
+  | { ok: false; error: string };
+
 export function protectPaidRoute<Context>(
   handler: (request: Request, context: Context, execution: PaidRouteExecution) => Promise<Response>,
   dependencies: {
     authorizationEnvironment?: { nodeEnv?: string; sitePassword?: string };
     now?: () => number;
+    /**
+     * 正式站沒設網站密碼時的替代把關：每日用量上限。
+     * 沒給就維持原本的行為（直接拒絕），所以新加的付費端點預設是安全的。
+     */
+    quota?: () => Promise<PaidQuotaResult>;
   } = {},
 ): (request: Request, context: Context) => Promise<Response> {
   return async (request, context) => {
@@ -71,9 +84,21 @@ export function protectPaidRoute<Context>(
     const authorization = dependencies.authorizationEnvironment
       ? authorizePaidRequest(request, dependencies.authorizationEnvironment)
       : authorizePaidRequest(request);
-    if (!authorization.ok) {
+    if (authorization.ok) return handler(request, context, { invocationStartedAt });
+
+    // 有設密碼但沒登入（401）一律擋；只有「正式站沒設密碼」（503）才改用每日上限
+    if (authorization.status !== 503 || !dependencies.quota) {
       return Response.json({ error: authorization.error }, { status: authorization.status });
     }
-    return handler(request, context, { invocationStartedAt });
+    let quota: PaidQuotaResult;
+    try { quota = await dependencies.quota(); }
+    catch { return Response.json({ error: "暫時無法確認今天的使用次數，請稍後再試。" }, { status: 503 }); }
+    if (!quota.ok) return Response.json({ error: quota.error }, { status: 429 });
+
+    const response = await handler(request, context, { invocationStartedAt });
+    // 請求本身有問題（格式錯、找不到資料）時還沒花到錢，把額度還回去；
+    // 伺服器錯誤可能已經打過 AI 服務了，照樣算一次，不然反覆失敗就能繞過上限。
+    if (response.status >= 400 && response.status < 500) await quota.release().catch(() => {});
+    return response;
   };
 }

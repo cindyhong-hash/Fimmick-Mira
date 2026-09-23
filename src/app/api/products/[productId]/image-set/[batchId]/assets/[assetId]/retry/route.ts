@@ -2,6 +2,7 @@ import { after, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db";
 import { protectPaidRoute } from "@/lib/site-gate";
+import { dailyQuota } from "@/lib/paid-quota";
 import { deriveImageSetKitStatus } from "@/lib/products/image-set-kit";
 import {
   createImageSetExecution,
@@ -91,4 +92,4 @@ export const POST = protectPaidRoute(async (
   });
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
   return NextResponse.json({ id: result.id, status: result.status });
-});
+}, { quota: dailyQuota("image-set-retry") });

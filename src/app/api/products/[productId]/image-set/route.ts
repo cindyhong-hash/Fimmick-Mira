@@ -2,6 +2,7 @@ import { after, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db";
 import { protectPaidRoute } from "@/lib/site-gate";
+import { dailyQuota } from "@/lib/paid-quota";
 import { parseBenefitIconStyle } from "@/lib/products/image-set-kit";
 import {
   claimProductPaidOperationLease,
@@ -131,4 +132,4 @@ export const POST = protectPaidRoute(async (
   });
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
   return NextResponse.json(result);
-});
+}, { quota: dailyQuota("image-set") });

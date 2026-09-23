@@ -98,6 +98,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const [, bumpHv] = useState(0);
   const bump = useCallback(() => bumpHv((n) => n + 1), []);
   const [doc, setDoc] = useState(() => ({ w: image.naturalWidth, h: image.naturalHeight }));
+  // 滑鼠事件是在 effect 裡註冊的，讀 state 會拿到舊值；框選要夾在畫布內，需要當下的尺寸
+  const docRef = useRef(doc);
+  useEffect(() => { docRef.current = doc; }, [doc]);
 
   const layersRef = useRef<EL[]>([]);
   const view = useRef({ zoom: 1, panX: 0, panY: 0 });
@@ -141,8 +144,12 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const [genFillResult, setGenFillResult] = useState<string[] | null>(null);
   /** 目前預覽第幾個版本；結果一回來就直接套在畫布上，用 ‹ › 換著看。 */
   const [genFillIndex, setGenFillIndex] = useState(0);
-  /** 預覽期間被蓋住的圖層；按取消要還原回去。 */
-  const hiddenByPreview = useRef<string[]>([]);
+  /**
+   * 這次生成式填色要補的範圍，以及補好的那塊要插在哪一層上面（最上面那張背景；null＝放最上層）。
+   * 之前的做法是把整張畫布壓平去修、再把所有圖層藏起來用結果當新背景——
+   * 用過一次整份設計就變成一張圖，存草稿回來字都不能改了。
+   */
+  const genFillTarget = useRef<{ box: { x: number; y: number; w: number; h: number }; afterId: string | null } | null>(null);
   const [brush, setBrush] = useState(28);   // 筆刷半徑（文件座標 px）
   const toolRef = useRef(tool); toolRef.current = tool;
   const brushRef = useRef(brush); brushRef.current = brush;
@@ -488,9 +495,13 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     const up = () => {
       if (drag.current?.mode === "marquee") {
         const m = marqueeRef.current;
-        const w = m ? Math.abs(m.x1 - m.x0) : 0, h = m ? Math.abs(m.y1 - m.y0) : 0;
+        // 夾在畫布範圍內：框到畫布外面的灰色區域沒有東西可以補，照樣送出去只是白花錢。
+        const { w: dw, h: dh } = docRef.current;
+        const x0 = m ? Math.max(0, Math.min(m.x0, m.x1)) : 0, y0 = m ? Math.max(0, Math.min(m.y0, m.y1)) : 0;
+        const x1 = m ? Math.min(dw, Math.max(m.x0, m.x1)) : 0, y1 = m ? Math.min(dh, Math.max(m.y0, m.y1)) : 0;
+        const w = x1 - x0, h = y1 - y0;
         // 太小的框當成誤點，直接取消——不然會跳出輸入框擋畫面。
-        if (m && w >= 12 && h >= 12) setMarquee({ x: Math.min(m.x0, m.x1), y: Math.min(m.y0, m.y1), w, h });
+        if (m && w >= 12 && h >= 12) { marqueeRef.current = { x0, y0, x1, y1 }; setMarquee({ x: x0, y: y0, w, h }); }
         else { marqueeRef.current = null; setMarquee(null); }
         drag.current = null; render(); return;
       }
@@ -759,13 +770,13 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   /* ---------- save / export (flatten + serialize) ---------- */
   // Flatten the doc to a full-res PNG (deliverable + 素材庫 image). Mirrors render()
   // minus pan/zoom/selection, drawn at document coordinates.
-  const flattenToDataUrl = useCallback(() => {
+  const flattenLayersToDataUrl = useCallback((keep: (l: EL) => boolean) => {
     const c = document.createElement("canvas");
     c.width = doc.w; c.height = doc.h;
     const ctx = c.getContext("2d")!;
     ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, doc.w, doc.h);
     for (const l of layersRef.current) {
-      if (!l.visible) continue;
+      if (!l.visible || !keep(l)) continue;
       ctx.save();
       ctx.translate(l.cx, l.cy); ctx.rotate(l.rotation); ctx.globalAlpha = l.opacity;
       if (l.canvas) { ctx.imageSmoothingQuality = "high"; ctx.drawImage(l.canvas, -l.w / 2, -l.h / 2, l.w, l.h); }
@@ -778,6 +789,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     }
     try { return c.toDataURL("image/png"); } catch { return ""; }
   }, [doc.w, doc.h]);
+  const flattenToDataUrl = useCallback(() => flattenLayersToDataUrl(() => true), [flattenLayersToDataUrl]);
 
   // 擴圖要餵「場景背景」，不能餵含文字與白色留邊的完成稿；否則模型會把白邊當成要延伸的內容。
   const outpaintSourceToDataUrl = useCallback(() => {
@@ -787,6 +799,12 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     const g = c.getContext("2d")!;
     // 背景語意即 full-bleed；擴圖時先還原成滿版場景，文字／產品之後仍由原圖層疊回。
     g.drawImage(bg.canvas, 0, 0, doc.w, doc.h);
+    // 生成式填色補過的那幾塊也是背景的一部分，要一起畫進去，不然擴圖後修過的地方會不見
+    for (const l of layersRef.current) {
+      if (l === bg || l.type !== "background" || !l.visible || !l.canvas) continue;
+      g.save(); g.translate(l.cx, l.cy); g.rotate(l.rotation); g.globalAlpha = l.opacity;
+      g.drawImage(l.canvas, -l.w / 2, -l.h / 2, l.w, l.h); g.restore();
+    }
     return c.toDataURL("image/png");
   }, [doc.w, doc.h, flattenToDataUrl]);
 
@@ -850,19 +868,39 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
    * 把某個版本直接套上畫布預覽。
    *
    * 不用彈窗列縮圖給使用者挑——那樣要瞇著眼睛比對小圖。改成直接蓋在畫布上，
-   * 用 ‹ › 原地切換，看到滿意的再按完成。第一次呼叫時把現有圖層藏起來並記下來，
-   * 按取消才還原得回去。
+   * 用 ‹ › 原地切換，看到滿意的再按完成。
+   *
+   * 只裁出框選的那一塊，當成一個新圖層插在背景正上方；其他圖層一個都不動，
+   * 字、產品、色塊都還能改。邊緣做一點柔化，接縫才不會看出一條線。
+   * 圖存的是裁好的像素（src 留空，存檔時會轉成圖檔），不能存模型回傳的整張圖網址——
+   * 下次打開時整張圖會被擠進這一小塊。
    */
   const previewGenFill = useCallback(async (url: string) => {
-    const canvas = await loadToCanvas(url); if (!canvas) return;
+    const target = genFillTarget.current; if (!target) return;
+    const full = await loadToCanvas(url); if (!full) return;
+    const { box } = target;
+    const sx = full.width / doc.w, sy = full.height / doc.h;
+    const patch = document.createElement("canvas");
+    patch.width = Math.max(1, Math.round(box.w * sx)); patch.height = Math.max(1, Math.round(box.h * sy));
+    const pg = patch.getContext("2d")!;
+    pg.drawImage(full, box.x * sx, box.y * sy, box.w * sx, box.h * sy, 0, 0, patch.width, patch.height);
+    const f = Math.max(2, Math.min(16, Math.round(Math.min(patch.width, patch.height) * 0.06)));
+    pg.globalCompositeOperation = "destination-in";
+    for (const [x1, y1] of [[patch.width, 0], [0, patch.height]] as const) {
+      const g = pg.createLinearGradient(0, 0, x1, y1), len = x1 || y1;
+      g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(f / len, "#000"); g.addColorStop(1 - f / len, "#000"); g.addColorStop(1, "rgba(0,0,0,0)");
+      pg.fillStyle = g; pg.fillRect(0, 0, patch.width, patch.height);
+    }
+    pg.globalCompositeOperation = "source-over";
+
     const existing = layersRef.current.find((l) => l.id === PREVIEW_ID);
     if (existing) {
-      existing.canvas = canvas; existing.src = url; existing.thumb = makeThumb(existing);
+      existing.canvas = patch; existing.naturalW = patch.width; existing.naturalH = patch.height; existing.thumb = makeThumb(existing);
     } else {
-      hiddenByPreview.current = layersRef.current.filter((l) => l.visible).map((l) => l.id);
-      layersRef.current.forEach((l) => { l.visible = false; });
-      const bg: EL = { id: PREVIEW_ID, name: "生成式填色", type: "background", semanticId: "background", instanceId: null, confidence: 1, editable: true, source: "generated", isText: false, text: "", color: "#000", fontSize: 24, fontFamily: FONT, fontWeight: 700, align: "center", shape: null, canvas, naturalW: canvas.width, naturalH: canvas.height, src: url, cx: doc.w / 2, cy: doc.h / 2, w: doc.w, h: doc.h, rotation: 0, visible: true, locked: false, opacity: 1, embeddedText: [], thumb: null };
-      bg.thumb = makeThumb(bg); layersRef.current.unshift(bg);
+      const el: EL = { id: PREVIEW_ID, name: "生成式填色", type: "background", semanticId: "background", instanceId: null, confidence: 1, editable: true, source: "generated", isText: false, text: "", color: "#000", fontSize: 24, fontFamily: FONT, fontWeight: 700, align: "center", shape: null, canvas: patch, naturalW: patch.width, naturalH: patch.height, src: null, cx: box.x + box.w / 2, cy: box.y + box.h / 2, w: box.w, h: box.h, rotation: 0, visible: true, locked: false, opacity: 1, embeddedText: [], thumb: null };
+      el.thumb = makeThumb(el);
+      const at = target.afterId ? layersRef.current.findIndex((l) => l.id === target.afterId) + 1 : layersRef.current.length;
+      layersRef.current.splice(at > 0 ? at : layersRef.current.length, 0, el);
     }
     refresh(); render();
   }, [doc.w, doc.h, refresh, render]);
@@ -871,7 +909,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const commitGenFill = useCallback(() => {
     const l = layersRef.current.find((x) => x.id === PREVIEW_ID);
     if (l) l.id = `genfill_${Date.now()}`;
-    hiddenByPreview.current = [];
+    genFillTarget.current = null;
     setGenFillResult(null); setGenFillIndex(0); setMarquee(null); marqueeRef.current = null;
     setGenFillPrompt(""); setTool("select");
     if (l) selectOnly(l.id);
@@ -881,9 +919,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   /** 丟掉預覽，畫面回到按生成之前。 */
   const cancelGenFill = useCallback(() => {
     layersRef.current = layersRef.current.filter((l) => l.id !== PREVIEW_ID);
-    const back = new Set(hiddenByPreview.current);
-    layersRef.current.forEach((l) => { if (back.has(l.id)) l.visible = true; });
-    hiddenByPreview.current = [];
+    genFillTarget.current = null;
     setGenFillResult(null); setGenFillIndex(0);
     refresh(); render();
   }, [refresh, render]);
@@ -902,16 +938,21 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       const mg = m.getContext("2d")!;
       mg.fillStyle = "#000"; mg.fillRect(0, 0, doc.w, doc.h);
       mg.fillStyle = "#fff"; mg.fillRect(marquee.x, marquee.y, marquee.w, marquee.h);
+      // 只把背景送去修：字、產品、色塊留在自己的圖層上，不能被烤進補好的那一塊。
+      // 沒有背景層（例如空白畫布直接貼圖）才退回整張壓平，補好的那塊放最上層。
+      const scene = layersRef.current.filter((l) => l.visible && l.type === "background" && l.id !== PREVIEW_ID);
+      genFillTarget.current = { box: { ...marquee }, afterId: scene.length ? scene[scene.length - 1].id : null };
+      const source = scene.length ? flattenLayersToDataUrl((l) => l.type === "background" && l.id !== PREVIEW_ID) : flattenToDataUrl();
       const r = await fetch("/api/magic-layers/magic-fill", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageDataUrl: flattenToDataUrl(), maskDataUrl: m.toDataURL("image/png"), prompt: mode === "fill" ? genFillPrompt.trim() || undefined : undefined, mode, variants: 2 }),
+        body: JSON.stringify({ imageDataUrl: source, maskDataUrl: m.toDataURL("image/png"), prompt: mode === "fill" ? genFillPrompt.trim() || undefined : undefined, mode, variants: 2 }),
       });
       const d = await r.json(); if (!r.ok) throw new Error(d.error ?? "生成失敗");
       setGenFillResult(d.variants); setGenFillIndex(0);
       if (d.variants?.[0]) await previewGenFill(d.variants[0]);
     } catch (e) { alert("生成式填色失敗：" + (e instanceof Error ? e.message : String(e))); }
     finally { setGenFillBusy(false); }
-  }, [marquee, genFillBusy, doc.w, doc.h, flattenToDataUrl, genFillPrompt, previewGenFill]);
+  }, [marquee, genFillBusy, doc.w, doc.h, flattenToDataUrl, flattenLayersToDataUrl, genFillPrompt, previewGenFill]);
 
   const generateOutpaint = useCallback(async () => {
     if (outpaintBusy) return; setOutpaintBusy(true); setOutpaintResult(null);
@@ -1317,7 +1358,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
               </button>
               {tool === "marquee" && (
                 <div style={{ fontSize: 11, color: "#6b7280", padding: "2px 4px 6px" }}>
-                  在圖上拖出一個框。要清掉東西按「移除」；要畫東西就打字再按「生成」。
+                  在圖上拖出一個框。要清掉東西按「移除」；要畫東西就打字再按「生成」。只會改背景，字和產品請直接選取後刪除。
                 </div>
               )}
               <button

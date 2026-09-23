@@ -13,7 +13,7 @@ import { useBrandFonts } from "@/lib/fonts/useBrandFonts";
 import type { SavedLayer, TextFx, TextRun, ShapeKind, ShapeSpec } from "@/lib/magic-layers/saved-layer.ts";
 export type { SavedLayer } from "@/lib/magic-layers/saved-layer.ts";
 /** 多頁設計的一頁（像 Canva 的頁面）：尺寸＋圖層。 */
-export type SavedPage = { docW: number; docH: number; layers: SavedLayer[] };
+export type SavedPage = { docW: number; docH: number; layers: SavedLayer[]; /** 頁面名稱（例如「封面」）；空的就顯示「第 N 頁」。 */ name?: string };
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronUp, ChevronDown, Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowLeft, Plus, Download, Image as ImageIcon, Upload, Type, BadgeCheck, Square, Star, Minus, Pencil, Undo2, Redo2, Eraser, Maximize2, GripVertical, WandSparkles, Save, Layers, LayoutTemplate, Wrench, PenTool } from "lucide-react";
 import type { LayerData, FragmentationReport } from "@/lib/magic-layers/types.ts";
@@ -58,9 +58,11 @@ const TYPE_LABEL: Record<string, string> = { background: "背景", product: "產
 
 /** One serialized layer in a saved 排版 (stored in LibraryImage.paramsJson). */
 
-export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, logos, name, clientId, onRename, onBack, onSave, extraPages }: { image: HTMLImageElement; layers: LayerData[]; fragmentation?: FragmentationReport; backgrounds?: { url: string; label?: string }[]; logos?: string[]; name?: string; clientId?: string | null; onRename?: (name: string) => void; onBack?: () => void; onSave?: (payload: { docW: number; docH: number; layers: SavedLayer[]; imageDataUrl: string; finalize: boolean; pages?: SavedPage[]; pageImages?: string[] }) => Promise<void>;
+export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, logos, name, clientId, onRename, onBack, onSave, extraPages, firstPageName }: { image: HTMLImageElement; layers: LayerData[]; fragmentation?: FragmentationReport; backgrounds?: { url: string; label?: string }[]; logos?: string[]; name?: string; clientId?: string | null; onRename?: (name: string) => void; onBack?: () => void; onSave?: (payload: { docW: number; docH: number; layers: SavedLayer[]; imageDataUrl: string; finalize: boolean; pages?: SavedPage[]; pageImages?: string[] }) => Promise<void>;
   /** 多頁草稿的第 2 頁以後；第 1 頁照舊從 image／layers 進來。 */
-  extraPages?: SavedPage[] }) {
+  extraPages?: SavedPage[];
+  /** 第 1 頁的名稱（第 1 頁的圖層走 layers，名稱另外帶進來）。 */
+  firstPageName?: string }) {
   // 品牌字體：使用者上傳的字體要能在畫布選用。ready 用來在字體載完後重畫一次，
   // 否則已經套用品牌字體的圖層會先以系統字型畫出來。
   const { fonts: brandFonts, ready: brandFontsReady } = useBrandFonts(clientId);
@@ -1275,15 +1277,15 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const pageIdxRef = useRef(0);
   const [pageIdx, setPageIdx] = useState(0);
   /** 縮圖列要顯示的東西（不在 render 裡讀 ref）。 */
-  const [pagesView, setPagesView] = useState<{ id: string; thumb: string | null; w: number; h: number }[]>([]);
+  const [pagesView, setPagesView] = useState<{ id: string; name: string; thumb: string | null; w: number; h: number }[]>([]);
   const [curThumb, setCurThumb] = useState<string | null>(null);
-  const syncPagesView = useCallback(() => setPagesView(pagesRef.current.map((p) => ({ id: p.id, thumb: p.thumb, w: p.w, h: p.h }))), []);
+  const syncPagesView = useCallback(() => setPagesView(pagesRef.current.map((p) => ({ id: p.id, name: p.name, thumb: p.thumb, w: p.w, h: p.h }))), []);
 
   // 第一次掛載：第 1 頁就是目前的畫布；其他頁在背景轉回圖層、算好縮圖
   useEffect(() => {
-    const first: EditorPage = { id: "page-1", w: image.naturalWidth, h: image.naturalHeight, els: null, loading: null, history: [], histIdx: 0, savedIdx: 0, thumb: null };
+    const first: EditorPage = { id: "page-1", name: firstPageName ?? "", w: image.naturalWidth, h: image.naturalHeight, els: null, loading: null, history: [], histIdx: 0, savedIdx: 0, thumb: null };
     const rest: EditorPage[] = (extraPages ?? []).map((pg, i) => {
-      const page: EditorPage = { id: `page-${i + 2}`, w: pg.docW, h: pg.docH, els: null, loading: null, history: [], histIdx: 0, savedIdx: 0, thumb: null };
+      const page: EditorPage = { id: `page-${i + 2}`, name: pg.name ?? "", w: pg.docW, h: pg.docH, els: null, loading: null, history: [], histIdx: 0, savedIdx: 0, thumb: null };
       page.loading = Promise.all(pg.layers.map(elFromSavedLayer)).then((els) => {
         const idMap = new Map(pg.layers.map((sl, k) => [sl.id, els[k].id]));
         for (const e of els) if (e.clipTo) e.clipTo = idMap.get(e.clipTo) ?? null;
@@ -1335,7 +1337,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     stashCurrentPage();
     const src = pagesRef.current[pageIdxRef.current];
     const els = duplicate && src.els ? duplicateEls(src.els) : [];
-    const page: EditorPage = { id: `page-${crypto.randomUUID().slice(0, 8)}`, w: src.w, h: src.h, els, loading: null, history: [], histIdx: 0, savedIdx: 0, thumb: flattenEls(els, src.w, src.h, PAGE_THUMB) };
+    const page: EditorPage = { id: `page-${crypto.randomUUID().slice(0, 8)}`, name: duplicate && src.name ? `${src.name} 複本` : "", w: src.w, h: src.h, els, loading: null, history: [], histIdx: 0, savedIdx: 0, thumb: flattenEls(els, src.w, src.h, PAGE_THUMB) };
     pagesRef.current.splice(pageIdxRef.current + 1, 0, page);
     setPagesChanged(true);
     void activatePage(pageIdxRef.current + 1);
@@ -1348,6 +1350,10 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     else { stashCurrentPage(); pages.splice(i, 1); const next = i < cur ? cur - 1 : cur; pageIdxRef.current = next; setPageIdx(next); syncPagesView(); }
     setPagesChanged(true);
   }, [stashCurrentPage, activatePage, syncPagesView]);
+  const renamePage = useCallback((i: number, nextName: string) => {
+    const p = pagesRef.current[i]; if (!p || p.name === nextName.trim()) return;
+    p.name = nextName.trim().slice(0, 40); setPagesChanged(true); syncPagesView();
+  }, [syncPagesView]);
   const movePage = useCallback((from: number, to: number) => {
     if (from === to) return;
     stashCurrentPage();
@@ -1415,12 +1421,12 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       const pages = pagesRef.current;
       // 還在背景轉換中的頁面先等它轉完
       const pageEls = await Promise.all(pages.map((p) => p.els ?? p.loading ?? Promise.resolve<EL[]>([])));
-      const multi = pages.length > 1;
+      const multi = pages.length > 1 || !!pages[0]?.name;
       // 第 1 頁放在原本的欄位（列表縮圖、舊版讀取都照舊）；多頁時另外帶上所有頁
       const firstEls = multi ? pageEls[0] : layersRef.current;
       const firstW = multi ? pages[0].w : doc.w, firstH = multi ? pages[0].h : doc.h;
       const imageDataUrl = multi ? flattenEls(firstEls, firstW, firstH) : flattenToDataUrl();
-      const pagePayload = multi ? pages.map((p, i) => ({ docW: p.w, docH: p.h, layers: serializeEls(pageEls[i]) })) : undefined;
+      const pagePayload = multi ? pages.map((p, i) => ({ docW: p.w, docH: p.h, layers: serializeEls(pageEls[i]), ...(p.name ? { name: p.name } : {}) })) : undefined;
       const pageImages = download && multi ? pages.map((p, i) => flattenEls(pageEls[i], p.w, p.h)) : undefined;
       await onSave({ docW: firstW, docH: firstH, layers: multi ? pagePayload![0].layers : serializeLayers(), imageDataUrl, finalize: download, pages: pagePayload, pageImages });
       savedIdx.current = histIdx.current;
@@ -1435,7 +1441,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           // 瀏覽器連續下載需要一點間隔，不然只會留最後一張
           setTimeout(() => {
             const a = document.createElement("a");
-            a.download = files.length > 1 ? `${base}-${i + 1}.png` : `${base}.png`;
+            const pageName = pages[i]?.name ? pages[i].name.replace(/[\\/:*?"<>|]/g, "") : String(i + 1);
+            a.download = files.length > 1 ? `${base}-${pageName}.png` : `${base}.png`;
             a.href = href; document.body.appendChild(a); a.click(); a.remove();
           }, i * 350);
         });
@@ -1825,7 +1832,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         )}
         </div>
         <PageStrip pages={pagesView} current={pageIdx} currentThumb={curThumb}
-          onSelect={goToPage} onAdd={() => addPage(false)} onDuplicate={() => addPage(true)} onDelete={deletePage} onMove={movePage} />
+          onSelect={goToPage} onAdd={() => addPage(false)} onDuplicate={() => addPage(true)} onDelete={deletePage} onMove={movePage} onRename={renamePage} />
         </div>
 
         {/* 右側面板常駐。原本是選到圖層才掛載，一選取畫布就從 501px 被擠到 237px，
@@ -2524,7 +2531,7 @@ function serializeEls(els: EL[]): SavedLayer[] {
 }
 
 type EditorPage = {
-  id: string; w: number; h: number;
+  id: string; name: string; w: number; h: number;
   /** null＝還沒轉回圖層（存檔讀回來的頁，在背景轉換中）。 */
   els: EL[] | null; loading: Promise<EL[]> | null;
   history: EL[][]; histIdx: number; savedIdx: number;
@@ -2571,14 +2578,16 @@ function duplicateEls(els: EL[]): EL[] {
  * 畫布下方的頁面列（像 Canva）：點縮圖切換、拖曳排序；滑鼠移上去可以複製、刪除；
  * 最後一格加空白頁。只有一頁時也顯示，讓人知道可以加頁。
  */
-function PageStrip({ pages, current, currentThumb, onSelect, onAdd, onDuplicate, onDelete, onMove }: {
-  pages: { id: string; thumb: string | null; w: number; h: number }[]; current: number; currentThumb: string | null;
+function PageStrip({ pages, current, currentThumb, onSelect, onAdd, onDuplicate, onDelete, onMove, onRename }: {
+  pages: { id: string; name: string; thumb: string | null; w: number; h: number }[]; current: number; currentThumb: string | null;
   onSelect: (i: number) => void; onAdd: () => void; onDuplicate: () => void; onDelete: (i: number) => void; onMove: (from: number, to: number) => void;
+  onRename: (i: number, name: string) => void;
 }) {
   const [drag, setDrag] = useState<number | null>(null);
   const [hover, setHover] = useState<number | null>(null);
+  const [editing, setEditing] = useState<{ i: number; value: string } | null>(null);
   const H = 64;
-  const list = pages.length ? pages : [{ id: "page-1", thumb: null, w: 1, h: 1 }];
+  const list = pages.length ? pages : [{ id: "page-1", name: "", thumb: null, w: 1, h: 1 }];
   const tile = (active: boolean): React.CSSProperties => ({ position: "relative", height: H, flex: "0 0 auto", borderRadius: 8, overflow: "hidden", cursor: "pointer", background: "#fff",
     border: active ? "2px solid #7c3aed" : "1px solid #e5e7eb", boxShadow: active ? "0 0 0 3px #ede9fe" : "none" });
   return (
@@ -2590,7 +2599,7 @@ function PageStrip({ pages, current, currentThumb, onSelect, onAdd, onDuplicate,
             onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
             <div draggable onDragStart={(e) => { setDrag(i); e.dataTransfer.effectAllowed = "move"; }} onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => { e.preventDefault(); if (drag !== null) onMove(drag, i); setDrag(null); }} onDragEnd={() => setDrag(null)}
-              onClick={() => onSelect(i)} title={`第 ${i + 1} 頁（拖曳可以排序）`}
+              onClick={() => onSelect(i)} title={`${p.name || `第 ${i + 1} 頁`}（拖曳可以排序）`}
               style={{ ...tile(i === current), width: Math.round(H * (p.w / p.h || 1)), opacity: drag === i ? 0.4 : 1 }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               {thumb ? <img src={thumb} alt={`第 ${i + 1} 頁`} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} /> : <div style={{ width: "100%", height: "100%", background: "#f3f4f6" }} />}
@@ -2607,7 +2616,18 @@ function PageStrip({ pages, current, currentThumb, onSelect, onAdd, onDuplicate,
                 </div>
               )}
             </div>
-            <span style={{ fontSize: 11, color: i === current ? "#7c3aed" : "#9ca3af", fontWeight: i === current ? 700 : 500 }}>{i + 1}</span>
+            {editing?.i === i ? (
+              <input autoFocus value={editing.value} maxLength={40}
+                onChange={(e) => setEditing({ i, value: e.target.value })}
+                onBlur={() => { onRename(i, editing.value); setEditing(null); }}
+                onKeyDown={(e) => { if (e.key === "Enter") { onRename(i, editing.value); setEditing(null); } if (e.key === "Escape") setEditing(null); e.stopPropagation(); }}
+                style={{ width: 88, height: 20, fontSize: 11, textAlign: "center", border: "1px solid #c4b5fd", borderRadius: 5, outline: "none", padding: "0 4px" }} />
+            ) : (
+              <span onDoubleClick={() => setEditing({ i, value: p.name })} title="雙擊改名"
+                style={{ maxWidth: 96, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, cursor: "text", color: i === current ? "#7c3aed" : "#6b7280", fontWeight: i === current ? 700 : 500 }}>
+                {p.name || `第 ${i + 1} 頁`}
+              </span>
+            )}
           </div>
         );
       })}

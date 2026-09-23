@@ -38,7 +38,8 @@ export function ComposeView({ clientId: clientIdProp }: { clientId?: string }) {
   const [clientId, setClientId] = useState<string | null>(clientIdProp ?? null);
   const [title, setTitle] = useState("");
   /** 多頁草稿的第 2 頁以後（第 1 頁照舊用 layers／img）。 */
-  const [extraPages, setExtraPages] = useState<SavedPage[] | undefined>(undefined);   // 精靈帶進來的標題，存檔時當預設設計名稱
+  const [extraPages, setExtraPages] = useState<SavedPage[] | undefined>(undefined);
+  const [firstPageName, setFirstPageName] = useState<string | undefined>(undefined);   // 精靈帶進來的標題，存檔時當預設設計名稱
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [layers, setLayers] = useState<LayerData[] | null>(null);
   const [bgLibrary, setBgLibrary] = useState<{ url: string; label?: string }[]>([]);
@@ -143,7 +144,10 @@ export function ComposeView({ clientId: clientIdProp }: { clientId?: string }) {
         if (cancelled) return;
         setImg(im);
         setLayers((d.layers as SavedLayer[]).map(savedToLayerData));
-        if (Array.isArray(d.pages) && d.pages.length > 1) setExtraPages((d.pages as SavedPage[]).slice(1));
+        if (Array.isArray(d.pages) && d.pages.length) {
+          setExtraPages((d.pages as SavedPage[]).slice(1));
+          setFirstPageName((d.pages as SavedPage[])[0]?.name);
+        }
           if (d.activityId) setActivityId(d.activityId);
         if (d.name) { setTitle(d.name); setDocName(d.name); }
       } catch { backToBrand(); }
@@ -206,7 +210,7 @@ export function ComposeView({ clientId: clientIdProp }: { clientId?: string }) {
       <div style={S.editorPanel}>
         <MagicLayersEditor image={img} layers={layers} backgrounds={availableBackgrounds} logos={logos}
           name={docName ?? title} clientId={clientId} onRename={setDocName}
-          onBack={() => router.back()} onSave={handleSave} extraPages={extraPages} />
+          onBack={() => router.back()} onSave={handleSave} extraPages={extraPages} firstPageName={firstPageName} />
       </div>
     );
   }

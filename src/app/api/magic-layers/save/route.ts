@@ -31,8 +31,8 @@ export async function POST(request: Request) {
     if (typeof imageDataUrl === "string" && imageDataUrl.startsWith("data:")) {
       imageUrl = await saveBuffer(Buffer.from(imageDataUrl.split(",")[1] ?? "", "base64"), "png", "ml-layout-");
     }
-    // 只有一頁時照舊存 version 1，不讓單頁草稿多帶一份重複的資料
-    const multi = Array.isArray(pages) && pages.length > 1
+    // 只有一頁（而且沒取頁名）時照舊存 version 1，不讓單頁草稿多帶一份重複的資料
+    const multi = Array.isArray(pages) && (pages.length > 1 || (pages.length === 1 && typeof pages[0]?.name === "string" && !!pages[0].name.trim()))
       && pages.every((p: { docW?: unknown; docH?: unknown; layers?: unknown }) => Number(p?.docW) > 0 && Number(p?.docH) > 0 && Array.isArray(p?.layers));
     const textLayerJson = JSON.stringify(multi
       ? { kind: MARKER, version: 2, docW, docH, layers, pages }
@@ -74,7 +74,10 @@ export async function POST(request: Request) {
         const urls = [imageUrl];
         for (const u of extra) urls.push(await saveBuffer(Buffer.from(u.split(",")[1] ?? "", "base64"), "png", "ml-layout-"));
         for (const [i, url] of urls.entries()) {
-          await db.libraryImage.create({ data: { clientId: clientId ?? null, imageUrl: url, subject: urls.length > 1 ? `${theme}（${i + 1}／${urls.length}）` : theme, prompt: "", paramsJson: JSON.stringify({ kind: MARKER, activityId: id, page: i + 1 }), status: "DONE" } });
+          // 頁面有名字就用名字（「夏日防曬－封面」），沒有就標第幾頁
+          const pageName = multi && typeof pages[i]?.name === "string" ? pages[i].name.trim() : "";
+          const subject = pageName ? `${theme}－${pageName}` : urls.length > 1 ? `${theme}（${i + 1}／${urls.length}）` : theme;
+          await db.libraryImage.create({ data: { clientId: clientId ?? null, imageUrl: url, subject, prompt: "", paramsJson: JSON.stringify({ kind: MARKER, activityId: id, page: i + 1 }), status: "DONE" } });
         }
         await db.generatedLayout.update({ where: { id: gl.id }, data: { savedToLibrary: true } });
       }
@@ -115,7 +118,7 @@ export async function GET(request: Request) {
     try { doc = JSON.parse(textLayerJson || "{}"); } catch { /* ignore */ }
     if (doc.kind !== MARKER) return NextResponse.json({ error: "not a magic layout" }, { status: 400 });
     return NextResponse.json({ activityId: outActivityId, name, imageUrl, docW: doc.docW, docH: doc.docH, layers: doc.layers ?? [],
-      pages: Array.isArray(doc.pages) && doc.pages.length > 1 ? doc.pages : undefined });
+      pages: Array.isArray(doc.pages) && doc.pages.length ? doc.pages : undefined });
   } catch (err) {
     console.error("[magic-layers/load] failed:", err);
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });

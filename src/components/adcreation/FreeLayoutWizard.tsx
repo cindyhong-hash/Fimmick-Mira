@@ -6,10 +6,13 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { File as FileIcon, Image as ImageIcon, Sparkles, X, Loader2, RotateCcw, ChevronRight } from "lucide-react";
+import { File as FileIcon, Image as ImageIcon, Sparkles, X, Loader2, RotateCcw, ChevronRight, ChevronLeft, Layers } from "lucide-react";
 import { ML_WIZARD_SEED_KEY } from "@/components/activities/RolePickerModal";
+import { buildRebuildLayers, shrinkForUpload } from "@/lib/magic-layers/reference-rebuild/client";
+import type { RebuildResult } from "@/lib/magic-layers/reference-rebuild/types";
 
-type Step = "method" | "material" | "aiPrompt" | "aiResult" | "canvas";
+// aiChoice：第三張卡「AI 幫我設計」點進來先選做法；reference：照參考圖重做
+type Step = "method" | "material" | "aiChoice" | "reference" | "aiPrompt" | "aiResult" | "canvas";
 type Branch = "material" | "ai" | null;
 
 type GalleryItem = { imageUrl: string; name?: string; subject?: string; prompt?: string; kind?: string };
@@ -35,6 +38,7 @@ export function FreeLayoutWizard({ clientId, onClose }: { clientId: string; onCl
   const [loadingGallery, setLoadingGallery] = useState(true);
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiRefUrl, setAiRefUrl] = useState("");
+  const [designRefUrl, setDesignRefUrl] = useState("");   // 照參考圖重做：使用者上傳的整張設計圖
   const [ratio, setRatio] = useState("1:1");
   const [products, setProducts] = useState<string[]>([]);
   const [title, setTitle] = useState("");
@@ -65,6 +69,11 @@ export function FreeLayoutWizard({ clientId, onClose }: { clientId: string; onCl
     setAiRefUrl(await fileToDataUrl(f)); e.target.value = "";
   }, []);
 
+  const handleUploadDesignRef = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    setDesignRefUrl(await fileToDataUrl(f)); e.target.value = "";
+  }, []);
+
   const handleAddProducts = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const fs = Array.from(e.target.files ?? []);
     const urls = await Promise.all(fs.map(fileToDataUrl));
@@ -90,6 +99,32 @@ export function FreeLayoutWizard({ clientId, onClose }: { clientId: string; onCl
       setBusy(false); setProgress("");
     }
   }, [aiPrompt, aiRefUrl, busy]);
+
+  // 照參考圖重做：伺服器負責看圖、擦字、去背；回來後在這裡用實際字體排字，再交棒給編輯器
+  const handleRebuild = useCallback(async () => {
+    if (!designRefUrl || busy) return;
+    setBusy(true); setProgress("AI 正在拆解版面，約需 30–60 秒…");
+    try {
+      const image = await shrinkForUpload(designRefUrl);
+      const res = await fetch("/api/magic-layers/rebuild", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? res.statusText);
+      setProgress("排版文字中…");
+      const result = data as RebuildResult;
+      const layers = await buildRebuildLayers(result);
+      sessionStorage.setItem(ML_WIZARD_SEED_KEY, JSON.stringify({
+        layers, docW: result.docW, docH: result.docH, clientId, title: "參考圖重做",
+      }));
+      router.push(`/clients/${clientId}/magic-layers/compose?seed=1`);
+      onClose();
+    } catch (err) {
+      alert("重做失敗：" + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setBusy(false); setProgress("");
+    }
+  }, [designRefUrl, busy, clientId, router, onClose]);
 
   const handleCreate = useCallback(async () => {
     if (busy) return;
@@ -150,7 +185,8 @@ export function FreeLayoutWizard({ clientId, onClose }: { clientId: string; onCl
               {[
                 { key: "blank", title: "空白開始", sub: "建立全新空白畫布", badge: "最自由設計", icon: <FileIcon className="h-7 w-7" />, iconCls: "bg-violet-600 text-white", badgeCls: "bg-violet-600 text-white", onClick: () => { router.push(`/clients/${clientId}/magic-layers/compose?blank=1`); onClose(); } },
                 { key: "material", title: "從素材開始", sub: "選一張素材作為底圖", badge: "已有商品圖片", icon: <ImageIcon className="h-7 w-7" />, iconCls: "bg-violet-100 text-violet-500", badgeCls: "bg-gray-100 text-gray-500", onClick: () => { setBranch("material"); setStep("material"); } },
-                { key: "ai", title: "AI 幫我建立底圖", sub: "描述想要的背景圖案", badge: "快速建立場景", icon: <Sparkles className="h-7 w-7" />, iconCls: "bg-violet-100 text-violet-500", badgeCls: "bg-gray-100 text-gray-500", onClick: () => { setBranch("ai"); setStep("aiPrompt"); } },
+                // 兩個 AI 做法（照參考圖重做／描述背景生成）收在同一張卡裡，起始選項維持三個
+                { key: "ai", title: "AI 幫我設計", sub: "照參考圖重做，或描述背景", badge: "AI", icon: <Sparkles className="h-7 w-7" />, iconCls: "bg-violet-100 text-violet-500", badgeCls: "bg-gray-100 text-gray-500", onClick: () => setStep("aiChoice") },
               ].map((c) => (
                 <button
                   key={c.key}
@@ -244,6 +280,102 @@ export function FreeLayoutWizard({ clientId, onClose }: { clientId: string; onCl
                   下一步
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {step === "aiChoice" && (
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-5">
+              <button type="button" onClick={() => setStep("method")} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800">
+                <ChevronLeft className="h-4 w-4" /> 返回
+              </button>
+              <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <h2 className="flex items-center gap-2 text-2xl font-bold text-gray-900">AI 幫我設計 <Sparkles className="h-5 w-5 text-violet-500" /></h2>
+            <p className="mt-1 mb-6 text-sm text-gray-400">選一種做法，完成後一樣會進畫布，每個東西都可以再調整。</p>
+            <div className="grid grid-cols-2 gap-4">
+              {[
+                { key: "reference", title: "照參考圖重做", sub: "上傳一張設計圖，拆成可編輯的圖層", badge: "還原整張設計", icon: <Layers className="h-7 w-7" />, onClick: () => setStep("reference") },
+                { key: "prompt", title: "描述背景生成", sub: "打字描述想要的場景，AI 生成底圖", badge: "快速建立場景", icon: <Sparkles className="h-7 w-7" />, onClick: () => { setBranch("ai"); setStep("aiPrompt"); } },
+              ].map((c) => (
+                <button
+                  key={c.key}
+                  type="button"
+                  onClick={c.onClick}
+                  className="group flex flex-col rounded-2xl border border-gray-200 p-5 text-left transition-all hover:border-violet-400 hover:bg-violet-50/40"
+                >
+                  <div className="mb-4 flex items-start justify-between">
+                    <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-100 text-violet-500">{c.icon}</span>
+                    <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-medium text-gray-500">{c.badge}</span>
+                  </div>
+                  <div className="text-lg font-bold text-gray-900">{c.title}</div>
+                  <div className="mt-1 text-sm text-gray-400">{c.sub}</div>
+                  <div className="mt-4 flex items-center gap-0.5 text-sm font-medium text-gray-400 group-hover:text-violet-600">
+                    點擊選擇 <ChevronRight className="h-4 w-4" />
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {step === "reference" && (
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-5">
+              <button type="button" onClick={() => setStep("aiChoice")} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800">
+                <ChevronLeft className="h-4 w-4" /> 返回
+              </button>
+              <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <h2 className="text-base font-semibold text-gray-900">照參考圖重做</h2>
+            <p className="mt-1 mb-4 text-sm text-gray-400">上傳一張喜歡的設計圖，AI 會把背景、產品、每段文字拆成獨立圖層，你再換成自己的產品和文案。</p>
+            <div className="grid grid-cols-[1fr_220px] gap-5">
+              {designRefUrl ? (
+                <div className="flex flex-col items-center gap-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={designRefUrl} alt="" className="max-h-72 rounded-xl border border-gray-200 object-contain" />
+                  <label className="text-sm text-violet-600 hover:underline cursor-pointer">
+                    更換圖片
+                    <input type="file" accept="image/*" className="hidden" onChange={handleUploadDesignRef} />
+                  </label>
+                </div>
+              ) : (
+                <label className="flex flex-col items-center justify-center gap-2 h-72 rounded-xl border-2 border-dashed border-gray-300 text-gray-400 hover:border-violet-300 hover:text-violet-500 cursor-pointer transition-colors">
+                  <ImageIcon className="h-7 w-7" />
+                  <span className="text-sm">點擊上傳設計圖</span>
+                  <span className="text-xs text-gray-300">JPG／PNG，一張完整的貼文或海報</span>
+                  <input type="file" accept="image/*" className="hidden" onChange={handleUploadDesignRef} />
+                </label>
+              )}
+              <div className="rounded-xl bg-gray-50 p-4 text-[13px] leading-relaxed text-gray-500">
+                <div className="mb-1.5 font-semibold text-gray-700">最容易做得像的圖</div>
+                <ul className="mb-3 list-disc space-y-0.5 pl-4">
+                  <li>背景乾淨（純色、漸層、柔焦）</li>
+                  <li>字沒有壓在複雜的照片上</li>
+                  <li>版面是正的，沒有傾斜</li>
+                </ul>
+                <div className="mb-1.5 font-semibold text-gray-700">會跟原圖不一樣的地方</div>
+                <ul className="list-disc space-y-0.5 pl-4">
+                  <li>字體會換成最接近的</li>
+                  <li>logo、插圖會保留在背景，不能改</li>
+                </ul>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-5 pt-4 border-t border-gray-100">
+              <button type="button" onClick={onClose} className="px-4 py-2 rounded-xl text-sm text-gray-600 hover:bg-gray-100">取消</button>
+              <button
+                type="button"
+                disabled={!designRefUrl || busy}
+                onClick={handleRebuild}
+                className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                開始重做
+              </button>
             </div>
           </div>
         )}

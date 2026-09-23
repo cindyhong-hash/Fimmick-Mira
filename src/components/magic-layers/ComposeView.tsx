@@ -18,7 +18,7 @@
    ============================================================ */
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { MagicLayersEditor, type SavedLayer } from "@/components/magic-layers/MagicLayersEditor.tsx";
+import { MagicLayersEditor, type SavedLayer, type SavedPage } from "@/components/magic-layers/MagicLayersEditor.tsx";
 import { savedToLayerData } from "@/lib/magic-layers/saved-layer.ts";
 import { imageSetSubtypeLabel } from "@/lib/products/image-set-subtype-labels";
 import type { LayerData } from "@/lib/magic-layers/types.ts";
@@ -36,7 +36,9 @@ export function ComposeView({ clientId: clientIdProp }: { clientId?: string }) {
   const router = useRouter();
   // clientId：品牌路由用 prop（會被側邊欄高亮）；獨立頁退回 sessionStorage handoff。
   const [clientId, setClientId] = useState<string | null>(clientIdProp ?? null);
-  const [title, setTitle] = useState("");   // 精靈帶進來的標題，存檔時當預設設計名稱
+  const [title, setTitle] = useState("");
+  /** 多頁草稿的第 2 頁以後（第 1 頁照舊用 layers／img）。 */
+  const [extraPages, setExtraPages] = useState<SavedPage[] | undefined>(undefined);   // 精靈帶進來的標題，存檔時當預設設計名稱
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [layers, setLayers] = useState<LayerData[] | null>(null);
   const [bgLibrary, setBgLibrary] = useState<{ url: string; label?: string }[]>([]);
@@ -141,6 +143,7 @@ export function ComposeView({ clientId: clientIdProp }: { clientId?: string }) {
         if (cancelled) return;
         setImg(im);
         setLayers((d.layers as SavedLayer[]).map(savedToLayerData));
+        if (Array.isArray(d.pages) && d.pages.length > 1) setExtraPages((d.pages as SavedPage[]).slice(1));
           if (d.activityId) setActivityId(d.activityId);
         if (d.name) { setTitle(d.name); setDocName(d.name); }
       } catch { backToBrand(); }
@@ -187,7 +190,7 @@ export function ComposeView({ clientId: clientIdProp }: { clientId?: string }) {
   const availableBackgrounds = [...kitLibrary, ...bgLibrary.filter((item) => !kitLibrary.some(({ url }) => url === item.url))];
 
   // 儲存 / 下載：壓平圖 + 圖層 JSON → 存進素材庫（第一次新增、之後更新同一筆）。
-  const handleSave = useCallback(async (payload: { docW: number; docH: number; layers: SavedLayer[]; imageDataUrl: string; finalize: boolean }) => {
+  const handleSave = useCallback(async (payload: { docW: number; docH: number; layers: SavedLayer[]; imageDataUrl: string; finalize: boolean; pages?: SavedPage[]; pageImages?: string[] }) => {
     const r = await fetch("/api/magic-layers/save", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ clientId, activityId, name: (docName ?? title).trim() || "未命名排版", ...payload }),
@@ -203,7 +206,7 @@ export function ComposeView({ clientId: clientIdProp }: { clientId?: string }) {
       <div style={S.editorPanel}>
         <MagicLayersEditor image={img} layers={layers} backgrounds={availableBackgrounds} logos={logos}
           name={docName ?? title} clientId={clientId} onRename={setDocName}
-          onBack={() => router.back()} onSave={handleSave} />
+          onBack={() => router.back()} onSave={handleSave} extraPages={extraPages} />
       </div>
     );
   }

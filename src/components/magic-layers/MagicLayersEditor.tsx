@@ -12,6 +12,8 @@ import { drawEditableText, readTextLayout, DEFAULT_TEXT_LAYOUT, type TextLayout 
 import { useBrandFonts } from "@/lib/fonts/useBrandFonts";
 import type { SavedLayer, TextFx, TextRun, ShapeKind, ShapeSpec } from "@/lib/magic-layers/saved-layer.ts";
 export type { SavedLayer } from "@/lib/magic-layers/saved-layer.ts";
+/** 多頁設計的一頁（像 Canva 的頁面）：尺寸＋圖層。 */
+export type SavedPage = { docW: number; docH: number; layers: SavedLayer[] };
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronUp, ChevronDown, Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowLeft, Plus, Download, Image as ImageIcon, Upload, Type, BadgeCheck, Square, Star, Minus, Pencil, Undo2, Redo2, Eraser, Maximize2, GripVertical, WandSparkles, Save, Layers, LayoutTemplate, Wrench, PenTool } from "lucide-react";
 import type { LayerData, FragmentationReport } from "@/lib/magic-layers/types.ts";
@@ -56,7 +58,9 @@ const TYPE_LABEL: Record<string, string> = { background: "背景", product: "產
 
 /** One serialized layer in a saved 排版 (stored in LibraryImage.paramsJson). */
 
-export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, logos, name, clientId, onRename, onBack, onSave }: { image: HTMLImageElement; layers: LayerData[]; fragmentation?: FragmentationReport; backgrounds?: { url: string; label?: string }[]; logos?: string[]; name?: string; clientId?: string | null; onRename?: (name: string) => void; onBack?: () => void; onSave?: (payload: { docW: number; docH: number; layers: SavedLayer[]; imageDataUrl: string; finalize: boolean }) => Promise<void> }) {
+export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, logos, name, clientId, onRename, onBack, onSave, extraPages }: { image: HTMLImageElement; layers: LayerData[]; fragmentation?: FragmentationReport; backgrounds?: { url: string; label?: string }[]; logos?: string[]; name?: string; clientId?: string | null; onRename?: (name: string) => void; onBack?: () => void; onSave?: (payload: { docW: number; docH: number; layers: SavedLayer[]; imageDataUrl: string; finalize: boolean; pages?: SavedPage[]; pageImages?: string[] }) => Promise<void>;
+  /** 多頁草稿的第 2 頁以後；第 1 頁照舊從 image／layers 進來。 */
+  extraPages?: SavedPage[] }) {
   // 品牌字體：使用者上傳的字體要能在畫布選用。ready 用來在字體載完後重畫一次，
   // 否則已經套用品牌字體的圖層會先以系統字型畫出來。
   const { fonts: brandFonts, ready: brandFontsReady } = useBrandFonts(clientId);
@@ -107,7 +111,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const history = useRef<EL[][]>([]);
   const histIdx = useRef(0);
   const savedIdx = useRef(0);
-  const [, bumpHv] = useState(0);
+  const [histTick, bumpHv] = useState(0);
+  /** 頁面有增刪、排序，或切走的那頁有沒存的修改 → 算「有未儲存的變更」。 */
+  const [pagesChanged, setPagesChanged] = useState(false);
   const bump = useCallback(() => bumpHv((n) => n + 1), []);
   const [doc, setDoc] = useState(() => ({ w: image.naturalWidth, h: image.naturalHeight }));
   // 滑鼠事件是在 effect 裡註冊的，讀 state 會拿到舊值；框選要夾在畫布內，需要當下的尺寸
@@ -395,7 +401,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   }, [bump, refresh, render]);
   const undo = useCallback(() => { if (histIdx.current > 0) restoreHist(histIdx.current - 1); }, [restoreHist]);
   const redo = useCallback(() => { if (histIdx.current < history.current.length - 1) restoreHist(histIdx.current + 1); }, [restoreHist]);
-  const dirty = histIdx.current !== savedIdx.current;
+  const dirty = histIdx.current !== savedIdx.current || pagesChanged;
   const canUndo = histIdx.current > 0;
   const canRedo = histIdx.current < history.current.length - 1;
 
@@ -1208,20 +1214,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     bg.thumb = makeThumb(bg); layersRef.current.unshift(bg); setDoc({ w: outpaintResult.targetW, h: outpaintResult.targetH }); setShowOutpaint(false); setOutpaintResult(null); selectOnly(bg.id); markDirty(); refresh();
   }, [outpaintResult, outpaintRatio, markDirty, refresh]);
 
-  const serializeLayers = useCallback((): SavedLayer[] => layersRef.current.map((l, i) => ({
-    id: l.id, name: l.name, type: l.type, zIndex: i,
-    x: l.cx - l.w / 2, y: l.cy - l.h / 2, w: l.w, h: l.h, rotation: l.rotation,
-    visible: l.visible, opacity: l.opacity, locked: l.locked, groupId: l.groupId ?? null,
-    ...(l.clipTo ? { clipTo: l.clipTo } : {}),
-    ...(l.skewX ? { skewX: l.skewX } : {}), ...(l.skewY ? { skewY: l.skewY } : {}),
-    ...(l.isText
-      ? { isText: true, text: l.text, color: l.color, fontSize: l.fontSize * (l.w / (l.naturalW || l.w)), fontFamily: l.fontFamily, fontWeight: l.fontWeight, align: l.align, ...(l.fx ? { fx: l.fx } : {}), ...(l.textLayout ? { textLayout: { ...l.textLayout, letterSpacing: l.textLayout.letterSpacing * (l.w / (l.naturalW || l.w)) } } : {}),
-          // 分段樣式的字級跟著圖層縮放一起換算，否則存檔重開會跑掉
-          ...(l.runs?.length ? { runs: l.runs.map((r) => ({ ...r, ...(r.fontSize ? { fontSize: r.fontSize * (l.w / (l.naturalW || l.w)) } : {}) })) } : {}) }
-      : l.shape
-        ? { shape: { ...l.shape } }
-        : { image: l.src ?? (l.canvas ? (safeDataUrl(l.canvas) ?? undefined) : undefined), ...(l.isArt ? { isArt: true, text: l.text, ...(l.artRefImage ? { artRefImage: l.artRefImage } : {}) } : {}) }),
-  })), []);
+  const serializeLayers = useCallback((): SavedLayer[] => serializeEls(layersRef.current), []);
 
   /* ---------- 範本庫（共用，1:1） ---------- */
 
@@ -1273,6 +1266,96 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     el.thumb = makeThumb(el);
     return el;
   }, []);
+
+  /* ---------- 多頁（像 Canva 的頁面） ----------
+     目前這一頁的圖層、尺寸、復原紀錄照舊放在 layersRef／doc／history；
+     切換頁面時把目前這頁收進 pagesRef，再把要去的那頁拿出來。
+     每一頁有自己的復原紀錄：在第 2 頁按復原不會把第 1 頁的東西改回去。 */
+  const pagesRef = useRef<EditorPage[]>([]);
+  const pageIdxRef = useRef(0);
+  const [pageIdx, setPageIdx] = useState(0);
+  /** 縮圖列要顯示的東西（不在 render 裡讀 ref）。 */
+  const [pagesView, setPagesView] = useState<{ id: string; thumb: string | null; w: number; h: number }[]>([]);
+  const [curThumb, setCurThumb] = useState<string | null>(null);
+  const syncPagesView = useCallback(() => setPagesView(pagesRef.current.map((p) => ({ id: p.id, thumb: p.thumb, w: p.w, h: p.h }))), []);
+
+  // 第一次掛載：第 1 頁就是目前的畫布；其他頁在背景轉回圖層、算好縮圖
+  useEffect(() => {
+    const first: EditorPage = { id: "page-1", w: image.naturalWidth, h: image.naturalHeight, els: null, loading: null, history: [], histIdx: 0, savedIdx: 0, thumb: null };
+    const rest: EditorPage[] = (extraPages ?? []).map((pg, i) => {
+      const page: EditorPage = { id: `page-${i + 2}`, w: pg.docW, h: pg.docH, els: null, loading: null, history: [], histIdx: 0, savedIdx: 0, thumb: null };
+      page.loading = Promise.all(pg.layers.map(elFromSavedLayer)).then((els) => {
+        const idMap = new Map(pg.layers.map((sl, k) => [sl.id, els[k].id]));
+        for (const e of els) if (e.clipTo) e.clipTo = idMap.get(e.clipTo) ?? null;
+        page.els = els; page.thumb = flattenEls(els, page.w, page.h, PAGE_THUMB);
+        return els;
+      });
+      return page;
+    });
+    pagesRef.current = [first, ...rest];
+    Promise.all(rest.map((p) => p.loading)).then(syncPagesView);
+    const t = setTimeout(syncPagesView, 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在掛載時建立一次
+  }, []);
+  useEffect(() => { pageIdxRef.current = pageIdx; }, [pageIdx]);
+  // 目前這頁的縮圖：改完停一下再算，不要每動一下就重畫
+  useEffect(() => {
+    const t = setTimeout(() => setCurThumb(flattenEls(layersRef.current, doc.w, doc.h, PAGE_THUMB)), 400);
+    return () => clearTimeout(t);
+  }, [histTick, doc.w, doc.h]);
+
+  /** 把目前這頁（畫布上的）收回 pagesRef。 */
+  const stashCurrentPage = useCallback(() => {
+    const p = pagesRef.current[pageIdxRef.current]; if (!p) return;
+    p.els = layersRef.current; p.w = docRef.current.w; p.h = docRef.current.h;
+    p.history = history.current; p.histIdx = histIdx.current; p.savedIdx = savedIdx.current;
+    p.thumb = flattenEls(p.els, p.w, p.h, PAGE_THUMB);
+    if (p.histIdx !== p.savedIdx) setPagesChanged(true);
+  }, []);
+  /** 把第 i 頁放上畫布（不先收目前這頁，呼叫的人自己決定）。 */
+  const activatePage = useCallback(async (i: number) => {
+    const p = pagesRef.current[i]; if (!p) return;
+    const els = p.els ?? (p.loading ? await p.loading : []);
+    p.els = els;
+    layersRef.current = els;
+    if (p.history.length) { history.current = p.history; histIdx.current = p.histIdx; savedIdx.current = p.savedIdx; }
+    else { history.current = [els.map(cloneEL)]; histIdx.current = 0; savedIdx.current = 0; }
+    pageIdxRef.current = i; setPageIdx(i);
+    applySelection([]); setDoc({ w: p.w, h: p.h }); setCurThumb(p.thumb);
+    syncPagesView(); bump(); refresh(); render();
+    requestAnimationFrame(() => fitRef.current());
+  }, [syncPagesView, bump, refresh, render]);
+  const goToPage = useCallback((i: number) => {
+    if (i === pageIdxRef.current) return;
+    stashCurrentPage(); void activatePage(i);
+  }, [stashCurrentPage, activatePage]);
+  /** 在目前這頁後面加一頁：空白（同尺寸），或把這一頁完整複製一份（做輪播最常用，風格一致）。 */
+  const addPage = useCallback((duplicate: boolean) => {
+    stashCurrentPage();
+    const src = pagesRef.current[pageIdxRef.current];
+    const els = duplicate && src.els ? duplicateEls(src.els) : [];
+    const page: EditorPage = { id: `page-${crypto.randomUUID().slice(0, 8)}`, w: src.w, h: src.h, els, loading: null, history: [], histIdx: 0, savedIdx: 0, thumb: flattenEls(els, src.w, src.h, PAGE_THUMB) };
+    pagesRef.current.splice(pageIdxRef.current + 1, 0, page);
+    setPagesChanged(true);
+    void activatePage(pageIdxRef.current + 1);
+  }, [stashCurrentPage, activatePage]);
+  const deletePage = useCallback((i: number) => {
+    const pages = pagesRef.current;
+    if (pages.length <= 1 || !window.confirm(`刪除第 ${i + 1} 頁？（可以用復原以外的方式找回：只要還沒存檔，重新整理就會回到上次存的樣子）`)) return;
+    const cur = pageIdxRef.current;
+    if (i === cur) { pages.splice(i, 1); void activatePage(Math.min(i, pages.length - 1)); }
+    else { stashCurrentPage(); pages.splice(i, 1); const next = i < cur ? cur - 1 : cur; pageIdxRef.current = next; setPageIdx(next); syncPagesView(); }
+    setPagesChanged(true);
+  }, [stashCurrentPage, activatePage, syncPagesView]);
+  const movePage = useCallback((from: number, to: number) => {
+    if (from === to) return;
+    stashCurrentPage();
+    const pages = pagesRef.current, curId = pages[pageIdxRef.current].id;
+    const [pg] = pages.splice(from, 1); pages.splice(to, 0, pg);
+    const next = pages.findIndex((p) => p.id === curId);
+    pageIdxRef.current = next; setPageIdx(next); setPagesChanged(true); syncPagesView();
+  }, [stashCurrentPage, syncPagesView]);
 
   /** 套用範本：換掉整個畫布內容（可以用復原還原）。 */
   const applyTemplate = useCallback(async (id: string) => {
@@ -1328,18 +1411,38 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     if (!onSave || saving) return;
     setSaving(true);
     try {
-      const imageDataUrl = flattenToDataUrl();
-      await onSave({ docW: doc.w, docH: doc.h, layers: serializeLayers(), imageDataUrl, finalize: download });
-      setSaved(true); savedIdx.current = histIdx.current; bump(); setTimeout(() => setSaved(false), 2000);
-      if (download && imageDataUrl) {
+      stashCurrentPage();
+      const pages = pagesRef.current;
+      // 還在背景轉換中的頁面先等它轉完
+      const pageEls = await Promise.all(pages.map((p) => p.els ?? p.loading ?? Promise.resolve<EL[]>([])));
+      const multi = pages.length > 1;
+      // 第 1 頁放在原本的欄位（列表縮圖、舊版讀取都照舊）；多頁時另外帶上所有頁
+      const firstEls = multi ? pageEls[0] : layersRef.current;
+      const firstW = multi ? pages[0].w : doc.w, firstH = multi ? pages[0].h : doc.h;
+      const imageDataUrl = multi ? flattenEls(firstEls, firstW, firstH) : flattenToDataUrl();
+      const pagePayload = multi ? pages.map((p, i) => ({ docW: p.w, docH: p.h, layers: serializeEls(pageEls[i]) })) : undefined;
+      const pageImages = download && multi ? pages.map((p, i) => flattenEls(pageEls[i], p.w, p.h)) : undefined;
+      await onSave({ docW: firstW, docH: firstH, layers: multi ? pagePayload![0].layers : serializeLayers(), imageDataUrl, finalize: download, pages: pagePayload, pageImages });
+      savedIdx.current = histIdx.current;
+      markPagesSaved(pages, pageIdxRef.current, histIdx.current);
+      setPagesChanged(false);
+      setSaved(true); bump(); setTimeout(() => setSaved(false), 2000);
+      if (download) {
         const nameLayer = layersRef.current.find((l) => l.isText);
-        const a = document.createElement("a");
-        a.download = ((nameLayer?.text || "magic-layout").slice(0, 40)) + ".png";
-        a.href = imageDataUrl; document.body.appendChild(a); a.click(); a.remove();
+        const base = (nameLayer?.text || "magic-layout").slice(0, 40);
+        const files = pageImages ?? (imageDataUrl ? [imageDataUrl] : []);
+        files.forEach((href, i) => {
+          // 瀏覽器連續下載需要一點間隔，不然只會留最後一張
+          setTimeout(() => {
+            const a = document.createElement("a");
+            a.download = files.length > 1 ? `${base}-${i + 1}.png` : `${base}.png`;
+            a.href = href; document.body.appendChild(a); a.click(); a.remove();
+          }, i * 350);
+        });
       }
     } catch (err) { alert("儲存失敗：" + (err instanceof Error ? err.message : String(err))); }
     finally { setSaving(false); }
-  }, [onSave, saving, doc.w, doc.h, flattenToDataUrl, serializeLayers]);
+  }, [onSave, saving, doc.w, doc.h, flattenToDataUrl, serializeLayers, stashCurrentPage]);
 
   // 設計工具慣例：Command+S / Ctrl+S 儲存草稿，不佔用工具列按鈕空間。
   useEffect(() => {
@@ -1630,6 +1733,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           </div>
         </aside>
 
+        {/* 畫布＋下方的頁面列 */}
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
         <div ref={wrapRef} style={S.stage}
           onDragOver={(e) => { if (e.dataTransfer.types.includes("text/ml-image-url")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}
           onDrop={(e) => {
@@ -1718,6 +1823,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
               padding: 0, margin: 0, resize: "none", outline: "none", overflow: "hidden", zIndex: 40,
             }} />
         )}
+        </div>
+        <PageStrip pages={pagesView} current={pageIdx} currentThumb={curThumb}
+          onSelect={goToPage} onAdd={() => addPage(false)} onDuplicate={() => addPage(true)} onDelete={deletePage} onMove={movePage} />
         </div>
 
         {/* 右側面板常駐。原本是選到圖層才掛載，一選取畫布就從 501px 被擠到 237px，
@@ -2397,6 +2505,126 @@ const ICON_NAMES = EDITABLE_ICON_NAMES;
 
 
 // 複製一個圖層（歷史快照用）：clone 可變欄位；canvas/thumb 以參照保留（它們整顆替換而非就地改）。
+/** 把一頁的圖層轉成存檔格式。 */
+function serializeEls(els: EL[]): SavedLayer[] {
+  return els.map((l, i) => ({
+    id: l.id, name: l.name, type: l.type, zIndex: i,
+    x: l.cx - l.w / 2, y: l.cy - l.h / 2, w: l.w, h: l.h, rotation: l.rotation,
+    visible: l.visible, opacity: l.opacity, locked: l.locked, groupId: l.groupId ?? null,
+    ...(l.clipTo ? { clipTo: l.clipTo } : {}),
+    ...(l.skewX ? { skewX: l.skewX } : {}), ...(l.skewY ? { skewY: l.skewY } : {}),
+    ...(l.isText
+      ? { isText: true, text: l.text, color: l.color, fontSize: l.fontSize * (l.w / (l.naturalW || l.w)), fontFamily: l.fontFamily, fontWeight: l.fontWeight, align: l.align, ...(l.fx ? { fx: l.fx } : {}), ...(l.textLayout ? { textLayout: { ...l.textLayout, letterSpacing: l.textLayout.letterSpacing * (l.w / (l.naturalW || l.w)) } } : {}),
+          // 分段樣式的字級跟著圖層縮放一起換算，否則存檔重開會跑掉
+          ...(l.runs?.length ? { runs: l.runs.map((r) => ({ ...r, ...(r.fontSize ? { fontSize: r.fontSize * (l.w / (l.naturalW || l.w)) } : {}) })) } : {}) }
+      : l.shape
+        ? { shape: { ...l.shape } }
+        : { image: l.src ?? (l.canvas ? (safeDataUrl(l.canvas) ?? undefined) : undefined), ...(l.isArt ? { isArt: true, text: l.text, ...(l.artRefImage ? { artRefImage: l.artRefImage } : {}) } : {}) }),
+  }));
+}
+
+type EditorPage = {
+  id: string; w: number; h: number;
+  /** null＝還沒轉回圖層（存檔讀回來的頁，在背景轉換中）。 */
+  els: EL[] | null; loading: Promise<EL[]> | null;
+  history: EL[][]; histIdx: number; savedIdx: number;
+  thumb: string | null;
+};
+const PAGE_THUMB = 140;
+
+/** 存檔成功後：每一頁目前的復原位置都算「已存」。 */
+function markPagesSaved(pages: EditorPage[], current: number, currentHistIdx: number) {
+  pages.forEach((p, i) => { p.savedIdx = i === current ? currentHistIdx : p.histIdx; });
+}
+
+/** 把一頁的圖層畫成一張圖（maxSide 有給就縮小，用來做縮圖）。 */
+function flattenEls(els: EL[], w: number, h: number, maxSide?: number): string {
+  const k = maxSide ? Math.min(1, maxSide / Math.max(w, h)) : 1;
+  const c = document.createElement("canvas"); c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+  const ctx = c.getContext("2d")!;
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
+  ctx.scale(k, k);
+  for (const l of els) {
+    if (!l.visible) continue;
+    ctx.save(); applyClip(ctx, l, els); applyLayerTransform(ctx, l); ctx.globalAlpha = l.opacity;
+    if (l.canvas) { ctx.imageSmoothingQuality = "high"; ctx.drawImage(l.canvas, -l.w / 2, -l.h / 2, l.w, l.h); }
+    else if (l.isText) drawTextEl(ctx, l); else if (l.shape) drawEditableShape(ctx, l.w, l.h, l.shape);
+    ctx.restore();
+  }
+  try { return c.toDataURL("image/png"); } catch { return ""; }
+}
+
+/** 複製整頁：每個圖層完整獨立一份、換新 id，群組和遮色片的對應也跟著換。 */
+function duplicateEls(els: EL[]): EL[] {
+  const idMap = new Map<string, string>(), groupMap = new Map<string, string>();
+  const out = els.map((l) => {
+    const c = cloneLayerDeep(l);
+    c.id = `${l.id.split("_pg")[0]}_pg${crypto.randomUUID().slice(0, 6)}`; idMap.set(l.id, c.id);
+    if (l.groupId) { if (!groupMap.has(l.groupId)) groupMap.set(l.groupId, `group_${crypto.randomUUID().slice(0, 8)}`); c.groupId = groupMap.get(l.groupId)!; }
+    return c;
+  });
+  for (const c of out) if (c.clipTo) c.clipTo = idMap.get(c.clipTo) ?? null;
+  return out;
+}
+
+/**
+ * 畫布下方的頁面列（像 Canva）：點縮圖切換、拖曳排序；滑鼠移上去可以複製、刪除；
+ * 最後一格加空白頁。只有一頁時也顯示，讓人知道可以加頁。
+ */
+function PageStrip({ pages, current, currentThumb, onSelect, onAdd, onDuplicate, onDelete, onMove }: {
+  pages: { id: string; thumb: string | null; w: number; h: number }[]; current: number; currentThumb: string | null;
+  onSelect: (i: number) => void; onAdd: () => void; onDuplicate: () => void; onDelete: (i: number) => void; onMove: (from: number, to: number) => void;
+}) {
+  const [drag, setDrag] = useState<number | null>(null);
+  const [hover, setHover] = useState<number | null>(null);
+  const H = 64;
+  const list = pages.length ? pages : [{ id: "page-1", thumb: null, w: 1, h: 1 }];
+  const tile = (active: boolean): React.CSSProperties => ({ position: "relative", height: H, flex: "0 0 auto", borderRadius: 8, overflow: "hidden", cursor: "pointer", background: "#fff",
+    border: active ? "2px solid #7c3aed" : "1px solid #e5e7eb", boxShadow: active ? "0 0 0 3px #ede9fe" : "none" });
+  return (
+    <div style={{ flex: "0 0 auto", height: 98, display: "flex", alignItems: "center", gap: 10, padding: "0 16px", background: "#fff", borderTop: "1px solid #e5e7eb", overflowX: "auto" }}>
+      {list.map((p, i) => {
+        const thumb = i === current ? currentThumb ?? p.thumb : p.thumb;
+        return (
+          <div key={p.id} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}
+            onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
+            <div draggable onDragStart={(e) => { setDrag(i); e.dataTransfer.effectAllowed = "move"; }} onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => { e.preventDefault(); if (drag !== null) onMove(drag, i); setDrag(null); }} onDragEnd={() => setDrag(null)}
+              onClick={() => onSelect(i)} title={`第 ${i + 1} 頁（拖曳可以排序）`}
+              style={{ ...tile(i === current), width: Math.round(H * (p.w / p.h || 1)), opacity: drag === i ? 0.4 : 1 }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              {thumb ? <img src={thumb} alt={`第 ${i + 1} 頁`} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} /> : <div style={{ width: "100%", height: "100%", background: "#f3f4f6" }} />}
+              {hover === i && (
+                <div style={{ position: "absolute", top: 3, right: 3, display: "flex", gap: 3 }}>
+                  {i === current && (
+                    <button onClick={(e) => { e.stopPropagation(); onDuplicate(); }} title="複製這一頁"
+                      style={{ width: 20, height: 20, border: "none", borderRadius: 5, background: "rgba(17,24,39,.75)", color: "#fff", cursor: "pointer", padding: 0, display: "grid", placeItems: "center" }}><Copy size={12} /></button>
+                  )}
+                  {list.length > 1 && (
+                    <button onClick={(e) => { e.stopPropagation(); onDelete(i); }} title="刪除這一頁"
+                      style={{ width: 20, height: 20, border: "none", borderRadius: 5, background: "rgba(17,24,39,.75)", color: "#fff", cursor: "pointer", padding: 0, display: "grid", placeItems: "center" }}><Trash2 size={12} /></button>
+                  )}
+                </div>
+              )}
+            </div>
+            <span style={{ fontSize: 11, color: i === current ? "#7c3aed" : "#9ca3af", fontWeight: i === current ? 700 : 500 }}>{i + 1}</span>
+          </div>
+        );
+      })}
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginLeft: 4 }}>
+        <button onClick={onAdd} title="在這一頁後面加一個空白頁"
+          style={{ height: 28, padding: "0 12px", border: "1px dashed #c4b5fd", borderRadius: 8, background: "#faf5ff", color: "#7c3aed", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>
+          <Plus size={13} /> 新增頁面
+        </button>
+        <button onClick={onDuplicate} title="把這一頁完整複製一份放在後面（做輪播最方便）"
+          style={{ height: 28, padding: "0 12px", border: "1px solid #e5e7eb", borderRadius: 8, background: "#fff", color: "#374151", fontSize: 12, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>
+          <Copy size={13} /> 複製這頁
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function cloneEL(el: EL): EL {
   return { ...el, textLayout: el.textLayout ? { ...el.textLayout } : undefined, shape: el.shape ? { ...el.shape } : null, fx: el.fx ? { ...el.fx } : el.fx, embeddedText: el.embeddedText.map((t) => ({ ...t })) };
 }

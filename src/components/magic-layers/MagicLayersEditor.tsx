@@ -1288,7 +1288,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
               )}
             </div>
           )}
-          <div style={{ borderBottom: "1px solid #e5e7eb", padding: "10px 6px 12px", flex: "0 0 auto" }}>
+          <div style={{ borderBottom: "1px solid #e5e7eb", padding: "10px 6px 12px", flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
             <button onClick={() => setToolsOpen((v) => !v)} style={{ ...S.panelHead, height: "auto", padding: "0 4px", marginBottom: toolsOpen ? 6 : 0, border: "none", width: "100%", background: "none", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span>工具</span>{toolsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
             </button>
@@ -1335,39 +1335,6 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
               )}
             </>)}
             <input ref={uploadImgRef} type="file" accept="image/*" onChange={onUploadImage} style={{ display: "none" }} />
-          </div>
-          <button onClick={() => setLayersOpen((v) => !v)} style={{ ...S.panelHead, flex: "0 0 auto", width: "100%", background: "none", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span>圖層 Layers</span>{layersOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          </button>
-          <div style={{ display: layersOpen ? "flex" : "none", flex: "1 1 0", minHeight: 60, overflowY: "auto", padding: 8, flexDirection: "column", gap: 6 }}>
-            {panel.map((l) => (
-              <div key={l.id} draggable={renamingLayerId !== l.id} onClick={(e) => e.shiftKey ? toggleSelection(l.id) : selectLayerOrGroup(l.id)}
-                   onDragStart={(e) => { setDragLayerId(l.id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", l.id); }}
-                   onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDragOverLayerId(l.id); }}
-                   onDragLeave={() => setDragOverLayerId((id) => id === l.id ? null : id)}
-                   onDrop={(e) => { e.preventDefault(); const source = dragLayerId || e.dataTransfer.getData("text/plain"); if (source) reorderLayer(source, l.id); setDragLayerId(null); setDragOverLayerId(null); }}
-                   onDragEnd={() => { setDragLayerId(null); setDragOverLayerId(null); }}
-                   style={{ ...S.row, ...(selectedIds.includes(l.id) ? S.rowSel : {}), ...(l.id === dragOverLayerId && l.id !== dragLayerId ? { borderTop: "3px solid #7c3aed" } : {}), opacity: l.visible ? 1 : 0.5 }}>
-                <GripVertical size={15} style={{ flex: "0 0 auto", color: "#9ca3af", cursor: "grab" }} aria-label="拖曳排序" />
-                <div style={S.thumb}>{l.thumb ? <img src={l.thumb} alt="" style={{ maxWidth: "100%", maxHeight: "100%" }} /> : (l.isText ? "T" : "◇")}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                    {renamingLayerId === l.id ? <input autoFocus value={renamingLayerValue} onChange={(e) => setRenamingLayerValue(e.target.value)} onClick={(e) => e.stopPropagation()} onBlur={commitLayerRename} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setRenamingLayerId(null); }} style={{ ...S.rinput, height: 28, padding: "0 7px", minWidth: 0 }} /> : <span style={S.name} title="雙擊重新命名" onDoubleClick={(e) => { e.stopPropagation(); setRenamingLayerId(l.id); setRenamingLayerValue(l.name); }}>{l.name}</span>}
-                    {confBadge(l.confidence)}
-                  </div>
-                  <div style={S.sub}>
-                    {TYPE_LABEL[l.type] ?? l.type}{l.instanceId ? ` · ${l.instanceId}` : ""}
-                    {l.embeddedText.length ? ` · 內嵌: ${l.embeddedText.map((t) => t.text).join(", ")}` : ""}
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: 2 }}>
-                  <button title="顯示/隱藏" style={{ ...S.icon, ...(l.visible ? {} : { color: "#c4b5fd" }) }} onClick={(e) => { e.stopPropagation(); toggleVis(l.id); }}>{l.visible ? <Eye size={15} /> : <EyeOff size={15} />}</button>
-                  <button title="鎖定" style={{ ...S.icon, ...(l.locked ? { color: "#7c3aed" } : {}) }} onClick={(e) => { e.stopPropagation(); toggleLock(l.id); }}>{l.locked ? <Lock size={14} /> : <Unlock size={14} />}</button>
-                  <button title="複製" style={S.icon} onClick={(e) => { e.stopPropagation(); duplicate(l.id); }}><Copy size={14} /></button>
-                  <button title="刪除" style={{ ...S.icon, color: "#ef4444" }} onClick={(e) => { e.stopPropagation(); del(l.id); }}><Trash2 size={14} /></button>
-                </div>
-              </div>
-            ))}
           </div>
         </aside>
 
@@ -1465,6 +1432,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
             縮放比例沒變、可視範圍卻少一半，操作起來就像「一點物件就放大」。
             Figma／PS 的面板都是固定的，畫布寬度不會因為選取而變動。 */}
         <aside style={S.rpanel}>
+          {/* 設定在上、圖層在下——跟 Photoshop 一樣，左欄就不會擠成一條。 */}
+          <div style={{ flex: "1 1 0", minHeight: 0, overflowY: "auto" }}>
           {!selEl ? (
             <div style={{ padding: 20, fontSize: 12, color: "#9ca3af", lineHeight: 1.7 }}>
               選一個圖層來編輯它的設定。<br />
@@ -1714,6 +1683,40 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
             )}
           </>
           )}
+          </div>
+            <button onClick={() => setLayersOpen((v) => !v)} style={{ ...S.panelHead, borderTop: "1px solid #e5e7eb", flex: "0 0 auto", width: "100%", background: "none", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>圖層 Layers</span>{layersOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </button>
+            <div style={{ display: layersOpen ? "flex" : "none", flex: "0 0 auto", maxHeight: "42vh", overflowY: "auto", padding: 8, flexDirection: "column", gap: 6 }}>
+              {panel.map((l) => (
+                <div key={l.id} draggable={renamingLayerId !== l.id} onClick={(e) => e.shiftKey ? toggleSelection(l.id) : selectLayerOrGroup(l.id)}
+                     onDragStart={(e) => { setDragLayerId(l.id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", l.id); }}
+                     onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDragOverLayerId(l.id); }}
+                     onDragLeave={() => setDragOverLayerId((id) => id === l.id ? null : id)}
+                     onDrop={(e) => { e.preventDefault(); const source = dragLayerId || e.dataTransfer.getData("text/plain"); if (source) reorderLayer(source, l.id); setDragLayerId(null); setDragOverLayerId(null); }}
+                     onDragEnd={() => { setDragLayerId(null); setDragOverLayerId(null); }}
+                     style={{ ...S.row, ...(selectedIds.includes(l.id) ? S.rowSel : {}), ...(l.id === dragOverLayerId && l.id !== dragLayerId ? { borderTop: "3px solid #7c3aed" } : {}), opacity: l.visible ? 1 : 0.5 }}>
+                  <GripVertical size={15} style={{ flex: "0 0 auto", color: "#9ca3af", cursor: "grab" }} aria-label="拖曳排序" />
+                  <div style={S.thumb}>{l.thumb ? <img src={l.thumb} alt="" style={{ maxWidth: "100%", maxHeight: "100%" }} /> : (l.isText ? "T" : "◇")}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      {renamingLayerId === l.id ? <input autoFocus value={renamingLayerValue} onChange={(e) => setRenamingLayerValue(e.target.value)} onClick={(e) => e.stopPropagation()} onBlur={commitLayerRename} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setRenamingLayerId(null); }} style={{ ...S.rinput, height: 28, padding: "0 7px", minWidth: 0 }} /> : <span style={S.name} title="雙擊重新命名" onDoubleClick={(e) => { e.stopPropagation(); setRenamingLayerId(l.id); setRenamingLayerValue(l.name); }}>{l.name}</span>}
+                      {confBadge(l.confidence)}
+                    </div>
+                    <div style={S.sub}>
+                      {TYPE_LABEL[l.type] ?? l.type}{l.instanceId ? ` · ${l.instanceId}` : ""}
+                      {l.embeddedText.length ? ` · 內嵌: ${l.embeddedText.map((t) => t.text).join(", ")}` : ""}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 2 }}>
+                    <button title="顯示/隱藏" style={{ ...S.icon, ...(l.visible ? {} : { color: "#c4b5fd" }) }} onClick={(e) => { e.stopPropagation(); toggleVis(l.id); }}>{l.visible ? <Eye size={15} /> : <EyeOff size={15} />}</button>
+                    <button title="鎖定" style={{ ...S.icon, ...(l.locked ? { color: "#7c3aed" } : {}) }} onClick={(e) => { e.stopPropagation(); toggleLock(l.id); }}>{l.locked ? <Lock size={14} /> : <Unlock size={14} />}</button>
+                    <button title="複製" style={S.icon} onClick={(e) => { e.stopPropagation(); duplicate(l.id); }}><Copy size={14} /></button>
+                    <button title="刪除" style={{ ...S.icon, color: "#ef4444" }} onClick={(e) => { e.stopPropagation(); del(l.id); }}><Trash2 size={14} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
         </aside>
       </div>
 
@@ -2110,7 +2113,7 @@ const S: Record<string, React.CSSProperties> = {
   tool: { display: "flex", alignItems: "center", gap: 10, width: "100%", height: 36, padding: "0 10px", border: "none", background: "transparent", color: "#374151", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", textAlign: "left" },
   toolOff: { color: "#c4c8d0", cursor: "not-allowed" },
   // right properties panel
-  rpanel: { width: 264, flex: "0 0 auto", background: "#ffffff", borderLeft: "1px solid #e5e7eb", display: "flex", flexDirection: "column", minHeight: 0 },
+  rpanel: { width: 320, flex: "0 0 auto", background: "#ffffff", borderLeft: "1px solid #e5e7eb", display: "flex", flexDirection: "column", minHeight: 0 },
   rtabs: { display: "flex", gap: 18, padding: "0 16px", borderBottom: "1px solid #e5e7eb", flex: "0 0 auto" },
   rtab: { height: 44, border: "none", background: "transparent", color: "#9ca3af", fontSize: 14, fontWeight: 700, cursor: "pointer", borderBottom: "2px solid transparent" },
   rtabOn: { color: "#7c3aed", borderBottom: "2px solid #7c3aed" },

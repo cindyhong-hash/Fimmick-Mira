@@ -80,3 +80,39 @@ test("放進形狀的圖存檔後還記得是放在哪個形狀裡", () => {
   const plain = savedToLayerData({ id: "p2", type: "object", name: "照片", x: 0, y: 0, w: 100, h: 100, rotation: 0, zIndex: 2, visible: true, locked: false, opacity: 1, image: "/a.png" } as SavedLayer);
   assert.equal("clipTo" in plain.meta, false);
 });
+
+test("鋼筆路徑：封閉的可以填色、當遮色片；沒封閉的只是一條線", () => {
+  const pts = [{ x: -0.5, y: -0.5 }, { x: 0.5, y: -0.5 }, { x: 0, y: 0.5 }];
+  const closed = { kind: "path" as const, fill: "#7c3aed", stroke: "none", strokeWidth: 0, points: pts, closed: true };
+  const open = { ...closed, closed: false, stroke: "#111111", strokeWidth: 4 };
+  assert.equal(isFillableShape(closed), true);
+  assert.equal(isFillableShape(open), false);
+
+  const a = recordingCtx();
+  drawEditableShape(a.ctx, 200, 100, closed);
+  assert.deepEqual(a.calls.find((c) => c.fn === "moveTo")?.args, [-100, -50], "比例座標要乘上圖層寬高");
+  assert.ok(a.calls.some((c) => c.fn === "closePath") && a.calls.some((c) => c.fn === "fill"));
+
+  const b = recordingCtx();
+  drawEditableShape(b.ctx, 200, 100, open);
+  assert.ok(!b.calls.some((c) => c.fn === "fill"), "沒封閉不能填色");
+  assert.ok(b.calls.some((c) => c.fn === "stroke"));
+  assert.equal(clipToShape(b.ctx, 200, 100, open), false, "沒封閉不能當遮色片");
+});
+
+test("鋼筆路徑：有拉把手的地方畫曲線，沒有的畫直線", () => {
+  const { ctx, calls } = recordingCtx();
+  drawEditableShape(ctx, 100, 100, { kind: "path", fill: "#000000", stroke: "none", strokeWidth: 0, closed: false,
+    points: [{ x: -0.5, y: 0, ox: 0.2, oy: -0.3 }, { x: 0, y: 0, ix: -0.2, iy: -0.3 }, { x: 0.5, y: 0 }] });
+  assert.equal(calls.filter((c) => c.fn === "bezierCurveTo").length, 1);
+  assert.deepEqual(calls.find((c) => c.fn === "bezierCurveTo")?.args, [-30, -30, -20, -30, 0, 0]);
+  assert.equal(calls.filter((c) => c.fn === "lineTo").length, 1);
+});
+
+test("鋼筆路徑存檔前會檢查節點，壞掉的不收", () => {
+  const base = { kind: "path", fill: "#000000", stroke: "none", strokeWidth: 0 };
+  assert.ok(normalizeShape({ ...base, points: [{ x: 0, y: 0 }, { x: 0.5, y: 0.5, ix: 0.1, iy: 0 }] }));
+  assert.equal(normalizeShape({ ...base, points: [{ x: 0, y: 0 }] }), null, "至少兩個點");
+  assert.equal(normalizeShape({ ...base, points: [{ x: 0, y: NaN }, { x: 1, y: 1 }] }), null);
+  assert.equal(normalizeShape({ ...base }), null, "沒有節點");
+});

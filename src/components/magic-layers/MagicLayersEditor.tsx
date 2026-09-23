@@ -12,7 +12,7 @@ import { useBrandFonts } from "@/lib/fonts/useBrandFonts";
 import type { SavedLayer, TextFx, TextRun, ShapeKind, ShapeSpec } from "@/lib/magic-layers/saved-layer.ts";
 export type { SavedLayer } from "@/lib/magic-layers/saved-layer.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronUp, ChevronDown, Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowLeft, Plus, Download, Image as ImageIcon, Upload, Type, BadgeCheck, Square, Star, Minus, Pencil, Undo2, Redo2, Eraser, Maximize2, GripVertical, WandSparkles, Save, Layers, LayoutTemplate, Wrench } from "lucide-react";
+import { ChevronUp, ChevronDown, Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowLeft, Plus, Download, Image as ImageIcon, Upload, Type, BadgeCheck, Square, Star, Minus, Pencil, Undo2, Redo2, Eraser, Maximize2, GripVertical, WandSparkles, Save, Layers, LayoutTemplate, Wrench, PenTool } from "lucide-react";
 import type { LayerData, FragmentationReport } from "@/lib/magic-layers/types.ts";
 import { extractLayer } from "@/lib/magic-layers/extract-browser.ts";
 import { alphaHit } from "@/lib/magic-layers/alpha-hit-test.ts";
@@ -129,7 +129,14 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null);
   const [zoomPct, setZoomPct] = useState(100);
   // 橡皮擦工具（局部擦掉圖片圖層）
-  const [tool, setTool] = useState<"select" | "erase" | "marquee">("select");
+  const [tool, setTool] = useState<"select" | "erase" | "marquee" | "pen">("select");
+  /**
+   * 鋼筆畫到一半的路徑（文件座標）。每個點可以有進／出把手（相對於點的位移）；
+   * hover 是滑鼠目前位置，用來畫「下一段會長這樣」的預覽線。
+   */
+  /** 滑鼠、鍵盤事件在較早的 effect 裡註冊，透過這個 ref 呼叫下面才宣告的 finishPen。 */
+  const finishPenRef = useRef<(closed: boolean) => void>(() => {});
+  const penRef = useRef<{ pts: { x: number; y: number; ix?: number; iy?: number; ox?: number; oy?: number }[]; hover: { x: number; y: number } | null } | null>(null);
   // 畫布內文字編輯：雙擊文字圖層就地打字，Enter 換行。
   // 右側面板也能改，但要在畫面上直接看著版面打字才知道會不會爆框。
   // 雙擊當下就把幾何算好存進 state；render 期間不再去讀 layersRef／view
@@ -309,6 +316,38 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       ctx.strokeRect(x, y, Math.abs(mq.x1 - mq.x0), Math.abs(mq.y1 - mq.y0));
       ctx.restore();
     }
+    // 鋼筆：已經點的節點、把手，以及從最後一點到滑鼠的預覽線
+    const pen = penRef.current;
+    if (pen && pen.pts.length) {
+      const z = view.current.zoom;
+      ctx.save();
+      ctx.lineWidth = 2 / z; ctx.strokeStyle = "#7c3aed";
+      ctx.beginPath(); ctx.moveTo(pen.pts[0].x, pen.pts[0].y);
+      for (let i = 1; i < pen.pts.length; i++) {
+        const a = pen.pts[i - 1], b = pen.pts[i];
+        if (a.ox != null || b.ix != null) ctx.bezierCurveTo(a.x + (a.ox ?? 0), a.y + (a.oy ?? 0), b.x + (b.ix ?? 0), b.y + (b.iy ?? 0), b.x, b.y);
+        else ctx.lineTo(b.x, b.y);
+      }
+      ctx.stroke();
+      if (pen.hover) {
+        const last = pen.pts[pen.pts.length - 1];
+        ctx.setLineDash([5 / z, 4 / z]); ctx.beginPath(); ctx.moveTo(last.x, last.y);
+        if (last.ox != null) ctx.quadraticCurveTo(last.x + last.ox, last.y + (last.oy ?? 0), pen.hover.x, pen.hover.y); else ctx.lineTo(pen.hover.x, pen.hover.y);
+        ctx.stroke(); ctx.setLineDash([]);
+      }
+      const closing = pen.hover && pen.pts.length >= 3 && Math.hypot(pen.hover.x - pen.pts[0].x, pen.hover.y - pen.pts[0].y) < 12 / z;
+      pen.pts.forEach((p, i) => {
+        for (const [hx, hy] of [[p.ix, p.iy], [p.ox, p.oy]] as const) {
+          if (hx == null) continue;
+          ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + hx, p.y + (hy ?? 0)); ctx.lineWidth = 1 / z; ctx.stroke();
+          ctx.beginPath(); ctx.arc(p.x + hx, p.y + (hy ?? 0), 3.5 / z, 0, Math.PI * 2); ctx.fillStyle = "#7c3aed"; ctx.fill();
+        }
+        const r = (i === 0 && closing ? 7 : 4.5) / z;
+        ctx.fillStyle = i === 0 && closing ? "#7c3aed" : "#fff"; ctx.lineWidth = 1.5 / z;
+        ctx.fillRect(p.x - r, p.y - r, r * 2, r * 2); ctx.strokeRect(p.x - r, p.y - r, r * 2, r * 2);
+      });
+      ctx.restore();
+    }
     // 橡皮擦筆刷游標圈
     if (toolRef.current === "erase" && erasePt.current) {
       ctx.beginPath();
@@ -431,6 +470,17 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         }
         return;
       }
+      // 鋼筆：點一下加一個點；按住拖曳就是拉出這一點的曲線把手；點回第一個點就封閉完成
+      if (!wantPan && toolRef.current === "pen") {
+        const pen = penRef.current ?? (penRef.current = { pts: [], hover: null });
+        const first = pen.pts[0];
+        if (first && pen.pts.length >= 3 && Math.hypot(d.x - first.x, d.y - first.y) < 12 / view.current.zoom) { finishPenRef.current(true); return; }
+        const pt = { x: d.x, y: d.y };
+        pen.pts.push(pt);
+        drag.current = { mode: "pen", pt };
+        render();
+        return;
+      }
       // 框選模式：只畫框，不碰圖層
       if (!wantPan && toolRef.current === "marquee") {
         marqueeRef.current = { x0: d.x, y0: d.y, x1: d.x, y1: d.y };
@@ -461,6 +511,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       if (!g) {
         const s = evPt(e);
         if (toolRef.current === "erase") { erasePt.current = s2d(s.x, s.y); cv.style.cursor = "crosshair"; render(); return; }
+        if (toolRef.current === "pen") { if (penRef.current) penRef.current.hover = s2d(s.x, s.y); cv.style.cursor = "crosshair"; render(); return; }
         hover(s); return;
       }
       const s = evPt(e), d = s2d(s.x, s.y);
@@ -472,6 +523,13 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         const n = Math.max(1, Math.ceil(distp / step));
         for (let i = 1; i <= n; i++) eraseAt(g.l, lx + (d.x - lx) * (i / n), ly + (d.y - ly) * (i / n));
         g.lx = d.x; g.ly = d.y; erasePt.current = d; render();
+      }
+      else if (g.mode === "pen") {
+        // 拖出來的方向就是「出」的把手，另一邊對稱成「進」的把手（跟 Photoshop 一樣的平滑節點）
+        const ox = d.x - g.pt.x, oy = d.y - g.pt.y;
+        if (Math.hypot(ox, oy) > 3 / view.current.zoom) { g.pt.ox = ox; g.pt.oy = oy; g.pt.ix = -ox; g.pt.iy = -oy; }
+        if (penRef.current) penRef.current.hover = d;
+        render();
       }
       else if (g.mode === "marquee") {
         if (marqueeRef.current) { marqueeRef.current.x1 = d.x; marqueeRef.current.y1 = d.y; render(); }
@@ -494,6 +552,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       else if (g.mode === "pan") { view.current.panX = g.opx + (s.x - g.sx); view.current.panY = g.opy + (s.y - g.sy); render(); }
     };
     const dbl = (e: MouseEvent) => {
+      // 鋼筆：雙擊結束（不封閉）。雙擊會先觸發兩次按下，多出來的那個點拿掉
+      if (toolRef.current === "pen") { penRef.current?.pts.pop(); finishPenRef.current(false); return; }
       const s = evPt(e), d = s2d(s.x, s.y);
       const hit = hitLayer(d.x, d.y);
       if (hit?.isText && !hit.locked) {
@@ -512,6 +572,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       }
     };
     const up = () => {
+      if (drag.current?.mode === "pen") { drag.current = null; return; }
       if (drag.current?.mode === "marquee") {
         const m = marqueeRef.current;
         // 夾在畫布範圍內：框到畫布外面的灰色區域沒有東西可以補，照樣送出去只是白花錢。
@@ -544,6 +605,36 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     const kd = (e: KeyboardEvent) => {
       const typing = /INPUT|TEXTAREA/.test((e.target as HTMLElement).tagName);
       if (e.code === "Space" && !typing) { space.current = true; if (canvasRef.current) canvasRef.current.style.cursor = "grab"; e.preventDefault(); }
+      // 鋼筆畫到一半：Enter 完成、Esc 取消、Backspace 退一個點（不能讓它去刪到選取的圖層）
+      if (toolRef.current === "pen" && !typing) {
+        if (e.key === "Enter") { e.preventDefault(); finishPenRef.current(false); return; }
+        if (e.key === "Escape") { e.preventDefault(); penRef.current = null; setTool("select"); if (canvasRef.current) canvasRef.current.style.cursor = "default"; render(); return; }
+        if (e.key === "Backspace" || e.key === "Delete") { e.preventDefault(); penRef.current?.pts.pop(); render(); return; }
+      }
+      // ⌘C／⌘V：複製、貼上物件。貼上的是完整獨立的一份，每貼一次往右下錯開一點
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c" && !typing && selectedIdsRef.current.length && !window.getSelection()?.toString()) {
+        e.preventDefault();
+        const ids = new Set(selectedIdsRef.current);
+        layerClipboard = { layers: layersRef.current.filter((l) => ids.has(l.id)).map(cloneLayerDeep), pastes: 0 };
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "v" && !typing && layerClipboard?.layers.length) {
+        e.preventDefault();
+        const off = 24 * ++layerClipboard.pastes;
+        const idMap = new Map<string, string>(), groupMap = new Map<string, string>();
+        const pasted = layerClipboard.layers.map((src) => {
+          const c = cloneLayerDeep(src);
+          c.id = `${src.id.split("_paste")[0]}_paste_${crypto.randomUUID().slice(0, 6)}`; idMap.set(src.id, c.id);
+          if (src.groupId) { if (!groupMap.has(src.groupId)) groupMap.set(src.groupId, `group_${crypto.randomUUID().slice(0, 8)}`); c.groupId = groupMap.get(src.groupId)!; }
+          c.cx += off; c.cy += off;
+          return c;
+        });
+        // 放在形狀裡的圖：形狀也一起貼的話指向新的形狀；形狀留在原處就還放在原本那個裡面
+        for (const c of pasted) if (c.clipTo) c.clipTo = idMap.get(c.clipTo) ?? (layersRef.current.some((l) => l.id === c.clipTo) ? c.clipTo : null);
+        layersRef.current.push(...pasted);
+        applySelection(pasted.map((c) => c.id), pasted[pasted.length - 1].id); markDirty(); refresh(); render();
+        return;
+      }
       if ((e.key === "Delete" || e.key === "Backspace") && selectedIdsRef.current.length && !typing) {
         const deleting = new Set(selectedIdsRef.current); layersRef.current = layersRef.current.filter((l) => !deleting.has(l.id));
         applySelection([]); markDirty(); refresh(); render();
@@ -640,7 +731,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   };
   const toggleVis = (id: string) => { const l = layersRef.current[idx(id)]; if (l) { l.visible = !l.visible; markDirty(); refresh(); render(); } };
   const toggleLock = (id: string) => { const l = layersRef.current[idx(id)]; if (l) { l.locked = !l.locked; markDirty(); refresh(); render(); } };
-  const duplicate = (id: string) => { const l = layersRef.current[idx(id)]; if (!l) return; const c: EL = { ...l, id: l.id + "_copy" + Math.floor(view.current.panX + Math.abs(l.cx)), name: l.name + " 複本", cx: l.cx + 24, cy: l.cy + 24, groupId: null }; layersRef.current.splice(idx(id) + 1, 0, c); selectOnly(c.id); markDirty(); refresh(); render(); };
+  // 用 cloneLayerDeep：之前只複製外殼，形狀顏色、文字特效其實跟原本共用同一份，改一個另一個也跟著變
+  const duplicate = (id: string) => { const l = layersRef.current[idx(id)]; if (!l) return; const c: EL = { ...cloneLayerDeep(l), id: `${l.id.split("_copy")[0]}_copy_${crypto.randomUUID().slice(0, 6)}`, name: l.name + " 複本", cx: l.cx + 24, cy: l.cy + 24, groupId: null }; layersRef.current.splice(idx(id) + 1, 0, c); selectOnly(c.id); markDirty(); refresh(); render(); };
   const groupSelected = () => { if (selectedIdsRef.current.length < 2) return; const groupId = `group_${Date.now()}`; layersRef.current.forEach((l) => { if (selectedIdsRef.current.includes(l.id)) l.groupId = groupId; }); markDirty(); refresh(); render(); };
   /**
    * 合併圖層（⌘E，跟 Photoshop 一樣）：選兩個以上就把它們合成一張；只選一個就跟下面那層合併。
@@ -827,6 +919,43 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   }, [doc.w, doc.h, markDirty, refresh, render]);
 
   // 向量圖層（形狀 / 線條 / 圖標）——畫在 canvas，可改色，不烤成點陣
+  /**
+   * 把鋼筆畫好的路徑變成一個形狀圖層。節點換算成「相對於圖層中心、佔寬高的比例」，
+   * 之後放大縮小整個形狀會跟著等比變化。範圍把把手也算進去（曲線一定落在節點＋把手圍起來的範圍內）。
+   * 封閉的預設紫色填色；沒封閉的是一條深色線。
+   */
+  const finishPen = useCallback((closed: boolean) => {
+    const pen = penRef.current; penRef.current = null;
+    setTool("select");
+    if (canvasRef.current) canvasRef.current.style.cursor = "default";
+    if (!pen || pen.pts.length < 2) { render(); return; }
+    const isClosed = closed && pen.pts.length >= 3;
+    const xs: number[] = [], ys: number[] = [];
+    for (const p of pen.pts) {
+      xs.push(p.x); ys.push(p.y);
+      if (p.ix != null) { xs.push(p.x + p.ix); ys.push(p.y + (p.iy ?? 0)); }
+      if (p.ox != null) { xs.push(p.x + p.ox); ys.push(p.y + (p.oy ?? 0)); }
+    }
+    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+    const w = Math.max(4, maxX - minX), h = Math.max(4, maxY - minY), cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    const points = pen.pts.map((p) => ({
+      x: (p.x - cx) / w, y: (p.y - cy) / h,
+      ...(p.ix != null ? { ix: p.ix / w, iy: (p.iy ?? 0) / h } : {}),
+      ...(p.ox != null ? { ox: p.ox / w, oy: (p.oy ?? 0) / h } : {}),
+    }));
+    const shape: ShapeSpec = isClosed
+      ? { kind: "path", points, closed: true, fill: "#7c3aed", stroke: "none", strokeWidth: 0 }
+      : { kind: "path", points, closed: false, fill: "none", stroke: "#1f2937", strokeWidth: 4 };
+    const el: EL = {
+      id: `path_${crypto.randomUUID().slice(0, 8)}`, name: isClosed ? "鋼筆形狀" : "鋼筆線條", type: "decoration", semanticId: "decoration", instanceId: null, confidence: 1, editable: true, source: "generated",
+      isText: false, text: "", color: "#241f47", fontSize: 24, fontFamily: FONT, fontWeight: 700, align: "center",
+      shape, canvas: null, naturalW: w, naturalH: h, src: null,
+      cx, cy, w, h, rotation: 0, visible: true, locked: false, opacity: 1, embeddedText: [], thumb: null,
+    };
+    el.thumb = makeThumb(el); layersRef.current.push(el); selectOnly(el.id); markDirty(); refresh(); render();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- selectOnly 只碰 ref 與 setState，跟 pushShapeLayer 一樣不列
+  }, [markDirty, refresh, render]);
+  useEffect(() => { finishPenRef.current = finishPen; }, [finishPen]);
   const pushShapeLayer = useCallback((shape: ShapeSpec, nm: string, w: number, h: number) => {
     const el: EL = {
       id: "shape_" + Math.floor(view.current.panX + layersRef.current.length + doc.w + (shape.icon ? shape.icon.length : shape.kind.length)),
@@ -840,7 +969,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const addShapeKind = useCallback((spec: Partial<ShapeSpec> & { kind: ShapeKind }, label: string) => {
     setShowShape(false);
     const s = Math.round(Math.min(doc.w, doc.h) * 0.3);
-    pushShapeLayer({ fill: "#7c3aed", stroke: "none", strokeWidth: 0, radius: 0, ...spec }, label, s, s);
+    pushShapeLayer({ fill: "#7c3aed", stroke: "none", strokeWidth: 0, ...spec, radius: roundedRadius(spec, s) ?? 0 }, label, s, s);
   }, [doc.w, doc.h, pushShapeLayer]);
   const addShape = useCallback(() => setShowShape(true), []);
   const addLine = useCallback(() => {
@@ -1738,7 +1867,20 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                 {selEl.shape && (
                   <>
                     <div style={S.rhead}>{selEl.shape.kind === "icon" ? "圖標設定" : selEl.shape.kind === "line" ? "線條設定" : "形狀設定"}</div>
-                    {(selEl.shape.kind !== "line" && selEl.shape.kind !== "icon") && (<>
+                    {selEl.shape.kind === "path" && !selEl.shape.closed && (
+                      <div style={{ marginBottom: 12 }}>
+                        <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.6, marginBottom: 8 }}>這是一條沒有封閉的線：可以改顏色、粗細；封閉之後就能填色、當成放圖的框。</div>
+                        <button onClick={() => updateShape({ closed: true, fill: "#7c3aed" })} style={{ ...S.rbtn, width: "100%" }}>把頭尾接起來，變成形狀</button>
+                      </div>
+                    )}
+                    {selEl.shape.kind === "path" && !selEl.shape.closed && (<>
+                      <label style={S.rlabel}>線條顏色</label>
+                      <input type="color" value={hexColor(toHex(selEl.shape.stroke === "none" ? "#1f2937" : selEl.shape.stroke))} onChange={(e) => updateShape({ stroke: e.target.value })} style={{ width: 40, height: 34, border: "1px solid #e5e7eb", borderRadius: 8, padding: 0, cursor: "pointer" }} />
+                      <label style={S.rlabel}>粗細</label>
+                      <input type="number" min={1} value={selEl.shape.strokeWidth} onChange={(e) => updateShape({ strokeWidth: Math.max(1, Number(e.target.value) || 1) })} style={S.rinput} />
+                    </>)}
+                    {(selEl.shape.kind !== "line" && selEl.shape.kind !== "icon" && !(selEl.shape.kind === "path" && !selEl.shape.closed)) && (<>
+                      {selEl.shape.kind !== "path" && (<>
                       <label style={S.rlabel}>類型</label>
                       <select value={selEl.shape.kind} onChange={(e) => updateShape({ kind: e.target.value as ShapeSpec["kind"] })} style={S.rinput}>
                         <option value="rect">矩形</option>
@@ -1748,6 +1890,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                         <option value="polygon">多邊形</option>
                         <option value="star">星形</option>
                       </select>
+                      </>)}
                       <label style={S.rlabel}>填色</label>
                       <div style={{ display: "flex", gap: 4, padding: 3, background: "#f3f4f6", borderRadius: 10, marginBottom: 8 }}>
                         {(["solid", "gradient"] as const).map((mode) => {
@@ -1863,6 +2006,16 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
               ? <ResizeHandle label="拖曳調整圖層區高度" onPointerDown={(e) => startLayersResize(e, -1, (rpanelRef.current?.clientHeight ?? 800) - 150)} />
               : <div style={{ borderTop: "1px solid #e5e7eb" }} />}
             <SectionHeader icon={<Layers size={16} color="#7c3aed" />} title="圖層" count={panel.length} open={layersOpen} collapseDown onToggle={() => setLayersOpen((v) => !v)} />
+            {/* 用 Shift 選了兩個以上：直接在圖層列表上方提示可以做什麼，工具列上的小按鈕不容易看到 */}
+            {layersOpen && selectedIds.length >= 2 && (
+              <div style={{ flex: "0 0 auto", margin: "8px 8px 0", padding: "10px 12px", borderRadius: 10, background: "#f5f3ff", border: "1px solid #ddd6fe", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "#5b21b6", marginRight: "auto" }}>已選取 {selectedIds.length} 個圖層</span>
+                <button onClick={mergeLayers} title="把選取的圖層合成一張（⌘E）"
+                  style={{ height: 30, padding: "0 12px", border: "none", borderRadius: 8, background: "#7c3aed", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>合併圖層 ⌘E</button>
+                <button onClick={groupSelected} title="設為一組，一起移動（⌘G）"
+                  style={{ height: 30, padding: "0 12px", border: "1px solid #c4b5fd", borderRadius: 8, background: "#fff", color: "#6d28d9", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>群組 ⌘G</button>
+              </div>
+            )}
             <div style={{ display: layersOpen ? "flex" : "none", flex: "0 0 auto", height: Math.max(0, layersH - 54), overflowY: "auto", padding: 8, flexDirection: "column", gap: 6 }}>
               {panel.map((l) => (
                 <div key={l.id} draggable={renamingLayerId !== l.id} onClick={(e) => e.shiftKey ? toggleSelection(l.id) : selectLayerOrGroup(l.id)}
@@ -1930,6 +2083,14 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       )}
 
       {/* 框好之後的輸入框：跟 PS 一樣，框選完就地問「要生成什麼」 */}
+      {tool === "pen" && (
+        <div style={{ position: "fixed", left: "50%", bottom: 28, transform: "translateX(-50%)", zIndex: 92, display: "flex", gap: 10, alignItems: "center", background: "#1f2937", color: "#f9fafb", padding: "10px 14px", borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,.28)" }}>
+          <PenTool size={16} color="#c4b5fd" />
+          <span style={{ fontSize: 13, lineHeight: 1.5 }}>點一下加點・按住拖曳拉曲線・點回第一個點封閉<br /><span style={{ color: "#9ca3af", fontSize: 12 }}>Enter 完成（不封閉）・Backspace 退一步・Esc 取消</span></span>
+          <button onClick={() => finishPen(false)} style={{ ...S.rbtn, background: "#7c3aed", color: "#fff", border: "none", whiteSpace: "nowrap" }}>完成</button>
+          <button onClick={() => { penRef.current = null; setTool("select"); render(); }} style={{ ...S.rbtn, background: "transparent", color: "#d1d5db", border: "1px solid #4b5563", whiteSpace: "nowrap" }}>取消</button>
+        </div>
+      )}
       {marquee && !genFillResult && (
         <div style={{ position: "fixed", left: "50%", bottom: 28, transform: "translateX(-50%)", zIndex: 92, display: "flex", gap: 8, alignItems: "center", background: "#1f2937", padding: 10, borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,.28)" }}>
           <input
@@ -2041,6 +2202,11 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                   <span style={{ fontSize: 11, color: "#6b7280" }}>{p.label}</span>
                 </button>
               ))}
+              <button onClick={() => { setShowShape(false); penRef.current = null; setTool("pen"); applySelection([]); }} title="自己畫形狀：點一下加點、按住拖曳拉曲線"
+                style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "12px 6px", borderRadius: 10, border: "1px solid #c4b5fd", background: "#f5f3ff", cursor: "pointer" }}>
+                <PenTool size={30} color="#7c3aed" strokeWidth={1.8} />
+                <span style={{ fontSize: 11, color: "#7c3aed", fontWeight: 600 }}>鋼筆（自己畫）</span>
+              </button>
             </div>
           </div>
         </div>
@@ -2243,10 +2409,16 @@ function iconPreview(name: string): string {
   const g = c.getContext("2d")!; g.translate(20, 20); drawIcon(g, 30, name, "#374151");
   try { return c.toDataURL("image/png"); } catch { return ""; }
 }
+/**
+ * 「圓角矩形」的圓角：用記號值，加形狀時換算成邊長的 18%。
+ * 之前直接給 9999，會被夾成邊長的一半——正方形就變成正圓，選單上的圖示也是圓的。
+ */
+const ROUNDED_RADIUS = -1;
+const roundedRadius = (spec: Partial<ShapeSpec>, size: number) => (spec.radius === ROUNDED_RADIUS ? Math.round(size * 0.18) : spec.radius);
 // 形狀選擇器：預設清單（參考 PS）＋縮圖
 const SHAPE_PRESETS: { label: string; spec: Partial<ShapeSpec> & { kind: ShapeKind } }[] = [
   { label: "矩形", spec: { kind: "rect", radius: 0 } },
-  { label: "圓角矩形", spec: { kind: "rect", radius: 9999 } },
+  { label: "圓角矩形", spec: { kind: "rect", radius: ROUNDED_RADIUS } },
   { label: "橢圓", spec: { kind: "ellipse" } },
   { label: "三角形", spec: { kind: "triangle" } },
   { label: "菱形", spec: { kind: "diamond" } },
@@ -2257,7 +2429,7 @@ const SHAPE_PRESETS: { label: string; spec: Partial<ShapeSpec> & { kind: ShapeKi
 function shapePreview(spec: Partial<ShapeSpec> & { kind: ShapeKind }): string {
   const c = document.createElement("canvas"); c.width = 44; c.height = 44;
   const g = c.getContext("2d")!; g.translate(22, 22);
-  const full: ShapeSpec = { fill: "#374151", stroke: "none", strokeWidth: 0, ...spec };
+  const full: ShapeSpec = { fill: "#374151", stroke: "none", strokeWidth: 0, ...spec, radius: roundedRadius(spec, 30) };
   const sz = 34;
   const r = full.radius && full.radius > 0 ? Math.min(full.radius, sz / 2) : 0;
   drawEditableShape(g, sz, sz, { ...full, radius: r });
@@ -2349,6 +2521,29 @@ function ClipPanel({ frameName, frames, onPut, onFit, onTakeOut }: {
     </div>
   );
 }
+
+/**
+ * 完整複製一個圖層：形狀、漸層、鋼筆節點、文字特效、分段樣式、圖片像素都各自一份。
+ * 只用 {...l} 的話這些設定是跟原本共用的，改複本的顏色原本也會跟著變。
+ */
+function cloneLayerDeep(l: EL): EL {
+  const canvas = l.canvas ? (() => { const c = document.createElement("canvas"); c.width = l.canvas.width; c.height = l.canvas.height; c.getContext("2d")!.drawImage(l.canvas, 0, 0); return c; })() : null;
+  return {
+    ...l,
+    canvas,
+    shape: l.shape ? { ...l.shape, ...(l.shape.gradient ? { gradient: { ...l.shape.gradient } } : {}), ...(l.shape.points ? { points: l.shape.points.map((p) => ({ ...p })) } : {}) } : null,
+    fx: l.fx ? { ...l.fx, ...(l.fx.gradient ? { gradient: [...l.fx.gradient] as [string, string] } : {}) } : l.fx,
+    runs: l.runs?.map((r) => ({ ...r })),
+    textLayout: l.textLayout ? { ...l.textLayout } : l.textLayout,
+    embeddedText: l.embeddedText.map((t) => ({ ...t })),
+  };
+}
+
+/**
+ * ⌘C 複製的圖層。放在模組層級：換到另一份草稿（同一個分頁）也貼得過去。
+ * pastes 記貼了幾次，每貼一次往右下錯開，不會整疊在同一個位置。
+ */
+let layerClipboard: { layers: EL[]; pastes: number } | null = null;
 
 /** 形狀被刪掉時，原本放在裡面的圖解除剪裁（不然存檔會留著指向不存在的形狀）。 */
 function releaseClips(layers: EL[], frameId: string) {

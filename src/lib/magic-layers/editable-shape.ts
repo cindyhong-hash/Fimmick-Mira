@@ -5,7 +5,19 @@ export const EDITABLE_ICON_NAMES = ["star", "heart", "circle", "triangle", "chec
 /** 可以填色、可以拿來當遮色片的形狀（線條、圖標只有筆畫，沒有「裡面」）。 */
 export const FILLABLE_SHAPE_KINDS = ["rect", "ellipse", "triangle", "diamond", "polygon", "star"] as const;
 export const isFillableShape = (sh: ShapeSpec | null | undefined): sh is ShapeSpec =>
-  !!sh && (FILLABLE_SHAPE_KINDS as readonly string[]).includes(sh.kind);
+  !!sh && ((FILLABLE_SHAPE_KINDS as readonly string[]).includes(sh.kind) || (sh.kind === "path" && !!sh.closed && (sh.points?.length ?? 0) >= 3));
+
+/** 描出鋼筆路徑（以圖層中心為原點）。有把手的線段畫成曲線，沒有的畫直線。 */
+function tracePath(ctx: CanvasRenderingContext2D, w: number, h: number, pts: NonNullable<ShapeSpec["points"]>, closed: boolean) {
+  const X = (v: number) => v * w, Y = (v: number) => v * h;
+  const seg = (a: (typeof pts)[number], b: (typeof pts)[number]) => {
+    if (a.ox != null || b.ix != null) ctx.bezierCurveTo(X(a.x + (a.ox ?? 0)), Y(a.y + (a.oy ?? 0)), X(b.x + (b.ix ?? 0)), Y(b.y + (b.iy ?? 0)), X(b.x), Y(b.y));
+    else ctx.lineTo(X(b.x), Y(b.y));
+  };
+  ctx.moveTo(X(pts[0].x), Y(pts[0].y));
+  for (let i = 1; i < pts.length; i++) seg(pts[i - 1], pts[i]);
+  if (closed) { seg(pts[pts.length - 1], pts[0]); ctx.closePath(); }
+}
 
 /**
  * 描出形狀的輪廓（以圖層中心為原點）。填色、漸層、剪裁遮色片都用這一條，
@@ -30,6 +42,10 @@ export function traceShapePath(ctx: CanvasRenderingContext2D, w: number, h: numb
       ctx.closePath(); return true;
     }
     case "polygon": poly(Math.max(3, sh.sides ?? 6), -Math.PI / 2); return true;   // 預設六邊
+    case "path":
+      if ((sh.points?.length ?? 0) < 2) return false;
+      tracePath(ctx, w, h, sh.points!, !!sh.closed && sh.points!.length >= 3);
+      return true;
     default: return false;
   }
 }
@@ -47,7 +63,7 @@ export function shapeGradientFill(ctx: CanvasRenderingContext2D, w: number, h: n
 
 /** 以形狀輪廓剪裁接下來畫的東西（剪裁遮色片）。形狀沒有輪廓時不剪、回傳 false。 */
 export function clipToShape(ctx: CanvasRenderingContext2D, w: number, h: number, sh: ShapeSpec): boolean {
-  if (!traceShapePath(ctx, w, h, sh)) return false;
+  if (!isFillableShape(sh) || !traceShapePath(ctx, w, h, sh)) return false;
   ctx.clip();
   return true;
 }
@@ -68,7 +84,8 @@ export function drawEditableShape(ctx: CanvasRenderingContext2D, w: number, h: n
   }
   if (sh.kind === "icon") { drawIcon(ctx, Math.min(w, h), sh.icon || "star", sh.fill || "#111"); return; }
   if (!traceShapePath(ctx, w, h, sh)) return;
-  if (doFill) { ctx.fillStyle = sh.gradient ? shapeGradientFill(ctx, w, h, sh.gradient) : sh.fill; ctx.fill(); }
+  // 沒封閉的鋼筆路徑只是一條線，沒有「裡面」可以填
+  if (doFill && (sh.kind !== "path" || isFillableShape(sh))) { ctx.fillStyle = sh.gradient ? shapeGradientFill(ctx, w, h, sh.gradient) : sh.fill; ctx.fill(); }
   if (doStroke) { ctx.lineWidth = sh.strokeWidth; ctx.strokeStyle = sh.stroke; ctx.lineJoin = "round"; ctx.stroke(); }
 }
 
@@ -105,8 +122,12 @@ export function drawIcon(ctx: CanvasRenderingContext2D, size: number, name: stri
 export function normalizeShape(value: unknown): ShapeSpec | null {
   if (!value || typeof value !== "object") return null;
   const v = value as ShapeSpec;
-  if (!["rect","ellipse","line","icon","triangle","polygon","star","diamond"].includes(v.kind) || typeof v.fill !== "string" || typeof v.stroke !== "string" || !Number.isFinite(v.strokeWidth) || v.strokeWidth < 0) return null;
+  if (!["rect","ellipse","line","icon","triangle","polygon","star","diamond","path"].includes(v.kind) || typeof v.fill !== "string" || typeof v.stroke !== "string" || !Number.isFinite(v.strokeWidth) || v.strokeWidth < 0) return null;
   if (v.softness !== undefined && (!Number.isFinite(v.softness) || v.softness < 0 || v.softness > 1)) return null;
   if (v.gradient && (!["horizontal","vertical","diagonal","radial"].includes(v.gradient.axis) || !/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(v.gradient.from) || !/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(v.gradient.to))) return null;
-  return { ...v, ...(v.gradient ? { gradient: { ...v.gradient } } : {}) };
+  if (v.kind === "path") {
+    const finite = (n: unknown) => n === undefined || Number.isFinite(n);
+    if (!Array.isArray(v.points) || v.points.length < 2 || !v.points.every((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y) && finite(p.ix) && finite(p.iy) && finite(p.ox) && finite(p.oy))) return null;
+  }
+  return { ...v, ...(v.gradient ? { gradient: { ...v.gradient } } : {}), ...(v.points ? { points: v.points.map((p) => ({ ...p })) } : {}) };
 }

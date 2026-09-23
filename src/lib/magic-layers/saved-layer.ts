@@ -5,8 +5,16 @@ import type { TextLayout } from "./editable-text.ts";
  * vertical 上→下、horizontal 左→右、diagonal 左上→右下、radial 由中間往外。
  */
 export type ShapeGradient = { axis: "horizontal" | "vertical" | "diagonal" | "radial"; from: string; to: string };
-export type ShapeKind = "rect" | "ellipse" | "line" | "icon" | "triangle" | "polygon" | "star" | "diamond";
-export type ShapeSpec = { kind: ShapeKind; fill: string; stroke: string; strokeWidth: number; radius?: number; icon?: string; sides?: number; gradient?: ShapeGradient; softness?: number };
+export type ShapeKind = "rect" | "ellipse" | "line" | "icon" | "triangle" | "polygon" | "star" | "diamond" | "path";
+/**
+ * 鋼筆畫的節點。座標以圖層中心為原點、用圖層寬高的比例表示（-0.5～0.5），
+ * 圖層放大縮小時形狀跟著等比變化。ix/iy、ox/oy 是進、出兩個方向的控制把手（同樣是比例、相對於節點）；
+ * 沒有把手就是直角轉折。
+ */
+export type PathPoint = { x: number; y: number; ix?: number; iy?: number; ox?: number; oy?: number };
+export type ShapeSpec = { kind: ShapeKind; fill: string; stroke: string; strokeWidth: number; radius?: number; icon?: string; sides?: number; gradient?: ShapeGradient; softness?: number;
+  /** 只有 kind = "path"（鋼筆）用：節點，以及是否封閉（封閉才有「裡面」，能填色、能當遮色片）。 */
+  points?: PathPoint[]; closed?: boolean };
 
 /**
  * 文字的分段樣式：用字元索引標出哪一段要換字級／顏色／字重。
@@ -31,7 +39,7 @@ export type SavedLayer = {
   fx?: TextFx | null;
   textLayout?: TextLayout;
   runs?: TextRun[];                   // 分段樣式（只把某幾個字放大／換色）
-  shape?: { kind: ShapeKind; fill: string; stroke: string; strokeWidth: number; radius?: number; icon?: string; sides?: number; gradient?: ShapeGradient; softness?: number };
+  shape?: ShapeSpec;
   groupId?: string | null;
   /**
    * 剪裁遮色片：這個圖層只顯示在指定形狀圖層的輪廓裡（像 Canva 的相框）。

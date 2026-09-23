@@ -15,10 +15,14 @@ import {
   parseCanvasTemplatePayload,
   rowToCanvasTemplate,
 } from "@/lib/magic-layers/canvas-template";
+import { builtinTemplateSummaries } from "@/lib/magic-layers/builtin-templates";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  // 內建範本跟著程式碼走，資料庫掛了也還在。使用者自存的排前面——
+  // 那是他們剛做的東西，比較常要回去套。
+  const builtins = builtinTemplateSummaries();
   try {
     const rows = await db.styleComponent.findMany({
       where: { type: CANVAS_TEMPLATE_TYPE },
@@ -26,14 +30,14 @@ export async function GET() {
       take: 120,
     });
     // 列表只要縮圖與名字；layers 有可能很大，點進去套用時才需要。
-    const templates = rows
+    const mine = rows
       .map(rowToCanvasTemplate)
       .filter((t): t is NonNullable<typeof t> => !!t)
-      .map(({ layers, ...rest }) => ({ ...rest, layerCount: layers.length }));
-    return NextResponse.json({ templates });
+      .map(({ layers, ...rest }) => ({ ...rest, layerCount: layers.length, builtin: false }));
+    return NextResponse.json({ templates: [...mine, ...builtins] });
   } catch {
-    // 本機資料庫還沒起來時回空陣列，不要讓整個編輯器掛掉。
-    return NextResponse.json({ templates: [] });
+    // 本機資料庫還沒起來時仍然給得出內建的，不要讓整個編輯器空掉。
+    return NextResponse.json({ templates: builtins });
   }
 }
 

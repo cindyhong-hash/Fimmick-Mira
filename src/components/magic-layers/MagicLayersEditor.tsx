@@ -78,7 +78,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const [bgOpen, setBgOpen] = useState(true);                 // 左側「背景庫」可收合
   // 範本庫（共用，全品牌看得到；目前只做 1:1）
   const [tplOpen, setTplOpen] = useState(true);
-  const [templates, setTemplates] = useState<{ id: string; name: string; previewUrl: string | null }[]>([]);
+  const [templates, setTemplates] = useState<{ id: string; name: string; previewUrl: string | null; builtin?: boolean }[]>([]);
   const [tplSaving, setTplSaving] = useState(false);
   const [layersOpen, setLayersOpen] = useState(true);         // 左側「圖層」可收合
   const [panelTab, setPanelTab] = useState<"design" | "settings">("design");
@@ -1244,7 +1244,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
               <>
                 {templates.length === 0 ? (
                   <div style={{ fontSize: 11, color: "#9ca3af", lineHeight: 1.6 }}>
-                    還沒有範本。排好一版之後按下面的「存成範本」，之後就能重複套用。
+                    範本載入中……如果一直沒出現，重新整理一次。
                   </div>
                 ) : (
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6, maxHeight: 200, overflowY: "auto" }}>
@@ -1256,8 +1256,11 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                             ? <img src={t.previewUrl} alt={t.name} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
                             : <div style={{ width: "100%", aspectRatio: "1", display: "grid", placeItems: "center", fontSize: 10, color: "#9ca3af" }}>無縮圖</div>}
                         </button>
-                        <button onClick={() => deleteTemplate(t.id, t.name)} title="刪除這個範本"
-                          style={{ position: "absolute", top: 2, right: 2, width: 18, height: 18, borderRadius: 9, border: "none", background: "rgba(17,24,39,.72)", color: "#fff", fontSize: 11, lineHeight: "18px", cursor: "pointer", padding: 0 }}>×</button>
+                        {/* 內建範本是唯讀的，刪掉之後只能重新部署才會回來，所以不給刪除鈕。 */}
+                        {!t.builtin && (
+                          <button onClick={() => deleteTemplate(t.id, t.name)} title="刪除這個範本"
+                            style={{ position: "absolute", top: 2, right: 2, width: 18, height: 18, borderRadius: 9, border: "none", background: "rgba(17,24,39,.72)", color: "#fff", fontSize: 11, lineHeight: "18px", cursor: "pointer", padding: 0 }}>×</button>
+                        )}
                       </div>
                     ))}
                   </div>

@@ -73,7 +73,8 @@ const PRODUCTS = {
 };
 /** 每個版預設用哪一支；layers() 開頭設定，product() 會讀它。 */
 let CURRENT = PRODUCTS.blue;
-const use = (key) => { CURRENT = PRODUCTS[key]; return []; };
+// 刻意不叫 use()——那會被 react-hooks/rules-of-hooks 誤判成 React Hook
+const pickProduct = (key) => { CURRENT = PRODUCTS[key]; return []; };
 
 const product = (x, y, w, h, over = {}) => [
   ...(over.shadow === false ? [] : [shape("商品陰影", x + w * 0.14, y + h * 0.88, w * 0.72, h * 0.08,

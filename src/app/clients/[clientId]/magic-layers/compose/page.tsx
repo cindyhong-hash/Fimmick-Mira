@@ -1,7 +1,7 @@
 "use client";
 /* Brand-scoped Magic Layers compose. Lives under /clients/[clientId] so the app
    shell renders the brand sidebar AND highlights the active brand; clientId comes
-   from the route (drives the 背景庫 that mirrors this brand's 素材庫). */
+   from the route (drives the editor's 素材庫 panel that mirrors this brand's 素材庫). */
 import { Suspense, useEffect, useState } from "react";
 import { ComposeView } from "@/components/magic-layers/ComposeView";
 

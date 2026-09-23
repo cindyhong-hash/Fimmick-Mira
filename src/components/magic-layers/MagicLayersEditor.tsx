@@ -66,7 +66,6 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const uploadImgRef = useRef<HTMLInputElement>(null);
   const uploadLogoRef = useRef<HTMLInputElement>(null);
   const [adding, setAdding] = useState(false);
-  const [showInsert, setShowInsert] = useState(false);        // 素材庫插入圖片挑選器
   const [showLogo, setShowLogo] = useState(false);            // Logo 選擇器（多版本挑一個）
   const [showIcon, setShowIcon] = useState(false);            // 圖標選擇器
   const [showShape, setShowShape] = useState(false);          // 形狀選擇器
@@ -80,13 +79,13 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const [magicFillBusy, setMagicFillBusy] = useState(false);
   const [magicFillResult, setMagicFillResult] = useState<string[] | null>(null);
   const [toolsOpen, setToolsOpen] = useState(true);           // 左側「工具」可收合
-  const [bgOpen, setBgOpen] = useState(true);                 // 左側「背景庫」可收合
+  const [bgOpen, setBgOpen] = useState(true);                 // 左側「素材庫」可收合
   // 範本庫（共用，全品牌看得到；目前只做 1:1）
   const [tplOpen, setTplOpen] = useState(true);
   const [templates, setTemplates] = useState<{ id: string; name: string; previewUrl: string | null; builtin?: boolean }[]>([]);
   const [tplSaving, setTplSaving] = useState(false);
   const [layersOpen, setLayersOpen] = useState(true);         // 右下「圖層」可收合
-  // 可拖曳調整的高度，記在這台瀏覽器（圖層區含標題列；範本庫、背景庫是縮圖格的高度）
+  // 可拖曳調整的高度，記在這台瀏覽器（圖層區含標題列；範本庫、素材庫是縮圖格的高度）
   const [layersH, startLayersResize] = useStoredHeight(LAYERS_H_KEY, 340, 150);
   const [tplH, startTplResize] = useStoredHeight("ml-tpl-h", 200, 90);
   const [bgH, startBgResize] = useStoredHeight("ml-bg-h", 168, 90);
@@ -799,7 +798,6 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   };
   /* ---------- background replacement (pick from library) ---------- */
   const replaceBackground = useCallback(async (url: string) => {
-    const bg = layersRef.current.find((l) => l.type === "background"); if (!bg) return;
     const im = await new Promise<HTMLImageElement | null>((res) => { const i = new Image(); i.crossOrigin = "anonymous"; i.onload = () => res(i); i.onerror = () => res(null); i.src = url; });
     if (!im) return;
     const c = document.createElement("canvas"); c.width = doc.w; c.height = doc.h;
@@ -807,7 +805,15 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     const s = Math.max(doc.w / im.naturalWidth, doc.h / im.naturalHeight); // cover
     const w = im.naturalWidth * s, h = im.naturalHeight * s;
     ctx.drawImage(im, (doc.w - w) / 2, (doc.h - h) / 2, w, h);
-    bg.canvas = c; bg.src = url; bg.naturalW = doc.w; bg.naturalH = doc.h; bg.w = doc.w; bg.h = doc.h; bg.cx = doc.w / 2; bg.cy = doc.h / 2; bg.thumb = makeThumb(bg);
+    // 圖的比例跟畫布一樣才存網址；不一樣的話畫面上是裁過的，存網址的話重開會被拉扁，所以存裁好的這張
+    const sameRatio = Math.abs(im.naturalWidth / im.naturalHeight - doc.w / doc.h) < 0.01;
+    let bg = layersRef.current.find((l) => l.type === "background");
+    if (!bg) {
+      // 空白畫布還沒有背景：新增一層放在最底下
+      bg = { id: `bg_${crypto.randomUUID().slice(0, 8)}`, name: "背景", type: "background", semanticId: "background", instanceId: null, confidence: 1, editable: true, source: "generated", isText: false, text: "", color: "#000", fontSize: 24, fontFamily: "'Noto Sans TC',system-ui,sans-serif", fontWeight: 700, align: "center", shape: null, canvas: null, naturalW: doc.w, naturalH: doc.h, src: null, cx: doc.w / 2, cy: doc.h / 2, w: doc.w, h: doc.h, rotation: 0, visible: true, locked: false, opacity: 1, embeddedText: [], thumb: null };
+      layersRef.current.unshift(bg);
+    }
+    bg.canvas = c; bg.src = sameRatio ? url : null; bg.naturalW = doc.w; bg.naturalH = doc.h; bg.w = doc.w; bg.h = doc.h; bg.cx = doc.w / 2; bg.cy = doc.h / 2; bg.visible = true; bg.thumb = makeThumb(bg);
     markDirty(); render(); refresh();
   }, [doc.w, doc.h, render, refresh]);
 
@@ -1523,7 +1529,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
 
       <div style={S.body}>
         <aside ref={lpanelRef} style={S.panel}>
-          {/* 範本庫：共用（全品牌看得到），目前只做 1:1。放在背景庫上面——
+          {/* 範本庫：共用（全品牌看得到），目前只做 1:1。放在素材庫上面——
               開一張新畫布時第一件事通常是挑版，不是挑背景。 */}
           <div style={{ borderBottom: "1px solid #e5e7eb", flex: "0 0 auto" }}>
             <SectionHeader icon={<LayoutTemplate size={16} color="#7c3aed" />} title="範本庫" hint="點擊套用" count={templates.length || undefined} open={tplOpen} onToggle={() => setTplOpen((v) => !v)} />
@@ -1562,23 +1568,24 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           </div>
           {backgrounds && backgrounds.length > 0 && (
             <div style={{ borderBottom: "1px solid #e5e7eb", flex: "0 0 auto" }}>
-              <SectionHeader icon={<ImageIcon size={16} color="#7c3aed" />} title="背景庫" hint="點擊替換" count={backgrounds.length} open={bgOpen} onToggle={() => setBgOpen((v) => !v)} />
+              {/* 原本「背景庫」和工具裡的「素材庫」是同一批圖、只差點下去做什麼，合成這一區：
+                  每張圖都能選設為背景或加入畫布，也能直接拖到畫布上 */}
+              <SectionHeader icon={<ImageIcon size={16} color="#7c3aed" />} title="素材庫" hint="設為背景・加入畫布" count={backgrounds.length} open={bgOpen} onToggle={() => setBgOpen((v) => !v)} />
               {bgOpen && (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6, maxHeight: bgH, overflowY: "auto", padding: "10px 10px 0" }}>
                   {backgrounds.map((b, i) => (
-                    <img key={i} src={b.url} alt={b.label ?? ""} title={(b.label ?? "") + "（點擊替換背景／拖到畫布加成圖層）"} onClick={() => replaceBackground(b.url)}
-                         draggable onDragStart={(e) => { e.dataTransfer.setData("text/ml-image-url", b.url); e.dataTransfer.effectAllowed = "copy"; }}
-                         style={{ width: "100%", aspectRatio: "1", objectFit: "cover", borderRadius: 8, border: "1px solid #e5e7eb", cursor: "pointer" }} />
+                    <MaterialThumb key={i} url={b.url} label={b.label ?? ""}
+                      onUseAsBackground={() => replaceBackground(b.url)}
+                      onAddToCanvas={() => void pushImageLayer(b.url, b.label || "圖片")} />
                   ))}
                 </div>
               )}
-              {bgOpen && <ResizeHandle label="拖曳調整背景庫高度" onPointerDown={(e) => startBgResize(e, 1, leftMax())} />}
+              {bgOpen && <ResizeHandle label="拖曳調整素材庫高度" onPointerDown={(e) => startBgResize(e, 1, leftMax())} />}
             </div>
           )}
           <SectionHeader icon={<Wrench size={16} color="#7c3aed" />} title="工具" open={toolsOpen} onToggle={() => setToolsOpen((v) => !v)} />
           <div style={{ borderBottom: "1px solid #e5e7eb", padding: toolsOpen ? "8px 6px 12px" : 0, flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
             {toolsOpen && (<>
-              <button style={S.tool} onClick={() => setShowInsert(true)}><ImageIcon size={16} />素材庫</button>
               <button style={S.tool} onClick={() => uploadImgRef.current?.click()}><Upload size={16} />上傳圖片</button>
               <button style={S.tool} onClick={addTextLayer}><Type size={16} />文字</button>
               <button style={S.tool} onClick={addLogo}><BadgeCheck size={16} />Logo</button>
@@ -2056,24 +2063,6 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         </aside>
       </div>
 
-      {showInsert && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,.4)" }} onClick={() => setShowInsert(false)} />
-          <div style={{ position: "relative", width: "min(560px,92%)", maxHeight: "80vh", background: "#fff", borderRadius: 16, padding: 20, display: "flex", flexDirection: "column" }}>
-            <div style={{ fontSize: 15, fontWeight: 800, color: "#1f2937", marginBottom: 12 }}>從素材庫插入圖片</div>
-            {backgrounds && backgrounds.length > 0 ? (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, overflowY: "auto" }}>
-                {backgrounds.map((b, i) => (
-                  <img key={i} src={b.url} alt={b.label ?? ""} title={b.label ?? ""}
-                    onClick={() => { setShowInsert(false); pushImageLayer(b.url, b.label || "圖片"); }}
-                    style={{ width: "100%", aspectRatio: "1", objectFit: "cover", borderRadius: 10, border: "1px solid #e5e7eb", cursor: "pointer" }} />
-                ))}
-              </div>
-            ) : <div style={{ color: "#9ca3af", fontSize: 13, padding: "20px 0" }}>此品牌素材庫還沒有圖。</div>}
-          </div>
-        </div>
-      )}
-
       {showOutpaint && (
         <div style={{ position: "fixed", inset: 0, zIndex: 90, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,.45)" }} onClick={() => !outpaintBusy && setShowOutpaint(false)} />
@@ -2490,6 +2479,31 @@ function GradientEditor({ g, onChange }: { g: NonNullable<ShapeSpec["gradient"]>
   </>);
 }
 
+/**
+ * 素材庫的一張縮圖。滑鼠移上去（觸控裝置點一下）出現兩個用途：
+ * 設為背景（換掉目前的背景）、加入畫布（加成一張可以移動縮放的圖）。
+ * 也可以直接拖到畫布上想放的位置。
+ */
+function MaterialThumb({ url, label, onUseAsBackground, onAddToCanvas }: { url: string; label: string; onUseAsBackground: () => void; onAddToCanvas: () => void }) {
+  const [active, setActive] = useState(false);
+  const btn: React.CSSProperties = { width: "100%", height: 24, border: "none", borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: "pointer" };
+  return (
+    <div style={{ position: "relative", borderRadius: 8, overflow: "hidden", border: "1px solid #e5e7eb", aspectRatio: "1" }}
+      onMouseEnter={() => setActive(true)} onMouseLeave={() => setActive(false)} onClick={() => setActive(true)}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={url} alt={label} title={label} draggable
+        onDragStart={(e) => { e.dataTransfer.setData("text/ml-image-url", url); e.dataTransfer.effectAllowed = "copy"; }}
+        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", cursor: "grab" }} />
+      {active && (
+        <div style={{ position: "absolute", inset: 0, background: "rgba(17,24,39,.55)", display: "flex", flexDirection: "column", justifyContent: "center", gap: 5, padding: 6 }}>
+          <button onClick={(e) => { e.stopPropagation(); setActive(false); onUseAsBackground(); }} style={{ ...btn, background: "#fff", color: "#1f2937" }}>設為背景</button>
+          <button onClick={(e) => { e.stopPropagation(); setActive(false); onAddToCanvas(); }} style={{ ...btn, background: "#7c3aed", color: "#fff" }}>加入畫布</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** 傾斜：水平傾斜把方塊推成平行四邊形（斜的標籤），垂直傾斜則是上下方向。文字、形狀、圖片都能用。 */
 function SkewControls({ skewX, skewY, onChange }: { skewX: number; skewY: number; onChange: (patch: { skewX?: number; skewY?: number }) => void }) {
   const row = (label: string, value: number, key: "skewX" | "skewY") => (<>
@@ -2651,7 +2665,7 @@ const S: Record<string, React.CSSProperties> = {
   divider: { width: 1, height: 24, background: "#e5e7eb" },
   tbtn: { height: 34, padding: "0 12px", border: "1px solid #e5e7eb", background: "#ffffff", color: "#374151", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 },
   body: { flex: 1, display: "flex", minHeight: 0 },
-  // overflowY：範本庫、背景庫都拉很高時，整欄可以捲，不會把外框撐高
+  // overflowY：範本庫、素材庫都拉很高時，整欄可以捲，不會把外框撐高
   panel: { width: 288, flex: "0 0 auto", background: "#ffffff", borderRight: "1px solid #e5e7eb", display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" },
   panelHead: { height: 44, display: "flex", alignItems: "center", padding: "0 14px", borderBottom: "1px solid #e5e7eb", fontSize: 12, letterSpacing: ".06em", textTransform: "uppercase", color: "#9ca3af", fontWeight: 700 },
   row: { display: "flex", alignItems: "center", gap: 9, padding: "8px 9px", borderRadius: 12, background: "#f9fafb", border: "1px solid transparent", cursor: "pointer" },

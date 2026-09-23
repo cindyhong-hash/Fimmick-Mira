@@ -12,7 +12,7 @@ import { useBrandFonts } from "@/lib/fonts/useBrandFonts";
 import type { SavedLayer, TextFx, TextRun, ShapeKind, ShapeSpec } from "@/lib/magic-layers/saved-layer.ts";
 export type { SavedLayer } from "@/lib/magic-layers/saved-layer.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronUp, ChevronDown, Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowLeft, Plus, Download, Image as ImageIcon, Upload, Type, BadgeCheck, Square, Star, Minus, Pencil, Undo2, Redo2, Eraser, Maximize2, GripVertical, WandSparkles, Save } from "lucide-react";
+import { ChevronUp, ChevronDown, Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowLeft, Plus, Download, Image as ImageIcon, Upload, Type, BadgeCheck, Square, Star, Minus, Pencil, Undo2, Redo2, Eraser, Maximize2, GripVertical, WandSparkles, Save, Layers, LayoutTemplate, Wrench } from "lucide-react";
 import type { LayerData, FragmentationReport } from "@/lib/magic-layers/types.ts";
 import { extractLayer } from "@/lib/magic-layers/extract-browser.ts";
 import { alphaHit } from "@/lib/magic-layers/alpha-hit-test.ts";
@@ -80,7 +80,15 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const [tplOpen, setTplOpen] = useState(true);
   const [templates, setTemplates] = useState<{ id: string; name: string; previewUrl: string | null; builtin?: boolean }[]>([]);
   const [tplSaving, setTplSaving] = useState(false);
-  const [layersOpen, setLayersOpen] = useState(true);         // 左側「圖層」可收合
+  const [layersOpen, setLayersOpen] = useState(true);         // 右下「圖層」可收合
+  // 可拖曳調整的高度，記在這台瀏覽器（圖層區含標題列；範本庫、背景庫是縮圖格的高度）
+  const [layersH, startLayersResize] = useStoredHeight(LAYERS_H_KEY, 340, 150);
+  const [tplH, startTplResize] = useStoredHeight("ml-tpl-h", 200, 90);
+  const [bgH, startBgResize] = useStoredHeight("ml-bg-h", 168, 90);
+  const rpanelRef = useRef<HTMLElement>(null);
+  const lpanelRef = useRef<HTMLElement>(null);
+  /** 左欄拉高某一區時，至少留一點給下面的工具列。 */
+  const leftMax = () => Math.max(120, (lpanelRef.current?.clientHeight ?? 800) - 260);
   const [panelTab, setPanelTab] = useState<"design" | "settings">("design");
   const [renaming, setRenaming] = useState(false);            // 重新命名這個設計
   const [renamingLayerId, setRenamingLayerId] = useState<string | null>(null);
@@ -1274,21 +1282,19 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       </div>
 
       <div style={S.body}>
-        <aside style={S.panel}>
+        <aside ref={lpanelRef} style={S.panel}>
           {/* 範本庫：共用（全品牌看得到），目前只做 1:1。放在背景庫上面——
               開一張新畫布時第一件事通常是挑版，不是挑背景。 */}
-          <div style={{ borderBottom: "1px solid #e5e7eb", padding: "10px 10px 12px", flex: "0 0 auto" }}>
-            <button onClick={() => setTplOpen((v) => !v)} style={{ ...S.panelHead, height: "auto", padding: 0, marginBottom: tplOpen ? 8 : 0, border: "none", width: "100%", background: "none", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span>範本庫（點擊套用）</span>{tplOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            </button>
+          <div style={{ borderBottom: "1px solid #e5e7eb", flex: "0 0 auto" }}>
+            <SectionHeader icon={<LayoutTemplate size={16} color="#7c3aed" />} title="範本庫" hint="點擊套用" count={templates.length || undefined} open={tplOpen} onToggle={() => setTplOpen((v) => !v)} />
             {tplOpen && (
-              <>
+              <div style={{ padding: "10px 10px 0" }}>
                 {templates.length === 0 ? (
                   <div style={{ fontSize: 11, color: "#9ca3af", lineHeight: 1.6 }}>
                     範本載入中……如果一直沒出現，重新整理一次。
                   </div>
                 ) : (
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6, maxHeight: 200, overflowY: "auto" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6, maxHeight: tplH, overflowY: "auto" }}>
                     {templates.map((t) => (
                       <div key={t.id} style={{ position: "relative" }}>
                         <button onClick={() => applyTemplate(t.id)} title={`${t.name}（點擊套用，會換掉目前畫布內容；可用復原還原）`}
@@ -1310,16 +1316,15 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                   style={{ ...S.tool, width: "100%", marginTop: 8, justifyContent: "center", opacity: tplSaving ? .6 : 1 }}>
                   <Save size={15} />{tplSaving ? "儲存中…" : "把目前畫布存成範本"}
                 </button>
-              </>
+              </div>
             )}
+            {tplOpen && <ResizeHandle label="拖曳調整範本庫高度" onPointerDown={(e) => startTplResize(e, 1, leftMax())} />}
           </div>
           {backgrounds && backgrounds.length > 0 && (
-            <div style={{ borderBottom: "1px solid #e5e7eb", padding: "10px 10px 12px", flex: "0 0 auto" }}>
-              <button onClick={() => setBgOpen((v) => !v)} style={{ ...S.panelHead, height: "auto", padding: 0, marginBottom: bgOpen ? 8 : 0, border: "none", width: "100%", background: "none", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span>背景庫（點擊替換）</span>{bgOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-              </button>
+            <div style={{ borderBottom: "1px solid #e5e7eb", flex: "0 0 auto" }}>
+              <SectionHeader icon={<ImageIcon size={16} color="#7c3aed" />} title="背景庫" hint="點擊替換" count={backgrounds.length} open={bgOpen} onToggle={() => setBgOpen((v) => !v)} />
               {bgOpen && (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6, maxHeight: 168, overflowY: "auto" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6, maxHeight: bgH, overflowY: "auto", padding: "10px 10px 0" }}>
                   {backgrounds.map((b, i) => (
                     <img key={i} src={b.url} alt={b.label ?? ""} title={(b.label ?? "") + "（點擊替換背景／拖到畫布加成圖層）"} onClick={() => replaceBackground(b.url)}
                          draggable onDragStart={(e) => { e.dataTransfer.setData("text/ml-image-url", b.url); e.dataTransfer.effectAllowed = "copy"; }}
@@ -1327,12 +1332,11 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                   ))}
                 </div>
               )}
+              {bgOpen && <ResizeHandle label="拖曳調整背景庫高度" onPointerDown={(e) => startBgResize(e, 1, leftMax())} />}
             </div>
           )}
-          <div style={{ borderBottom: "1px solid #e5e7eb", padding: "10px 6px 12px", flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
-            <button onClick={() => setToolsOpen((v) => !v)} style={{ ...S.panelHead, height: "auto", padding: "0 4px", marginBottom: toolsOpen ? 6 : 0, border: "none", width: "100%", background: "none", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span>工具</span>{toolsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            </button>
+          <SectionHeader icon={<Wrench size={16} color="#7c3aed" />} title="工具" open={toolsOpen} onToggle={() => setToolsOpen((v) => !v)} />
+          <div style={{ borderBottom: "1px solid #e5e7eb", padding: toolsOpen ? "8px 6px 12px" : 0, flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
             {toolsOpen && (<>
               <button style={S.tool} onClick={() => setShowInsert(true)}><ImageIcon size={16} />素材庫</button>
               <button style={S.tool} onClick={() => uploadImgRef.current?.click()}><Upload size={16} />上傳圖片</button>
@@ -1472,7 +1476,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         {/* 右側面板常駐。原本是選到圖層才掛載，一選取畫布就從 501px 被擠到 237px，
             縮放比例沒變、可視範圍卻少一半，操作起來就像「一點物件就放大」。
             Figma／PS 的面板都是固定的，畫布寬度不會因為選取而變動。 */}
-        <aside style={S.rpanel}>
+        <aside ref={rpanelRef} style={S.rpanel}>
           {/* 設定在上、圖層在下——跟 Photoshop 一樣，左欄就不會擠成一條。 */}
           <div style={{ flex: "1 1 0", minHeight: 0, overflowY: "auto" }}>
           {!selEl ? (
@@ -1725,10 +1729,12 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           </>
           )}
           </div>
-            <button onClick={() => setLayersOpen((v) => !v)} style={{ ...S.panelHead, borderTop: "1px solid #e5e7eb", flex: "0 0 auto", width: "100%", background: "none", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span>圖層 Layers</span>{layersOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            </button>
-            <div style={{ display: layersOpen ? "flex" : "none", flex: "0 0 auto", maxHeight: "42vh", overflowY: "auto", padding: 8, flexDirection: "column", gap: 6 }}>
+            {/* 分隔線：往上拉一次看到更多圖層，往下拉把空間讓給上面的設定 */}
+            {layersOpen
+              ? <ResizeHandle label="拖曳調整圖層區高度" onPointerDown={(e) => startLayersResize(e, -1, (rpanelRef.current?.clientHeight ?? 800) - 150)} />
+              : <div style={{ borderTop: "1px solid #e5e7eb" }} />}
+            <SectionHeader icon={<Layers size={16} color="#7c3aed" />} title="圖層" count={panel.length} open={layersOpen} collapseDown onToggle={() => setLayersOpen((v) => !v)} />
+            <div style={{ display: layersOpen ? "flex" : "none", flex: "0 0 auto", height: Math.max(0, layersH - 54), overflowY: "auto", padding: 8, flexDirection: "column", gap: 6 }}>
               {panel.map((l) => (
                 <div key={l.id} draggable={renamingLayerId !== l.id} onClick={(e) => e.shiftKey ? toggleSelection(l.id) : selectLayerOrGroup(l.id)}
                      onDragStart={(e) => { setDragLayerId(l.id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", l.id); }}
@@ -2129,6 +2135,64 @@ function loadToCanvas(url: string): Promise<HTMLCanvasElement | null> {
 }
 
 /* ---------- inline styles (self-contained; no CSS import needed) ---------- */
+/** 圖層區高度記在 localStorage 的 key。 */
+const LAYERS_H_KEY = "ml-layers-h";
+
+/**
+ * 可拖曳調整、記在這台瀏覽器的高度。
+ * 編輯器只在瀏覽器端載好圖之後才出現，不會在伺服器端算，所以初始值可以直接讀 localStorage。
+ * dir：1＝往下拖變高（左欄的縮圖格），-1＝往上拖變高（右下的圖層區）。
+ */
+function useStoredHeight(key: string, fallback: number, min: number) {
+  const [h, setH] = useState(() => {
+    try { const v = Number(window.localStorage.getItem(key)); if (v >= min) return v; } catch { /* 無痕模式等讀不到就用預設 */ }
+    return fallback;
+  });
+  const start = useCallback((e: React.PointerEvent, dir: 1 | -1, max: number) => {
+    e.preventDefault();
+    const startY = e.clientY, startH = h, top = Math.max(min, max);
+    let latest = startH;
+    const move = (ev: PointerEvent) => { latest = Math.max(min, Math.min(top, startH + dir * (ev.clientY - startY))); setH(latest); };
+    const up = () => {
+      window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
+      try { window.localStorage.setItem(key, String(Math.round(latest))); } catch { /* 存不了就只在這次有效 */ }
+    };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  }, [h, key, min]);
+  return [h, start] as const;
+}
+
+/** 可拖曳的分隔線：中間一條短橫槓提示「這裡可以拉」。 */
+function ResizeHandle({ label, onPointerDown }: { label: string; onPointerDown: (e: React.PointerEvent) => void }) {
+  return (
+    <div role="separator" aria-orientation="horizontal" aria-label={label} title={label} onPointerDown={onPointerDown}
+      style={{ flex: "0 0 auto", height: 12, cursor: "row-resize", display: "flex", alignItems: "center", justifyContent: "center", borderTop: "1px solid #f0f1f4", background: "#fff", touchAction: "none" }}>
+      <span style={{ width: 40, height: 4, borderRadius: 2, background: "#d1d5db" }} />
+    </div>
+  );
+}
+
+/**
+ * 側欄每一區的標題列。原本是灰色小字的全大寫標題，擠在一起看不出哪裡是一區的開始；
+ * 改成淺底、深色粗體、帶圖示與數量，一眼就找得到。
+ * collapseDown：放在最下面的區塊（圖層）收合方向是往下。
+ */
+function SectionHeader({ icon, title, hint, count, open, onToggle, collapseDown }: {
+  icon: React.ReactNode; title: string; hint?: string; count?: number; open: boolean; onToggle: () => void; collapseDown?: boolean;
+}) {
+  return (
+    <button onClick={onToggle}
+      style={{ flex: "0 0 auto", width: "100%", height: 42, padding: "0 14px", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f9fafb", border: "none", borderBottom: "1px solid #eef0f3", cursor: "pointer", color: "#6b7280" }}>
+      <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, fontWeight: 700, color: "#1f2937" }}>
+        {icon}{title}
+        {count != null && <span style={{ fontSize: 11, fontWeight: 600, color: "#7c3aed", background: "#f5f3ff", borderRadius: 999, padding: "1px 8px" }}>{count}</span>}
+        {hint && <span style={{ fontSize: 11, fontWeight: 500, color: "#9ca3af" }}>{hint}</span>}
+      </span>
+      {(open !== !!collapseDown) ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+    </button>
+  );
+}
+
 const S: Record<string, React.CSSProperties> = {
   root: { display: "flex", flexDirection: "column", height: "100%", background: "#ffffff", color: "#1f2937", fontFamily: "'Manrope','Noto Sans TC',system-ui,sans-serif" },
   warn: { background: "#fffbeb", color: "#b45309", padding: "8px 14px", fontSize: 13, borderBottom: "1px solid #fde68a" },

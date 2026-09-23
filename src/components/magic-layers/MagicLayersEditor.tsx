@@ -642,6 +642,57 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const toggleLock = (id: string) => { const l = layersRef.current[idx(id)]; if (l) { l.locked = !l.locked; markDirty(); refresh(); render(); } };
   const duplicate = (id: string) => { const l = layersRef.current[idx(id)]; if (!l) return; const c: EL = { ...l, id: l.id + "_copy" + Math.floor(view.current.panX + Math.abs(l.cx)), name: l.name + " 複本", cx: l.cx + 24, cy: l.cy + 24, groupId: null }; layersRef.current.splice(idx(id) + 1, 0, c); selectOnly(c.id); markDirty(); refresh(); render(); };
   const groupSelected = () => { if (selectedIdsRef.current.length < 2) return; const groupId = `group_${Date.now()}`; layersRef.current.forEach((l) => { if (selectedIdsRef.current.includes(l.id)) l.groupId = groupId; }); markDirty(); refresh(); render(); };
+  /**
+   * 合併圖層（⌘E，跟 Photoshop 一樣）：選兩個以上就把它們合成一張；只選一個就跟下面那層合併。
+   * 依原本的上下順序畫進一張新圖（位置、旋轉、透明度、遮色片都照畫面上的樣子），
+   * 放在原本最上面那層的位置。有背景參與時結果就是背景、而且是整張畫布大小，
+   * 擴圖、換背景這些把背景當滿版的功能才接得上。
+   * 文字合併後會變成圖片，所以先問一次；合錯了可以復原。
+   */
+  const mergeLayers = () => {
+    const a = layersRef.current;
+    let ids = selectedIdsRef.current.slice();
+    if (ids.length === 1) {
+      const i = a.findIndex((l) => l.id === ids[0]);
+      const below = a.slice(0, Math.max(0, i)).reverse().find((l) => l.visible);
+      if (!below) return;
+      ids = [ids[0], below.id];
+    }
+    const picked = a.filter((l) => ids.includes(l.id) && l.visible);
+    if (picked.length < 2) return;
+    if (picked.some((l) => l.isText) && !window.confirm("合併之後文字會變成圖片，就不能再改字了（可以用復原還原）。要合併嗎？")) return;
+
+    const hasBg = picked.some((l) => l.type === "background");
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const l of picked) {
+      const c = Math.abs(Math.cos(l.rotation)), sn = Math.abs(Math.sin(l.rotation));
+      const hw = (l.w * c + l.h * sn) / 2, hh = (l.w * sn + l.h * c) / 2;
+      minX = Math.min(minX, l.cx - hw); maxX = Math.max(maxX, l.cx + hw); minY = Math.min(minY, l.cy - hh); maxY = Math.max(maxY, l.cy + hh);
+    }
+    // 超出畫布的部分本來就看不到，不用留；背景一律是整張畫布
+    if (hasBg) { minX = 0; minY = 0; maxX = doc.w; maxY = doc.h; }
+    else { minX = Math.max(0, minX); minY = Math.max(0, minY); maxX = Math.min(doc.w, maxX); maxY = Math.min(doc.h, maxY); }
+    const W = Math.round(maxX - minX), H = Math.round(maxY - minY);
+    if (W < 1 || H < 1) return;
+    const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+    const g = cv.getContext("2d")!;
+    g.translate(-minX, -minY);
+    for (const l of picked) {
+      g.save(); applyClip(g, l, a); g.translate(l.cx, l.cy); g.rotate(l.rotation); g.globalAlpha = l.opacity;
+      if (l.canvas) { g.imageSmoothingQuality = "high"; g.drawImage(l.canvas, -l.w / 2, -l.h / 2, l.w, l.h); }
+      else if (l.isText) drawTextEl(g, l); else if (l.shape) drawEditableShape(g, l.w, l.h, l.shape);
+      g.restore();
+    }
+    const merged: EL = { id: `merged_${crypto.randomUUID().slice(0, 8)}`, name: hasBg ? "背景" : "合併圖層", type: hasBg ? "background" : "object", semanticId: hasBg ? "background" : "object", instanceId: null, confidence: 1, editable: true, source: "generated", isText: false, text: "", color: "#000", fontSize: 24, fontFamily: FONT, fontWeight: 700, align: "center", shape: null, canvas: cv, naturalW: W, naturalH: H, src: null, cx: minX + W / 2, cy: minY + H / 2, w: W, h: H, rotation: 0, visible: true, locked: false, opacity: 1, embeddedText: [], thumb: null, groupId: null, clipTo: null };
+    merged.thumb = makeThumb(merged);
+    const pickedIds = new Set(picked.map((l) => l.id));
+    const top = Math.max(...picked.map((l) => a.indexOf(l)));
+    const at = top - picked.filter((l) => a.indexOf(l) < top).length;
+    layersRef.current = a.filter((l) => !pickedIds.has(l.id));
+    layersRef.current.splice(at, 0, merged);
+    for (const id of pickedIds) releaseClips(layersRef.current, id);
+    selectOnly(merged.id); markDirty(); refresh(); render();
+  };
   const ungroupSelected = () => { const groups = new Set(layersRef.current.filter((l) => selectedIdsRef.current.includes(l.id)).map((l) => l.groupId).filter(Boolean)); if (!groups.size) return; layersRef.current.forEach((l) => { if (l.groupId && groups.has(l.groupId)) l.groupId = null; }); markDirty(); refresh(); render(); };
   const commitLayerRename = () => { const l = layersRef.current.find((x) => x.id === renamingLayerId); if (l && renamingLayerValue.trim()) { l.name = renamingLayerValue.trim(); markDirty(); refresh(); } setRenamingLayerId(null); };
   const canvasRatio = (() => { const r = doc.w / doc.h; return Math.abs(r - 1) < .01 ? "1:1" : Math.abs(r - .8) < .01 ? "4:5" : Math.abs(r - 9 / 16) < .01 ? "9:16" : Math.abs(r - 16 / 9) < .01 ? "16:9" : "custom"; })();
@@ -1162,6 +1213,11 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         e.preventDefault();
         if (e.shiftKey) ungroupSelected(); else groupSelected();
       }
+      // ⌘E 合併圖層（Photoshop 的慣例）
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "e"
+        && !/INPUT|TEXTAREA/.test((e.target as HTMLElement).tagName)) {
+        e.preventDefault(); mergeLayers();
+      }
     };
     window.addEventListener("keydown", saveShortcut);
     return () => window.removeEventListener("keydown", saveShortcut);
@@ -1307,6 +1363,11 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         <span style={S.divider} />
         {selectedIds.length >= 2 && !selectedIds.some((id) => !!layersRef.current.find((l) => l.id === id)?.groupId) && <button style={S.tbtn} onClick={groupSelected} title="將選取的物件設為一組（⌘G）">群組</button>}
         {selectedIds.some((id) => !!layersRef.current.find((l) => l.id === id)?.groupId) && <button style={S.tbtn} onClick={ungroupSelected} title="解除目前群組（⌘⇧G）">解散群組</button>}
+        {(selectedIds.length >= 2 || (selectedIds.length === 1 && panel.findIndex((l) => l.id === selectedIds[0]) < panel.length - 1)) && (
+          <button style={S.tbtn} onClick={mergeLayers} title={selectedIds.length >= 2 ? "把選取的圖層合成一張（⌘E）" : "跟下面那一層合成一張（⌘E）"}>
+            {selectedIds.length >= 2 ? "合併圖層" : "向下合併"}
+          </button>
+        )}
         {selectedIsImage && (
           <button style={S.tbtn} onClick={() => void cutoutSelected()} disabled={adding} title="移除這個圖層的背景（會呼叫付費去背服務）">
             {adding ? "去背中…" : "去背"}

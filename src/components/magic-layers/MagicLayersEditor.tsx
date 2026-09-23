@@ -1,5 +1,6 @@
 "use client";
 import { clipToShape, drawEditableShape, drawIcon, EDITABLE_ICON_NAMES, isFillableShape } from "@/lib/magic-layers/editable-shape.ts";
+import { applyLayerTransform, docToLayer, layerCorners, layerToDoc } from "@/lib/magic-layers/layer-transform.ts";
 /* ============================================================
    Magic Layers — React editor
    Canvas layer editor: select / move / scale / rotate / z-order / show / lock /
@@ -40,6 +41,8 @@ type EL = {
   groupId?: string | null;
   /** 剪裁遮色片：只顯示在這個形狀圖層的輪廓裡（形狀圖層的 id）。 */
   clipTo?: string | null;
+  /** 傾斜（角度）：水平傾斜讓方塊變成平行四邊形，像斜的標籤。 */
+  skewX?: number; skewY?: number;
 };
 
 /**
@@ -221,6 +224,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           opacity: (l.meta?.opacity as number | undefined) ?? 1,
           groupId: (l.meta?.groupId as string | undefined) ?? null,
           clipTo: (l.meta?.clipTo as string | undefined) ?? null,
+          skewX: (l.meta?.skewX as number | undefined) ?? 0, skewY: (l.meta?.skewY as number | undefined) ?? 0,
           embeddedText: l.embeddedText.map((t) => ({ text: t.text })), thumb: null,
         };
         if (isText && !st && !canvas) el.color = sampleColor(sctx, l.x, l.y, l.width, l.height);
@@ -242,17 +246,17 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const s2d = (sx: number, sy: number) => ({ x: (sx - view.current.panX) / view.current.zoom, y: (sy - view.current.panY) / view.current.zoom });
   const d2s = (dx: number, dy: number) => ({ x: dx * view.current.zoom + view.current.panX, y: dy * view.current.zoom + view.current.panY });
   const evPt = (e: MouseEvent) => { const r = canvasRef.current!.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
-  const corners = (l: EL) => {
-    const hw = l.w / 2, hh = l.h / 2, cos = Math.cos(l.rotation), sin = Math.sin(l.rotation);
-    return [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([px, py]) => ({ x: l.cx + px * cos - py * sin, y: l.cy + px * sin + py * cos }));
-  };
+  // 四個角：跟著旋轉和傾斜，選取框才會貼著斜的圖層
+  const corners = (l: EL) => layerCorners(l);
   // 四邊中點（上/右/下/左）— 拖曳只改單一方向（壓扁/拉長）
   const edges = (l: EL) => {
-    const hw = l.w / 2, hh = l.h / 2, cos = Math.cos(l.rotation), sin = Math.sin(l.rotation);
-    return ([[0, -hh, "y"], [hw, 0, "x"], [0, hh, "y"], [-hw, 0, "x"]] as const).map(([px, py, axis]) => ({ x: l.cx + px * cos - py * sin, y: l.cy + px * sin + py * cos, axis }));
+    const hw = l.w / 2, hh = l.h / 2;
+    return ([[0, -hh, "y"], [hw, 0, "x"], [0, hh, "y"], [-hw, 0, "x"]] as const).map(([px, py, axis]) => ({ ...layerToDoc(l, px, py), axis }));
   };
-  const rotHandle = (l: EL) => { const gap = 26 / view.current.zoom, dy = -(l.h / 2 + gap), cos = Math.cos(l.rotation), sin = Math.sin(l.rotation); return { x: l.cx - dy * sin, y: l.cy + dy * cos }; };
-  const toLocal = (l: EL, dx: number, dy: number) => { const ox = dx - l.cx, oy = dy - l.cy, cos = Math.cos(-l.rotation), sin = Math.sin(-l.rotation); return { x: ox * cos - oy * sin, y: ox * sin + oy * cos }; };
+  // 旋轉把手：在上緣中點（傾斜後的位置）再往「上」一段
+  const rotHandle = (l: EL) => { const gap = 26 / view.current.zoom, top = layerToDoc(l, 0, -l.h / 2); return { x: top.x + gap * Math.sin(l.rotation), y: top.y - gap * Math.cos(l.rotation) }; };
+  // 畫布座標換回圖層自己的座標（把旋轉和傾斜都還原）：點選、縮放、橡皮擦都用這個
+  const toLocal = (l: EL, dx: number, dy: number) => docToLayer(l, dx, dy);
   const sel = () => layersRef.current.find((l) => l.id === selectedId) ?? null;
   const applySelection = (ids: string[], primary: string | null = ids[0] ?? null) => {
     selectedIdsRef.current = ids;
@@ -292,7 +296,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       if (!l.visible) continue;
       ctx.save();
       applyClip(ctx, l, layersRef.current);
-      ctx.translate(l.cx, l.cy); ctx.rotate(l.rotation); ctx.globalAlpha = l.opacity;
+      applyLayerTransform(ctx, l); ctx.globalAlpha = l.opacity;
       if (l.canvas) {
         // real original pixels (objects, cropped text, background)
         ctx.imageSmoothingQuality = "high";
@@ -756,10 +760,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
 
     const hasBg = picked.some((l) => l.type === "background");
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const l of picked) {
-      const c = Math.abs(Math.cos(l.rotation)), sn = Math.abs(Math.sin(l.rotation));
-      const hw = (l.w * c + l.h * sn) / 2, hh = (l.w * sn + l.h * c) / 2;
-      minX = Math.min(minX, l.cx - hw); maxX = Math.max(maxX, l.cx + hw); minY = Math.min(minY, l.cy - hh); maxY = Math.max(maxY, l.cy + hh);
+    for (const l of picked) for (const p of layerCorners(l)) {
+      minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
     }
     // 超出畫布的部分本來就看不到，不用留；背景一律是整張畫布
     if (hasBg) { minX = 0; minY = 0; maxX = doc.w; maxY = doc.h; }
@@ -770,7 +772,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     const g = cv.getContext("2d")!;
     g.translate(-minX, -minY);
     for (const l of picked) {
-      g.save(); applyClip(g, l, a); g.translate(l.cx, l.cy); g.rotate(l.rotation); g.globalAlpha = l.opacity;
+      g.save(); applyClip(g, l, a); applyLayerTransform(g, l); g.globalAlpha = l.opacity;
       if (l.canvas) { g.imageSmoothingQuality = "high"; g.drawImage(l.canvas, -l.w / 2, -l.h / 2, l.w, l.h); }
       else if (l.isText) drawTextEl(g, l); else if (l.shape) drawEditableShape(g, l.w, l.h, l.shape);
       g.restore();
@@ -1008,7 +1010,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       if (!l.visible || !keep(l)) continue;
       ctx.save();
       applyClip(ctx, l, layersRef.current);
-      ctx.translate(l.cx, l.cy); ctx.rotate(l.rotation); ctx.globalAlpha = l.opacity;
+      applyLayerTransform(ctx, l); ctx.globalAlpha = l.opacity;
       if (l.canvas) { ctx.imageSmoothingQuality = "high"; ctx.drawImage(l.canvas, -l.w / 2, -l.h / 2, l.w, l.h); }
       else if (l.isText) {
         drawTextEl(ctx, l);
@@ -1032,7 +1034,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     // 生成式填色補過的那幾塊也是背景的一部分，要一起畫進去，不然擴圖後修過的地方會不見
     for (const l of layersRef.current) {
       if (l === bg || l.type !== "background" || !l.visible || !l.canvas) continue;
-      g.save(); g.translate(l.cx, l.cy); g.rotate(l.rotation); g.globalAlpha = l.opacity;
+      g.save(); applyLayerTransform(g, l); g.globalAlpha = l.opacity;
       g.drawImage(l.canvas, -l.w / 2, -l.h / 2, l.w, l.h); g.restore();
     }
     return c.toDataURL("image/png");
@@ -1205,6 +1207,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     x: l.cx - l.w / 2, y: l.cy - l.h / 2, w: l.w, h: l.h, rotation: l.rotation,
     visible: l.visible, opacity: l.opacity, locked: l.locked, groupId: l.groupId ?? null,
     ...(l.clipTo ? { clipTo: l.clipTo } : {}),
+    ...(l.skewX ? { skewX: l.skewX } : {}), ...(l.skewY ? { skewY: l.skewY } : {}),
     ...(l.isText
       ? { isText: true, text: l.text, color: l.color, fontSize: l.fontSize * (l.w / (l.naturalW || l.w)), fontFamily: l.fontFamily, fontWeight: l.fontWeight, align: l.align, ...(l.fx ? { fx: l.fx } : {}), ...(l.textLayout ? { textLayout: { ...l.textLayout, letterSpacing: l.textLayout.letterSpacing * (l.w / (l.naturalW || l.w)) } } : {}),
           // 分段樣式的字級跟著圖層縮放一起換算，否則存檔重開會跑掉
@@ -1259,6 +1262,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       cx: sl.x + sl.w / 2, cy: sl.y + sl.h / 2, w: boxW, h: boxH,
       rotation: sl.rotation ?? 0, visible: sl.visible !== false, locked: !!sl.locked,
       opacity: sl.opacity ?? 1, embeddedText: [], thumb: null, groupId: sl.groupId ?? null, clipTo: sl.clipTo ?? null,
+      skewX: sl.skewX ?? 0, skewY: sl.skewY ?? 0,
     };
     el.thumb = makeThumb(el);
     return el;
@@ -1404,7 +1408,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           const g = c.getContext("2d")!; g.fillStyle = "#fff"; g.fillRect(0, 0, doc.w, doc.h);
           for (const l of layersRef.current) {
             if (!l.visible || l.id === target.id) continue;
-            g.save(); applyClip(g, l, layersRef.current); g.translate(l.cx, l.cy); g.rotate(l.rotation); g.globalAlpha = l.opacity;
+            g.save(); applyClip(g, l, layersRef.current); applyLayerTransform(g, l); g.globalAlpha = l.opacity;
             if (l.canvas) { g.imageSmoothingQuality = "high"; g.drawImage(l.canvas, -l.w / 2, -l.h / 2, l.w, l.h); }
             else if (l.isText) drawTextEl(g, l); else if (l.shape) drawEditableShape(g, l.w, l.h, l.shape);
             g.restore();
@@ -1990,6 +1994,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                 <div style={S.rhead}>圖層設定</div>
                 <label style={S.rlabel}>透明度 <span style={{ float: "right", color: "#9ca3af" }}>{Math.round(selEl.opacity * 100)}%</span></label>
                 <input type="range" min={0} max={100} value={Math.round(selEl.opacity * 100)} onChange={(e) => updateText({ opacity: Number(e.target.value) / 100 })} style={{ width: "100%", accentColor: "#7c3aed" }} />
+                {selEl.type !== "background" && (
+                  <SkewControls skewX={selEl.skewX ?? 0} skewY={selEl.skewY ?? 0} onChange={(patch) => updateText(patch)} />
+                )}
               </div>
             ) : (
               <div style={{ padding: 16 }}>
@@ -2483,6 +2490,25 @@ function GradientEditor({ g, onChange }: { g: NonNullable<ShapeSpec["gradient"]>
   </>);
 }
 
+/** 傾斜：水平傾斜把方塊推成平行四邊形（斜的標籤），垂直傾斜則是上下方向。文字、形狀、圖片都能用。 */
+function SkewControls({ skewX, skewY, onChange }: { skewX: number; skewY: number; onChange: (patch: { skewX?: number; skewY?: number }) => void }) {
+  const row = (label: string, value: number, key: "skewX" | "skewY") => (<>
+    <label style={S.rlabel}>{label} <span style={{ float: "right", color: "#9ca3af", fontVariantNumeric: "tabular-nums" }}>{Math.round(value)}°</span></label>
+    <input type="range" min={-60} max={60} value={Math.round(value)} onChange={(e) => onChange({ [key]: Number(e.target.value) })}
+      onDoubleClick={() => onChange({ [key]: 0 })} title="雙擊歸零" style={{ width: "100%", accentColor: "#7c3aed" }} />
+  </>);
+  return (<>
+    {row("水平傾斜", skewX, "skewX")}
+    {row("垂直傾斜", skewY, "skewY")}
+    <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+      {[-15, 15].map((v) => (
+        <button key={v} onClick={() => onChange({ skewX: v, skewY: 0 })} style={{ ...S.rbtn, flex: 1, height: 30, fontSize: 12 }}>{v < 0 ? "往左斜" : "往右斜"} {Math.abs(v)}°</button>
+      ))}
+      {(skewX || skewY) ? <button onClick={() => onChange({ skewX: 0, skewY: 0 })} style={{ ...S.rbtn, flex: 1, height: 30, fontSize: 12 }}>取消傾斜</button> : null}
+    </div>
+  </>);
+}
+
 /** 右側面板「放進形狀（剪裁遮色片）」：選到圖片時出現。 */
 function ClipPanel({ frameName, frames, onPut, onFit, onTakeOut }: {
   frameName: string | null;
@@ -2554,9 +2580,10 @@ function applyClip(ctx: CanvasRenderingContext2D, l: EL, layers: EL[]) {
   if (!l.clipTo) return;
   const frame = layers.find((x) => x.id === l.clipTo);
   if (!frame || !isFillableShape(frame.shape)) return;
-  ctx.translate(frame.cx, frame.cy); ctx.rotate(frame.rotation);
+  const m = ctx.getTransform();
+  applyLayerTransform(ctx, frame);
   clipToShape(ctx, frame.w, frame.h, frame.shape);
-  ctx.rotate(-frame.rotation); ctx.translate(-frame.cx, -frame.cy);
+  ctx.setTransform(m);   // 剪裁範圍會留著，只把座標系換回來
 }
 
 /** 圖層區高度記在 localStorage 的 key。 */

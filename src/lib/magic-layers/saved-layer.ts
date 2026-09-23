@@ -46,6 +46,8 @@ export type SavedLayer = {
    * 存的是形狀圖層的 id；形狀被刪掉就等於沒有剪裁。
    */
   clipTo?: string | null;
+  /** 傾斜（角度）：水平／垂直。 */
+  skewX?: number; skewY?: number;
 };
 export function savedToLayerData(sl: SavedLayer): LayerData {
   const semanticId: SemanticId = sl.type === "independent_text" ? "text" : (sl.type as SemanticId);
@@ -59,6 +61,7 @@ export function savedToLayerData(sl: SavedLayer): LayerData {
     meta: {
       visible: sl.visible, locked: sl.locked, opacity: sl.opacity, groupId: sl.groupId ?? null,
       ...(sl.clipTo ? { clipTo: sl.clipTo } : {}),
+      ...(sl.skewX ? { skewX: sl.skewX } : {}), ...(sl.skewY ? { skewY: sl.skewY } : {}),
       ...(sl.isText ? { style: { text: sl.text, fontSizePx: sl.fontSize, fontWeight: sl.fontWeight, color: sl.color, align: sl.align, fontFamily: sl.fontFamily, fx: sl.fx ?? null, ...(sl.textLayout ? { layout: sl.textLayout } : {}), ...(sl.runs ? { runs: sl.runs } : {}) }, textObject: { text: sl.text } } : {}),
       ...(sl.isArt ? { isArt: true, artText: sl.text ?? "", ...(sl.artRefImage ? { artRefImage: sl.artRefImage } : {}) } : {}),
       ...(sl.shape ? { shape: sl.shape } : {}),

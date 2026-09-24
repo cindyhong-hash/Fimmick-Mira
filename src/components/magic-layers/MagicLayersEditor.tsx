@@ -1,6 +1,7 @@
 "use client";
 import { clipToShape, drawEditableShape, drawIcon, EDITABLE_ICON_NAMES, isFillableShape } from "@/lib/magic-layers/editable-shape.ts";
 import { applyLayerTransform, docToLayer, layerCorners, layerToDoc } from "@/lib/magic-layers/layer-transform.ts";
+import { distanceToPolyline, samplePath, smoothStroke } from "@/lib/magic-layers/freehand.ts";
 /* ============================================================
    Magic Layers — React editor
    Canvas layer editor: select / move / scale / rotate / z-order / show / lock /
@@ -54,7 +55,7 @@ type EL = {
  */
 const SHOW_MAGIC_FILL = false;
 
-const TYPE_LABEL: Record<string, string> = { background: "背景", product: "產品", person: "人物", object: "物件", decoration: "裝飾", independent_text: "文字" };
+const TYPE_LABEL: Record<string, string> = { background: "背景", product: "產品", person: "人物", object: "物件", decoration: "裝飾", drawing: "繪製", independent_text: "文字" };
 
 /** One serialized layer in a saved 排版 (stored in LibraryImage.paramsJson). */
 
@@ -139,7 +140,17 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null);
   const [zoomPct, setZoomPct] = useState(100);
   // 橡皮擦工具（局部擦掉圖片圖層）
-  const [tool, setTool] = useState<"select" | "erase" | "marquee" | "pen">("select");
+  const [tool, setTool] = useState<"select" | "erase" | "marquee" | "pen" | "draw">("select");
+  /**
+   * 繪製（Figma Pencil）：顏色、粗細、透明度、平滑度、是否在擦除模式。
+   * 事件處理在較早的 effect 裡註冊，透過 drawCfgRef 讀到最新設定。
+   */
+  const [drawCfg, setDrawCfg] = useState({ color: "#1f2937", width: 6, opacity: 1, smooth: 50, erase: false });
+  const drawCfgRef = useRef(drawCfg);
+  useEffect(() => { drawCfgRef.current = drawCfg; }, [drawCfg]);
+  /** 正在畫的這一筆（文件座標），放開滑鼠才變成圖層。 */
+  const strokeRef = useRef<{ x: number; y: number }[] | null>(null);
+  const finishStrokeRef = useRef<() => void>(() => {});
   /**
    * 鋼筆畫到一半的路徑（文件座標）。每個點可以有進／出把手（相對於點的位移）；
    * hover 是滑鼠目前位置，用來畫「下一段會長這樣」的預覽線。
@@ -327,6 +338,18 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       ctx.strokeRect(x, y, Math.abs(mq.x1 - mq.x0), Math.abs(mq.y1 - mq.y0));
       ctx.restore();
     }
+    // 繪製：畫到一半的這一筆，照目前的顏色、粗細、透明度即時顯示
+    const stroke = strokeRef.current;
+    if (stroke && stroke.length) {
+      const cfg = drawCfgRef.current;
+      ctx.save();
+      ctx.globalAlpha = cfg.opacity; ctx.strokeStyle = cfg.color; ctx.lineWidth = cfg.width;
+      ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.beginPath(); ctx.moveTo(stroke[0].x, stroke[0].y);
+      for (let i = 1; i < stroke.length; i++) ctx.lineTo(stroke[i].x, stroke[i].y);
+      if (stroke.length === 1) ctx.lineTo(stroke[0].x + 0.01, stroke[0].y);
+      ctx.stroke(); ctx.restore();
+    }
     // 鋼筆：已經點的節點、把手，以及從最後一點到滑鼠的預覽線
     const pen = penRef.current;
     if (pen && pen.pts.length) {
@@ -444,6 +467,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       const l = ls[i]; if (!l.visible || l.locked) continue;
       const lp = toLocal(l, dx, dy);
       if (Math.abs(lp.x) > l.w / 2 || Math.abs(lp.y) > l.h / 2) continue;   // outside bbox
+      if (l.type === "drawing" && l.shape?.points && !hitsDrawing(l, dx, dy, 6 / view.current.zoom)) continue;
       if (l.clipTo) {
         const frame = ls.find((x) => x.id === l.clipTo);
         if (frame) { const fp = toLocal(frame, dx, dy); if (Math.abs(fp.x) > frame.w / 2 || Math.abs(fp.y) > frame.h / 2) continue; }
@@ -479,6 +503,14 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           drag.current = { mode: "erase", l, lx: d.x, ly: d.y };
           render();
         }
+        return;
+      }
+      // 繪製：按下開始一筆；擦除模式則是碰到哪一筆就刪哪一筆
+      if (!wantPan && toolRef.current === "draw") {
+        if (drawCfgRef.current.erase) { drag.current = { mode: "drawErase", removed: eraseDrawingsAt(layersRef.current, d.x, d.y, view.current.zoom) }; render(); return; }
+        strokeRef.current = [{ x: d.x, y: d.y }];
+        drag.current = { mode: "draw" };
+        render();
         return;
       }
       // 鋼筆：點一下加一個點；按住拖曳就是拉出這一點的曲線把手；點回第一個點就封閉完成
@@ -523,6 +555,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         const s = evPt(e);
         if (toolRef.current === "erase") { erasePt.current = s2d(s.x, s.y); cv.style.cursor = "crosshair"; render(); return; }
         if (toolRef.current === "pen") { if (penRef.current) penRef.current.hover = s2d(s.x, s.y); cv.style.cursor = "crosshair"; render(); return; }
+        if (toolRef.current === "draw") { cv.style.cursor = drawCfgRef.current.erase ? "cell" : "crosshair"; return; }
         hover(s); return;
       }
       const s = evPt(e), d = s2d(s.x, s.y);
@@ -534,6 +567,13 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         const n = Math.max(1, Math.ceil(distp / step));
         for (let i = 1; i <= n; i++) eraseAt(g.l, lx + (d.x - lx) * (i / n), ly + (d.y - ly) * (i / n));
         g.lx = d.x; g.ly = d.y; erasePt.current = d; render();
+      }
+      else if (g.mode === "draw") {
+        const pts = strokeRef.current, last = pts?.[pts.length - 1];
+        if (pts && last && Math.hypot(d.x - last.x, d.y - last.y) >= 0.5 / view.current.zoom) { pts.push({ x: d.x, y: d.y }); render(); }
+      }
+      else if (g.mode === "drawErase") {
+        if (eraseDrawingsAt(layersRef.current, d.x, d.y, view.current.zoom)) { g.removed = true; render(); }
       }
       else if (g.mode === "pen") {
         // 拖出來的方向就是「出」的把手，另一邊對稱成「進」的把手（跟 Photoshop 一樣的平滑節點）
@@ -584,6 +624,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     };
     const up = () => {
       if (drag.current?.mode === "pen") { drag.current = null; return; }
+      if (drag.current?.mode === "draw") { drag.current = null; finishStrokeRef.current(); return; }
+      if (drag.current?.mode === "drawErase") { const removed = drag.current.removed; drag.current = null; if (removed) { markDirty(); refresh(); } render(); return; }
       if (drag.current?.mode === "marquee") {
         const m = marqueeRef.current;
         // 夾在畫布範圍內：框到畫布外面的灰色區域沒有東西可以補，照樣送出去只是白花錢。
@@ -616,6 +658,10 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     const kd = (e: KeyboardEvent) => {
       const typing = /INPUT|TEXTAREA/.test((e.target as HTMLElement).tagName);
       if (e.code === "Space" && !typing) { space.current = true; if (canvasRef.current) canvasRef.current.style.cursor = "grab"; e.preventDefault(); }
+      if (e.key === "Escape" && toolRef.current === "draw" && !typing) { e.preventDefault(); strokeRef.current = null; setTool("select"); if (canvasRef.current) canvasRef.current.style.cursor = "default"; render(); return; }
+      if (e.shiftKey && !e.metaKey && !e.ctrlKey && e.key.toLowerCase() === "p" && !typing) {
+        e.preventDefault(); const on = toolRef.current !== "draw"; setTool(on ? "draw" : "select"); if (on) applySelection([]); return;
+      }
       // 鋼筆畫到一半：Enter 完成、Esc 取消、Backspace 退一個點（不能讓它去刪到選取的圖層）
       if (toolRef.current === "pen" && !typing) {
         if (e.key === "Enter") { e.preventDefault(); finishPenRef.current(false); return; }
@@ -972,6 +1018,45 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     // eslint-disable-next-line react-hooks/exhaustive-deps -- selectOnly 只碰 ref 與 setState，跟 pushShapeLayer 一樣不列
   }, [markDirty, refresh, render]);
   useEffect(() => { finishPenRef.current = finishPen; }, [finishPen]);
+
+  /**
+   * 放開滑鼠：把這一筆平滑、簡化成向量路徑，變成一個「繪製」圖層（跟鋼筆一樣以寬高比例存節點）。
+   * 範圍外擴半個筆寬，選取框才包得住整條線。只點一下也算一筆（畫成一個點）。
+   */
+  const finishStroke = useCallback(() => {
+    const raw = strokeRef.current; strokeRef.current = null;
+    if (!raw || !raw.length) { render(); return; }
+    const cfg = drawCfgRef.current;
+    let pts = smoothStroke(raw, cfg.smooth, view.current.zoom);
+    if (pts.length === 1) pts = [pts[0], { x: pts[0].x + 0.01, y: pts[0].y }];
+    const xs: number[] = [], ys: number[] = [];
+    for (const p of pts) {
+      xs.push(p.x); ys.push(p.y);
+      if (p.ix != null) { xs.push(p.x + p.ix); ys.push(p.y + (p.iy ?? 0)); }
+      if (p.ox != null) { xs.push(p.x + p.ox); ys.push(p.y + (p.oy ?? 0)); }
+    }
+    const pad = cfg.width / 2 + 1;
+    const minX = Math.min(...xs) - pad, maxX = Math.max(...xs) + pad, minY = Math.min(...ys) - pad, maxY = Math.max(...ys) + pad;
+    const w = Math.max(2, maxX - minX), h = Math.max(2, maxY - minY), cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    const points = pts.map((p) => ({
+      x: (p.x - cx) / w, y: (p.y - cy) / h,
+      ...(p.ix != null ? { ix: p.ix / w, iy: (p.iy ?? 0) / h } : {}),
+      ...(p.ox != null ? { ox: p.ox / w, oy: (p.oy ?? 0) / h } : {}),
+    }));
+    const el: EL = {
+      id: `draw_${crypto.randomUUID().slice(0, 8)}`, name: "繪製", type: "drawing", semanticId: "decoration", instanceId: null, confidence: 1, editable: true, source: "generated",
+      isText: false, text: "", color: cfg.color, fontSize: 24, fontFamily: "'Noto Sans TC',system-ui,sans-serif", fontWeight: 700, align: "center",
+      shape: { kind: "path", points, closed: false, fill: "none", stroke: cfg.color, strokeWidth: cfg.width }, canvas: null, naturalW: w, naturalH: h, src: null,
+      cx, cy, w, h, rotation: 0, visible: true, locked: false, opacity: cfg.opacity, embeddedText: [], thumb: null,
+    };
+    el.thumb = makeThumb(el); layersRef.current.push(el); markDirty(); refresh(); render();
+  }, [markDirty, refresh, render]);
+  useEffect(() => { finishStrokeRef.current = finishStroke; }, [finishStroke]);
+  const exitDraw = useCallback(() => {
+    strokeRef.current = null; setTool("select");
+    if (canvasRef.current) canvasRef.current.style.cursor = "default";
+    render();
+  }, [render]);
   const pushShapeLayer = useCallback((shape: ShapeSpec, nm: string, w: number, h: number) => {
     const el: EL = {
       id: "shape_" + Math.floor(view.current.panX + layersRef.current.length + doc.w + (shape.icon ? shape.icon.length : shape.kind.length)),
@@ -1699,6 +1784,10 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
               <button style={S.tool} onClick={() => uploadImgRef.current?.click()}><Upload size={16} />上傳圖片</button>
               <button style={S.tool} onClick={addTextLayer}><Type size={16} />文字</button>
               <button style={S.tool} onClick={addLogo}><BadgeCheck size={16} />Logo</button>
+              <button style={{ ...S.tool, ...(tool === "draw" ? { border: "1px solid #7c3aed", color: "#7c3aed", background: "#f5f3ff" } : {}) }}
+                onClick={() => { if (tool === "draw") exitDraw(); else { setTool("draw"); applySelection([]); } }} title="繪製：按住拖曳畫任意線條（Shift＋P）">
+                <Pencil size={16} />繪製{tool === "draw" ? "（開）" : ""}
+              </button>
               <button style={S.tool} onClick={addShape}><Square size={16} />形狀</button>
               <button style={S.tool} onClick={() => setShowIcon(true)}><Star size={16} />圖標</button>
               <button style={S.tool} onClick={addLine}><Minus size={16} />線條</button>
@@ -1993,7 +2082,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                 {selEl.shape && (
                   <>
                     <div style={S.rhead}>{selEl.shape.kind === "icon" ? "圖標設定" : selEl.shape.kind === "line" ? "線條設定" : "形狀設定"}</div>
-                    {selEl.shape.kind === "path" && !selEl.shape.closed && (
+                    {selEl.shape.kind === "path" && !selEl.shape.closed && selEl.type !== "drawing" && (
                       <div style={{ marginBottom: 12 }}>
                         <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.6, marginBottom: 8 }}>這是一條沒有封閉的線：可以改顏色、粗細；封閉之後就能填色、當成放圖的框。</div>
                         <button onClick={() => updateShape({ closed: true, fill: "#7c3aed" })} style={{ ...S.rbtn, width: "100%" }}>把頭尾接起來，變成形狀</button>
@@ -2194,8 +2283,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       )}
 
       {/* 框好之後的輸入框：跟 PS 一樣，框選完就地問「要生成什麼」 */}
+      {tool === "draw" && <DrawToolbar cfg={drawCfg} onChange={(patch) => setDrawCfg((c) => ({ ...c, ...patch }))} onDone={exitDraw} />}
       {tool === "pen" && (
-        <div style={{ position: "fixed", left: "50%", bottom: 28, transform: "translateX(-50%)", zIndex: 92, display: "flex", gap: 10, alignItems: "center", background: "#1f2937", color: "#f9fafb", padding: "10px 14px", borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,.28)" }}>
+        <div style={{ position: "fixed", left: "50%", bottom: 124, transform: "translateX(-50%)", zIndex: 92, display: "flex", gap: 10, alignItems: "center", background: "#1f2937", color: "#f9fafb", padding: "10px 14px", borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,.28)" }}>
           <PenTool size={16} color="#c4b5fd" />
           <span style={{ fontSize: 13, lineHeight: 1.5 }}>點一下加點・按住拖曳拉曲線・點回第一個點封閉<br /><span style={{ color: "#9ca3af", fontSize: 12 }}>Enter 完成（不封閉）・Backspace 退一步・Esc 取消</span></span>
           <button onClick={() => finishPen(false)} style={{ ...S.rbtn, background: "#7c3aed", color: "#fff", border: "none", whiteSpace: "nowrap" }}>完成</button>
@@ -2203,7 +2293,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         </div>
       )}
       {marquee && !genFillResult && (
-        <div style={{ position: "fixed", left: "50%", bottom: 28, transform: "translateX(-50%)", zIndex: 92, display: "flex", gap: 8, alignItems: "center", background: "#1f2937", padding: 10, borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,.28)" }}>
+        <div style={{ position: "fixed", left: "50%", bottom: 124, transform: "translateX(-50%)", zIndex: 92, display: "flex", gap: 8, alignItems: "center", background: "#1f2937", padding: 10, borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,.28)" }}>
           <input
             autoFocus
             value={genFillPrompt}
@@ -2238,7 +2328,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
 
       {/* 結果直接套在畫布上，用 ‹ › 原地換版本——不要彈窗擺一排小縮圖給人瞇著眼比。 */}
       {genFillResult && genFillResult.length > 0 && (
-        <div style={{ position: "fixed", left: "50%", bottom: 28, transform: "translateX(-50%)", zIndex: 93, display: "flex", gap: 10, alignItems: "center", background: "#1f2937", padding: "10px 14px", borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,.28)", color: "#f9fafb" }}>
+        <div style={{ position: "fixed", left: "50%", bottom: 124, transform: "translateX(-50%)", zIndex: 93, display: "flex", gap: 10, alignItems: "center", background: "#1f2937", padding: "10px 14px", borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,.28)", color: "#f9fafb" }}>
           <span style={{ fontSize: 12, color: "#9ca3af" }}>只有框選的那塊被換掉</span>
           <button
             onClick={() => { const i = (genFillIndex - 1 + genFillResult.length) % genFillResult.length; setGenFillIndex(i); void previewGenFill(genFillResult[i]); }}
@@ -2832,6 +2922,61 @@ function cloneLayerDeep(l: EL): EL {
  * pastes 記貼了幾次，每貼一次往右下錯開，不會整疊在同一個位置。
  */
 let layerClipboard: { layers: EL[]; pastes: number } | null = null;
+
+/** 擦除模式：刪掉這一點碰到的繪製筆畫（最上面那筆先；V1 整筆刪，不做像素級擦除）。回傳有沒有刪到。 */
+function eraseDrawingsAt(ls: EL[], dx: number, dy: number, zoom: number): boolean {
+  for (let i = ls.length - 1; i >= 0; i--) {
+    const l = ls[i];
+    if (l.type !== "drawing" || !l.visible || l.locked) continue;
+    if (hitsDrawing(l, dx, dy, 8 / zoom)) { ls.splice(i, 1); return true; }
+  }
+  return false;
+}
+
+/** 這一點有沒有碰到繪製的線（考慮線寬、再加一點容許範圍）。 */
+function hitsDrawing(l: EL, dx: number, dy: number, tolerance: number): boolean {
+  if (!l.shape?.points) return false;
+  const local = docToLayer(l, dx, dy);
+  return distanceToPolyline(local, samplePath(l.shape.points, l.w, l.h)) <= l.shape.strokeWidth / 2 + tolerance;
+}
+
+/**
+ * 繪製時畫布下方的工具列：顏色｜粗細｜透明度｜平滑｜橡皮擦（跟 Figma 一樣就地調，不開大面板）。
+ */
+function DrawToolbar({ cfg, onChange, onDone }: {
+  cfg: { color: string; width: number; opacity: number; smooth: number; erase: boolean };
+  onChange: (patch: Partial<{ color: string; width: number; opacity: number; smooth: number; erase: boolean }>) => void;
+  onDone: () => void;
+}) {
+  const label: React.CSSProperties = { fontSize: 11, color: "#9ca3af", whiteSpace: "nowrap" };
+  const slider = (value: number, min: number, max: number, set: (v: number) => void, title: string, unit = "") => (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }} title={title}>
+      <input type="range" min={min} max={max} value={value} onChange={(e) => set(Number(e.target.value))} style={{ width: 80, accentColor: "#a78bfa" }} disabled={cfg.erase} />
+      <span style={{ width: 34, fontSize: 11, color: "#e5e7eb", fontVariantNumeric: "tabular-nums" }}>{value}{unit}</span>
+    </div>
+  );
+  const sep = <span aria-hidden style={{ width: 1, height: 22, background: "#374151" }} />;
+  return (
+    <div style={{ position: "fixed", left: "50%", bottom: 124, transform: "translateX(-50%)", zIndex: 92, display: "flex", gap: 10, alignItems: "center", background: "#1f2937", color: "#f9fafb", padding: "8px 12px", borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,.28)" }}>
+      <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 700 }}><Pencil size={15} color="#c4b5fd" />繪製</span>
+      {sep}
+      <span style={label}>顏色</span>
+      <input type="color" aria-label="線條顏色" value={cfg.color} onChange={(e) => onChange({ color: e.target.value, erase: false })}
+        style={{ width: 28, height: 26, border: "1px solid #4b5563", borderRadius: 6, padding: 0, background: "none", cursor: "pointer" }} />
+      <span style={label}>粗細</span>{slider(cfg.width, 1, 40, (v) => onChange({ width: v }), "筆畫粗細", "px")}
+      <span style={label}>透明度</span>{slider(Math.round(cfg.opacity * 100), 5, 100, (v) => onChange({ opacity: v / 100 }), "筆畫透明度", "%")}
+      <span style={label}>平滑</span>{slider(cfg.smooth, 0, 100, (v) => onChange({ smooth: v }), "去掉手抖的程度（0＝完全照你畫的）")}
+      {sep}
+      <button onClick={() => onChange({ erase: !cfg.erase })} title="橡皮擦：碰到哪一筆就刪掉哪一筆"
+        style={{ display: "flex", alignItems: "center", gap: 5, height: 30, padding: "0 10px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer",
+          border: cfg.erase ? "1px solid #a78bfa" : "1px solid #4b5563", background: cfg.erase ? "#4c1d95" : "transparent", color: "#f9fafb" }}>
+        <Eraser size={14} />橡皮擦
+      </button>
+      <button onClick={onDone} title="回到選取（Esc）"
+        style={{ height: 30, padding: "0 12px", border: "none", borderRadius: 8, background: "#7c3aed", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>完成</button>
+    </div>
+  );
+}
 
 /** 形狀被刪掉時，原本放在裡面的圖解除剪裁（不然存檔會留著指向不存在的形狀）。 */
 function releaseClips(layers: EL[], frameId: string) {

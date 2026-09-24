@@ -21,7 +21,7 @@ import { cleanMask, featherFor } from "./../mask-postprocess.ts";
 // VLM box still contains the WHOLE item (avoids "cut in half"); BiRefNet then
 // keeps only the salient object inside the crop.
 const PADDING: Record<LayerType, number> = {
-  person: 0.22, product: 0.28, object: 0.24, decoration: 0.18, background: 0, independent_text: 0,
+  person: 0.22, product: 0.28, object: 0.24, decoration: 0.18, drawing: 0, background: 0, independent_text: 0,
 };
 
 function initFal() { const key = process.env.FAL_KEY; if (!key) throw new Error("FAL_KEY is not set"); fal.config({ credentials: key }); }

@@ -112,5 +112,5 @@ function pickType(parts: Region[]): LayerType {
 }
 
 export function typeName(t: LayerType): string {
-  return { background: "Background", product: "Product", person: "Person", object: "Object", decoration: "Decoration", independent_text: "Text" }[t];
+  return { background: "Background", product: "Product", person: "Person", object: "Object", decoration: "Decoration", drawing: "Drawing", independent_text: "Text" }[t];
 }

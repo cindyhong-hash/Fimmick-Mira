@@ -86,7 +86,8 @@ export function drawEditableShape(ctx: CanvasRenderingContext2D, w: number, h: n
   if (!traceShapePath(ctx, w, h, sh)) return;
   // 沒封閉的鋼筆路徑只是一條線，沒有「裡面」可以填
   if (doFill && (sh.kind !== "path" || isFillableShape(sh))) { ctx.fillStyle = sh.gradient ? shapeGradientFill(ctx, w, h, sh.gradient) : sh.fill; ctx.fill(); }
-  if (doStroke) { ctx.lineWidth = sh.strokeWidth; ctx.strokeStyle = sh.stroke; ctx.lineJoin = "round"; ctx.stroke(); }
+  // 線頭、轉角都用圓的：手繪的線、鋼筆的線才不會出現尖角
+  if (doStroke) { ctx.lineWidth = sh.strokeWidth; ctx.strokeStyle = sh.stroke; ctx.lineJoin = "round"; if (sh.kind === "path") ctx.lineCap = "round"; ctx.stroke(); }
 }
 
 /** Draw a text layer (with optional 文字特效). ctx already translated to layer centre + rotated.

@@ -7,7 +7,8 @@ import { bbox, rectPolygon, iou } from "./geometry.ts";
 import { typeName } from "./semantic-grouper.ts";
 
 function semanticIdOf(t: LayerType): SemanticId {
-  return t === "independent_text" ? "text" : t;
+  // 繪製的筆畫在語意上歸在裝飾
+  return t === "independent_text" ? "text" : t === "drawing" ? "decoration" : t;
 }
 
 /** Drop near-duplicate text boxes (the VLM often returns several overlapping

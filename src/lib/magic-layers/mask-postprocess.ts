@@ -10,7 +10,7 @@ import type { LayerType } from "./types.ts";
 
 // Step 6 — feather (px) per object type.
 export const FEATHER_BY_TYPE: Record<LayerType, number> = {
-  person: 6, product: 3, object: 2, decoration: 4, background: 0, independent_text: 0,
+  person: 6, product: 3, object: 2, decoration: 4, drawing: 0, background: 0, independent_text: 0,
 };
 
 export function featherFor(type: LayerType): number {

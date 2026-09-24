@@ -50,7 +50,7 @@ export type SavedLayer = {
   skewX?: number; skewY?: number;
 };
 export function savedToLayerData(sl: SavedLayer): LayerData {
-  const semanticId: SemanticId = sl.type === "independent_text" ? "text" : (sl.type as SemanticId);
+  const semanticId: SemanticId = sl.type === "independent_text" ? "text" : sl.type === "drawing" ? "decoration" : (sl.type as SemanticId);
   return {
     id: sl.id, type: sl.type, name: sl.name, semanticId, instanceId: sl.id, parentId: null,
     bbox: { x: sl.x, y: sl.y, w: sl.w, h: sl.h }, mask: null,

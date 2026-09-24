@@ -12,6 +12,8 @@ export type LayerType =
   | "person"
   | "object"
   | "decoration"
+  /** 自由繪製的筆畫（向量路徑）。 */
+  | "drawing"
   | "independent_text";
 
 export type Source = "original" | "segmented" | "generated" | "ocr";

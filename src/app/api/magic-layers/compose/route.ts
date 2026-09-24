@@ -6,12 +6,18 @@
            texts?, canvasWidth?, canvasHeight? }
    Returns: { layers, backgroundUrl, canvasWidth, canvasHeight } | { error }
    Requires FAL_KEY (bg generation + product cut-outs).
+
+   會花錢（AI 生成背景、產品去背），掛在付費閘後面：有設網站密碼要登入；
+   沒設密碼就用每日上限（paid-quota.ts 的 compose）。呼叫的地方：編輯器「AI 設計 → 生成背景」、
+   建立圖文精靈的「描述背景生成」和最後一步合成。
    ============================================================ */
 import { NextResponse } from "next/server";
 import { buildCompositionLayers, type ComposeInput } from "@/lib/magic-layers/compose-layers.ts";
 import { translateBriefToEnglishPrompt, generateImage, falSceneFromRef } from "@/lib/generate";
 import { loadBuffer, saveBuffer } from "@/lib/storage";
 import sharp from "sharp";
+import { protectPaidRoute } from "@/lib/site-gate";
+import { dailyQuota } from "@/lib/paid-quota";
 
 export const maxDuration = 120;
 
@@ -20,7 +26,7 @@ const RATIO_SIZE: Record<string, [number, number]> = {
   "16:9": [1280, 720], "9:16": [720, 1280], "4:3": [1280, 960],
 };
 
-export async function POST(request: Request) {
+export const POST = protectPaidRoute(async (request: Request) => {
   try {
     if (!process.env.FAL_KEY) return NextResponse.json({ error: "缺少 FAL_KEY（背景生成/產品去背需要）" }, { status: 400 });
     const body = (await request.json()) as ComposeInput & { backgroundPrompt?: string; backgroundRefUrl?: string; ratio?: string; fitMode?: "cover" | "contain" };
@@ -83,4 +89,4 @@ export async function POST(request: Request) {
     console.error("[magic-layers/compose] failed:", err);
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
-}
+}, { quota: dailyQuota("compose") });

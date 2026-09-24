@@ -50,6 +50,16 @@ if (missing.length) {
   process.exit(1);
 }
 
+/**
+ * 已下架的範本（2026-09-24 使用者覺得品質不夠，要重做一批）。
+ * 設計檔先留著，只是不再匯出；編號照原本的順序給，剩下的範本 id 不會跟著往前移。
+ */
+const RETIRED = new Set([
+  "11 系列・封面", "12 系列・功效實證", "13 系列・核心成分", "15 系列・使用步驟",
+  "Editorial｜標題即畫面", "Editorial｜對角動線", "Editorial｜框中框", "Editorial｜大留白",
+  "Luxury｜黑金雙欄", "Luxury｜置中儀式感", "Luxury｜襯線破邊", "Luxury｜字框標題",
+]);
+
 const builtins = entries.map((e, i) => ({
   id: `builtin-${String(i + 1).padStart(2, "0")}`,
   name: e.name,
@@ -57,7 +67,7 @@ const builtins = entries.map((e, i) => ({
   docW: DOC, docH: DOC,
   art: e.art,
   layers: e.layers,
-}));
+})).filter((t) => !RETIRED.has(t.name));
 
 writeFileSync(OUT, `${JSON.stringify(builtins, null, 0)}\n`);
 const kb = Math.round(readFileSync(OUT).length / 1024);

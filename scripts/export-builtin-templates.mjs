@@ -17,6 +17,7 @@ import { FAMILY as F3 } from "./family-03-y2k.mjs";
 import { FAMILY as F4 } from "./family-04-luxury.mjs";
 import { FAMILY as SHOWCASE } from "./showcase-ai-background.mjs";
 import { FAMILY as F5 } from "./family-05-promo.mjs";
+import { FAMILY as F6 } from "./family-06-festival.mjs";
 
 const DB = "prisma/dev-release.db";
 const OUT = "src/lib/magic-layers/builtin-templates.json";
@@ -52,7 +53,7 @@ const DRAFT = process.argv.includes("--draft");
 const thumbs = thumbnails();
 const entries = [
   ...LEGACY.slice(10).map((t) => ({ name: t.name, layers: t.layers(), art: null })),
-  ...[...F1, ...F2, ...F3, ...F4, ...SHOWCASE, ...F5].map((f) => ({
+  ...[...F1, ...F2, ...F3, ...F4, ...SHOWCASE, ...F5, ...F6].map((f) => ({
     name: f.art.name, layers: f.layers(),
     art: {
       family: f.art.family, composition: f.art.composition,

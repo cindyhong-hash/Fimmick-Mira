@@ -1385,6 +1385,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       isText, text: sl.text ?? "", color: sl.color ?? "#111",
       fontSize: sl.fontSize ?? 32, fontFamily: sl.fontFamily ?? FONT, fontWeight: sl.fontWeight ?? 700,
       align: sl.align ?? "center", fx: sl.fx ?? null, textLayout: sl.textLayout,
+      // 分段樣式（只把某幾個字放大／換色）：之前漏接，範本和多頁草稿第 2 頁以後重開就變回整段同一個樣式
+      ...(sl.runs?.length ? { runs: sl.runs.map((r) => ({ ...r })) } : {}),
       shape: (sl.shape as ShapeSpec | undefined) ?? null,
       canvas, naturalW: canvas?.width ?? sl.w, naturalH: canvas?.height ?? sl.h,
       src: sl.image ?? null,
@@ -3109,7 +3111,7 @@ function ImagePreview({ items, index, onIndex, onClose, actions, hint }: {
       <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
         <div style={{ position: "relative" }}>
           {t.url
-            ? <img src={t.url} alt={t.name} style={{ display: "block", maxWidth: "min(640px, calc(100vw - 160px))", maxHeight: "72vh", minWidth: 240, minHeight: 240, objectFit: "contain", background: "#fff", borderRadius: 14, boxShadow: "0 20px 50px rgba(0,0,0,.35)" }} />
+            ? <img src={t.url} alt={t.name} style={{ display: "block", width: "min(640px, 72vh, calc(100vw - 160px))", height: "min(640px, 72vh, calc(100vw - 160px))", objectFit: "contain", background: "#fff", borderRadius: 14, boxShadow: "0 20px 50px rgba(0,0,0,.35)" }} />
             : <div style={{ width: "min(640px, 72vh)", aspectRatio: "1", display: "grid", placeItems: "center", background: "#fff", borderRadius: 14, color: "#9ca3af" }}>無縮圖</div>}
           {n > 1 && arrow(-1, "上一個")}
           {n > 1 && arrow(1, "下一個")}

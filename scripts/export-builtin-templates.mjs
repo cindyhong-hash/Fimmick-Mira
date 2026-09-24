@@ -16,39 +16,10 @@ import { FAMILY as F2 } from "./family-02-kbeauty.mjs";
 import { FAMILY as F3 } from "./family-03-y2k.mjs";
 import { FAMILY as F4 } from "./family-04-luxury.mjs";
 import { FAMILY as SHOWCASE } from "./showcase-ai-background.mjs";
+import { FAMILY as F5 } from "./family-05-promo.mjs";
 
 const DB = "prisma/dev-release.db";
 const OUT = "src/lib/magic-layers/builtin-templates.json";
-
-/** 名稱 → 縮圖網址。同名取最新一筆（反覆灌入會留下重複）。 */
-function thumbnails() {
-  const rows = JSON.parse(execFileSync("sqlite3", [
-    "-json", DB,
-    "select name, previewUrl, createdAt from StyleComponent where type='CANVAS_TEMPLATE' order by createdAt",
-  ], { encoding: "utf8" }) || "[]");
-  const map = new Map();
-  for (const r of rows) if (r.previewUrl) map.set(r.name, r.previewUrl);
-  return map;
-}
-
-const thumbs = thumbnails();
-const entries = [
-  ...LEGACY.slice(10).map((t) => ({ name: t.name, layers: t.layers(), art: null })),
-  ...[...F1, ...F2, ...F3, ...F4, ...SHOWCASE].map((f) => ({
-    name: f.art.name, layers: f.layers(),
-    art: {
-      family: f.art.family, composition: f.art.composition,
-      negativeSpace: f.art.negativeSpace, recommendedFor: f.art.recommendedFor,
-    },
-  })),
-];
-
-const missing = entries.filter((e) => !thumbs.get(e.name));
-if (missing.length) {
-  console.error("缺縮圖，先跑一次 seed-canvas-templates.mjs 產生：");
-  for (const m of missing) console.error("  -", m.name);
-  process.exit(1);
-}
 
 /**
  * 已下架的範本（2026-09-24 使用者覺得品質不夠，要重做一批）。
@@ -60,10 +31,48 @@ const RETIRED = new Set([
   "Luxury｜黑金雙欄", "Luxury｜置中儀式感", "Luxury｜襯線破邊", "Luxury｜字框標題",
 ]);
 
+/**
+ * 名稱 → 縮圖網址。先用目前 JSON 裡已經有的（縮圖都在共用的 Blob 上），
+ * 再用本機資料庫的蓋過去（同名取最新一筆；反覆灌入會留下重複）。
+ * 這樣換一台電腦、本機資料庫沒有舊範本時也跑得起來，只有新範本要先產生縮圖。
+ */
+function thumbnails() {
+  const map = new Map();
+  try { for (const t of JSON.parse(readFileSync(OUT, "utf8"))) if (t.previewUrl) map.set(t.name, t.previewUrl); } catch { /* 第一次產生 */ }
+  const rows = JSON.parse(execFileSync("sqlite3", [
+    "-json", DB,
+    "select name, previewUrl, createdAt from StyleComponent where type='CANVAS_TEMPLATE' order by createdAt",
+  ], { encoding: "utf8" }) || "[]");
+  for (const r of rows) if (r.previewUrl) map.set(r.name, r.previewUrl);
+  return map;
+}
+/** --draft：還沒有縮圖的新範本也先匯出（previewUrl 空著），方便在編輯器裡套用檢查、再存縮圖。 */
+const DRAFT = process.argv.includes("--draft");
+
+const thumbs = thumbnails();
+const entries = [
+  ...LEGACY.slice(10).map((t) => ({ name: t.name, layers: t.layers(), art: null })),
+  ...[...F1, ...F2, ...F3, ...F4, ...SHOWCASE, ...F5].map((f) => ({
+    name: f.art.name, layers: f.layers(),
+    art: {
+      family: f.art.family, composition: f.art.composition,
+      negativeSpace: f.art.negativeSpace, recommendedFor: f.art.recommendedFor,
+    },
+  })),
+];
+
+const missing = entries.filter((e) => !thumbs.get(e.name) && !RETIRED.has(e.name));
+if (missing.length && !DRAFT) {
+  console.error("缺縮圖，先跑一次 seed-canvas-templates.mjs 產生：");
+  for (const m of missing) console.error("  -", m.name);
+  process.exit(1);
+}
+
+
 const builtins = entries.map((e, i) => ({
   id: `builtin-${String(i + 1).padStart(2, "0")}`,
   name: e.name,
-  previewUrl: thumbs.get(e.name),
+  previewUrl: thumbs.get(e.name) ?? null,
   docW: DOC, docH: DOC,
   art: e.art,
   layers: e.layers,

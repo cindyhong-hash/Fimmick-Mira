@@ -12,6 +12,7 @@ import { FAMILY as SHOWCASE } from "./showcase-ai-background.mjs";
 import { FAMILY as F5 } from "./family-05-promo.mjs";
 import { FAMILY as F6 } from "./family-06-festival.mjs";
 import { FAMILY as F7 } from "./family-07-health.mjs";
+import { FAMILY as F8 } from "./family-08-pain-points.mjs";
 
 /**
  * 要灌進範本庫的東西。
@@ -22,7 +23,7 @@ import { FAMILY as F7 } from "./family-07-health.mjs";
  */
 const TEMPLATES = [
   ...LEGACY.slice(10),
-  ...[...F1, ...F2, ...F3, ...F4, ...SHOWCASE, ...F5, ...F6, ...F7].map((f) => ({ name: f.art.name, layers: f.layers })),
+  ...[...F1, ...F2, ...F3, ...F4, ...SHOWCASE, ...F5, ...F6, ...F7, ...F8].map((f) => ({ name: f.art.name, layers: f.layers })),
 ];
 
 const CHROME = `${os.homedir()}/Library/Caches/ms-playwright/chromium-1234/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`;

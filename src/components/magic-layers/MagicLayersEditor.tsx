@@ -1,6 +1,7 @@
 "use client";
 import { clipToShape, drawEditableShape, drawIcon, EDITABLE_ICON_NAMES, isFillableShape } from "@/lib/magic-layers/editable-shape.ts";
 import { applyLayerTransform, docToLayer, layerCorners, layerToDoc } from "@/lib/magic-layers/layer-transform.ts";
+import { alignOffsets, unitCount, type AlignMode } from "@/lib/magic-layers/align.ts";
 import { DEFAULT_GLOW, drawGlow, type LayerGlow } from "@/lib/magic-layers/layer-glow.ts";
 import { distanceToPolyline, drawPaint, paintHits, samplePath, smoothStroke, strokeToPaint } from "@/lib/magic-layers/freehand.ts";
 /* ============================================================
@@ -17,7 +18,7 @@ export type { SavedLayer } from "@/lib/magic-layers/saved-layer.ts";
 /** 多頁設計的一頁（像 Canva 的頁面）：尺寸＋圖層。 */
 export type SavedPage = { docW: number; docH: number; layers: SavedLayer[]; /** 頁面名稱（例如「封面」）；空的就顯示「第 N 頁」。 */ name?: string };
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronUp, ChevronDown, Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowLeft, Plus, Download, Image as ImageIcon, Upload, Type, BadgeCheck, Square, Star, Minus, Pencil, Undo2, Redo2, Eraser, Maximize2, GripVertical, WandSparkles, Save, Layers, LayoutTemplate, Wrench, PenTool } from "lucide-react";
+import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalDistributeCenter, AlignStartHorizontal, AlignStartVertical, AlignVerticalDistributeCenter, ChevronUp, ChevronDown, Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowLeft, Plus, Download, Image as ImageIcon, Upload, Type, BadgeCheck, Square, Star, Minus, Pencil, Undo2, Redo2, Eraser, Maximize2, GripVertical, WandSparkles, Save, Layers, LayoutTemplate, Wrench, PenTool } from "lucide-react";
 import type { LayerData, FragmentationReport } from "@/lib/magic-layers/types.ts";
 import { extractLayer } from "@/lib/magic-layers/extract-browser.ts";
 import { alphaHit } from "@/lib/magic-layers/alpha-hit-test.ts";
@@ -798,6 +799,19 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const toggleLock = (id: string) => { const l = layersRef.current[idx(id)]; if (l) { l.locked = !l.locked; markDirty(); refresh(); render(); } };
   // 用 cloneLayerDeep：之前只複製外殼，形狀顏色、文字特效其實跟原本共用同一份，改一個另一個也跟著變
   const duplicate = (id: string) => { const l = layersRef.current[idx(id)]; if (!l) return; const c: EL = { ...cloneLayerDeep(l), id: `${l.id.split("_copy")[0]}_copy_${crypto.randomUUID().slice(0, 6)}`, name: l.name + " 複本", cx: l.cx + 24, cy: l.cy + 24, groupId: null }; layersRef.current.splice(idx(id) + 1, 0, c); selectOnly(c.id); markDirty(); refresh(); render(); };
+  /**
+   * 對齊／均分：只選一塊對齊畫布，選兩塊以上對齊彼此；群組一起動，鎖定的不動，
+   * 放在形狀裡的圖跟著形狀走。一次是一個復原步驟。
+   */
+  const alignSelected = (mode: AlignMode) => {
+    const ids = new Set(selectedIdsRef.current); if (!ids.size) return;
+    const offs = alignOffsets(layersRef.current.filter((l) => ids.has(l.id)), mode, doc);
+    if (!offs.size) return;
+    moveByOffsets(layersRef.current, offs, ids);
+    markDirty(); refresh(); render();
+  };
+  const alignRef = useRef(alignSelected);
+  useEffect(() => { alignRef.current = alignSelected; });
   const groupSelected = () => { if (selectedIdsRef.current.length < 2) return; const groupId = `group_${Date.now()}`; layersRef.current.forEach((l) => { if (selectedIdsRef.current.includes(l.id)) l.groupId = groupId; }); markDirty(); refresh(); render(); };
   /**
    * 合併圖層（⌘E，跟 Photoshop 一樣）：選兩個以上就把它們合成一張；只選一個就跟下面那層合併。
@@ -1559,6 +1573,12 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         e.preventDefault();
         if (e.shiftKey) ungroupSelected(); else groupSelected();
       }
+      // ⌥A／⌥H／⌥D 靠左／水平置中／靠右，⌥W／⌥V／⌥S 靠上／垂直置中／靠下（跟 Figma 一樣）。
+      // 用 e.code：Mac 按著 Option 時 e.key 會變成特殊符號
+      if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey && !/INPUT|TEXTAREA/.test((e.target as HTMLElement).tagName) && !(e.target as HTMLElement).isContentEditable) {
+        const mode = ({ KeyA: "left", KeyH: "hcenter", KeyD: "right", KeyW: "top", KeyV: "vcenter", KeyS: "bottom" } as Record<string, AlignMode>)[e.code];
+        if (mode && selectedIdsRef.current.length) { e.preventDefault(); alignRef.current(mode); }
+      }
       // ⌘E 合併圖層（Photoshop 的慣例）
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "e"
         && !/INPUT|TEXTAREA/.test((e.target as HTMLElement).tagName)) {
@@ -1954,6 +1974,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
             </div>
             {panelTab === "design" ? (
               <div style={{ padding: 16, overflowY: "auto" }}>
+                <AlignBar units={unitCount(panel.filter((l) => selectedIds.includes(l.id)))} onAlign={alignSelected} />
                 {selEl.isText && (artView === "setup" ? (
                   /* ===== State B：AI 文字藝術字設定（獨立子畫面） ===== */
                   <>
@@ -2900,6 +2921,38 @@ function MaterialThumb({ url, label, onUseAsBackground, onAddToCanvas }: { url: 
 
 /** 傾斜：水平傾斜把方塊推成平行四邊形（斜的標籤），垂直傾斜則是上下方向。文字、形狀、圖片都能用。 */
 /**
+ * 對齊列（像 Figma 面板最上面那排）：靠左／水平置中／靠右｜靠上／垂直置中／靠下｜水平均分／垂直均分。
+ * units＝選取裡有幾塊：1 塊對齊畫布，2 塊以上對齊彼此，3 塊以上才能均分。
+ */
+function AlignBar({ units, onAlign }: { units: number; onAlign: (mode: AlignMode) => void }) {
+  if (!units) return null;
+  const target = units === 1 ? "對齊畫布" : `對齊選取的 ${units} 個`;
+  const btn = (mode: AlignMode, icon: React.ReactNode, label: string, key: string, disabled = false) => (
+    <button key={mode} onClick={() => onAlign(mode)} disabled={disabled} aria-label={label}
+      title={disabled ? "選三個以上才能均分" : `${label}（${units === 1 ? "對齊畫布" : "對齊選取範圍"}）${key ? ` ${key}` : ""}`}
+      style={{ ...S.icon, width: 30, height: 30, borderRadius: 6, color: disabled ? "#d1d5db" : "#374151", cursor: disabled ? "not-allowed" : "pointer" }}>{icon}</button>
+  );
+  const sep = <span aria-hidden style={{ width: 1, height: 18, background: "#e5e7eb", margin: "0 2px" }} />;
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 4 }}>{target}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
+        {btn("left", <AlignStartVertical size={16} />, "靠左對齊", "⌥A")}
+        {btn("hcenter", <AlignCenterVertical size={16} />, "水平置中", "⌥H")}
+        {btn("right", <AlignEndVertical size={16} />, "靠右對齊", "⌥D")}
+        {sep}
+        {btn("top", <AlignStartHorizontal size={16} />, "靠上對齊", "⌥W")}
+        {btn("vcenter", <AlignCenterHorizontal size={16} />, "垂直置中", "⌥V")}
+        {btn("bottom", <AlignEndHorizontal size={16} />, "靠下對齊", "⌥S")}
+        {sep}
+        {btn("hdistribute", <AlignHorizontalDistributeCenter size={16} />, "水平均分", "", units < 3)}
+        {btn("vdistribute", <AlignVerticalDistributeCenter size={16} />, "垂直均分", "", units < 3)}
+      </div>
+    </div>
+  );
+}
+
+/**
  * 外光暈（像 PS 圖層樣式）：開關＋顏色／大小／透明度／強度。
  * 物件、形狀、文字都能用；光暈沿著內容輪廓，去背的產品就沿著產品邊緣發光。
  */
@@ -3018,6 +3071,14 @@ function paintTarget(ls: EL[], selectedIds: string[], bind: boolean): EL | null 
   if (!bind || selectedIds.length !== 1) return null;
   const l = ls.find((x) => x.id === selectedIds[0]);
   return isPaintable(l) && l.visible && !l.locked ? l : null;
+}
+
+/** 套用對齊算出來的位移；放在形狀裡、自己沒被選到的圖跟著形狀一起動。 */
+function moveByOffsets(ls: EL[], offs: Map<string, { dx: number; dy: number }>, selected: Set<string>) {
+  for (const l of ls) {
+    const o = offs.get(l.id) ?? (l.clipTo && !selected.has(l.id) && !l.locked ? offs.get(l.clipTo) : undefined);
+    if (o) { l.cx += o.dx; l.cy += o.dy; }
+  }
 }
 
 /** 進入繪製時：選的是一張圖片就保留選取（要畫在它上面）；其他情況清掉，畫成新圖層。 */

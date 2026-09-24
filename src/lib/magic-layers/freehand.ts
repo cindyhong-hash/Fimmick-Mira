@@ -7,7 +7,7 @@
    平滑刻意做得輕：定位是「設計畫布上的標記與裝飾」，使用者畫歪的地方要保留，
    只去掉滑鼠／觸控板的細碎抖動，不幫人把線拉直。
    ============================================================ */
-import type { PathPoint } from "./saved-layer.ts";
+import type { PaintStroke, PathPoint } from "./saved-layer.ts";
 
 export type Pt = { x: number; y: number };
 
@@ -129,4 +129,58 @@ export function toSvgPath(points: PathPoint[], w: number, h: number, closed = fa
   for (let i = 1; i < points.length; i++) seg(points[i - 1], points[i]);
   if (closed && points.length > 2) { seg(points[points.length - 1], points[0]); d += " Z"; }
   return d;
+}
+
+/* ---------- 圖層內繪製：畫在圖片上的筆畫 ---------- */
+
+/** 筆畫粗細的基準：圖層 (寬＋高)/2。圖片縮放時粗細跟著變，不會放大後線變細。 */
+export const paintScale = (w: number, h: number) => (w + h) / 2;
+
+/**
+ * 一筆畫（畫布座標、已平滑）→ 掛在圖層上的比例座標。
+ * toLocal 把畫布座標換成圖層座標（以中心為原點、已扣掉旋轉和傾斜）。
+ */
+export function strokeToPaint(
+  pts: { x: number; y: number; ix?: number; iy?: number; ox?: number; oy?: number }[],
+  toLocal: (x: number, y: number) => Pt, w: number, h: number,
+  style: { color: string; width: number; opacity: number },
+): PaintStroke {
+  const points = pts.map((p) => {
+    const a = toLocal(p.x, p.y);
+    const out: PathPoint = { x: a.x / w, y: a.y / h };
+    if (p.ix != null) { const b = toLocal(p.x + p.ix, p.y + (p.iy ?? 0)); out.ix = b.x / w - out.x; out.iy = b.y / h - out.y; }
+    if (p.ox != null) { const b = toLocal(p.x + p.ox, p.y + (p.oy ?? 0)); out.ox = b.x / w - out.x; out.oy = b.y / h - out.y; }
+    return out;
+  });
+  return { points, color: style.color, width: style.width / paintScale(w, h), opacity: style.opacity };
+}
+
+/** 在圖層座標系（中心為原點）畫出這張圖片上的筆畫；超出圖片範圍的部分裁掉。 */
+export function drawPaint(ctx: CanvasRenderingContext2D, strokes: PaintStroke[] | undefined, w: number, h: number) {
+  if (!strokes?.length) return;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(-w / 2, -h / 2, w, h); ctx.clip();
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  const base = ctx.globalAlpha, k = paintScale(w, h);
+  for (const s of strokes) {
+    const p = s.points; if (!p.length) continue;
+    ctx.globalAlpha = base * s.opacity; ctx.strokeStyle = s.color; ctx.lineWidth = s.width * k;
+    ctx.beginPath(); ctx.moveTo(p[0].x * w, p[0].y * h);
+    for (let i = 1; i < p.length; i++) {
+      const a = p[i - 1], b = p[i];
+      if (a.ox != null || b.ix != null) ctx.bezierCurveTo((a.x + (a.ox ?? 0)) * w, (a.y + (a.oy ?? 0)) * h, (b.x + (b.ix ?? 0)) * w, (b.y + (b.iy ?? 0)) * h, b.x * w, b.y * h);
+      else ctx.lineTo(b.x * w, b.y * h);
+    }
+    if (p.length === 1) ctx.lineTo(p[0].x * w + 0.01, p[0].y * h);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/** 圖層座標 local 碰到的那幾筆（索引）；橡皮擦、點選用。 */
+export function paintHits(strokes: PaintStroke[] | undefined, w: number, h: number, local: Pt, tolerance: number): number[] {
+  if (!strokes?.length) return [];
+  const k = paintScale(w, h), out: number[] = [];
+  strokes.forEach((s, i) => { if (distanceToPolyline(local, samplePath(s.points, w, h)) <= (s.width * k) / 2 + tolerance) out.push(i); });
+  return out;
 }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { distanceToPolyline, samplePath, simplify, smoothStroke, stabilize, toSmoothPath, toSvgPath } from "./freehand.ts";
+import { distanceToPolyline, paintHits, samplePath, simplify, smoothStroke, stabilize, strokeToPaint, toSmoothPath, toSvgPath } from "./freehand.ts";
 
 /** 一條往右畫、每點上下亂抖 ±2px 的線（模擬手抖）。 */
 const jittery = Array.from({ length: 60 }, (_, i) => ({ x: i * 4, y: 100 + (i % 2 ? 2 : -2) }));
@@ -61,4 +61,17 @@ test("取樣與距離：橡皮擦碰到線才算，離很遠不算", () => {
 test("輸出 SVG path：曲線用 C、直線用 L", () => {
   const d = toSvgPath([{ x: -0.5, y: 0 }, { x: 0, y: 0.5, ix: -0.1, iy: 0 }, { x: 0.5, y: 0 }], 100, 100);
   assert.equal(d, "M-50 0 C-50 0 -10 50 0 50 L50 0");
+});
+
+test("圖層內繪製：筆畫換成圖片的比例座標，圖片移動、旋轉後筆畫還在圖片上同一個位置", () => {
+  // 一張 200×100、中心在 (500,300)、旋轉 90° 的圖片
+  const l = { cx: 500, cy: 300, w: 200, h: 100, rotation: Math.PI / 2 };
+  const toLocal = (x: number, y: number) => { const ox = x - l.cx, oy = y - l.cy; return { x: oy, y: -ox }; };
+  const paint = strokeToPaint([{ x: 500, y: 300 }, { x: 500, y: 350 }], toLocal, l.w, l.h, { color: "#f00", width: 15, opacity: 1 });
+  // 畫布上往下 50 → 旋轉 90° 的圖片裡是往右 50 → 比例 0.25
+  assert.deepEqual(paint.points.map((p) => [p.x + 0, p.y + 0]), [[0, 0], [0.25, 0]]);
+  assert.equal(paint.width, 0.1);   // 15 / ((200+100)/2)
+  // 圖片放大一倍：碰得到的位置跟著放大
+  assert.deepEqual(paintHits([paint], 400, 200, { x: 100, y: 0 }, 1), [0]);
+  assert.deepEqual(paintHits([paint], 400, 200, { x: 100, y: 60 }, 1), []);
 });

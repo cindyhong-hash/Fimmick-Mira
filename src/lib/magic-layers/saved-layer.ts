@@ -12,6 +12,12 @@ export type ShapeKind = "rect" | "ellipse" | "line" | "icon" | "triangle" | "pol
  * 沒有把手就是直角轉折。
  */
 export type PathPoint = { x: number; y: number; ix?: number; iy?: number; ox?: number; oy?: number };
+/**
+ * 畫在圖片上的筆畫（圖層內繪製）：屬於那張圖片，不是另外的圖層；原圖像素一點都不動。
+ * points 跟 PathPoint 一樣以圖層比例存，width 是「圖層 (寬＋高)/2」的比例——
+ * 圖片移動、縮放、旋轉、傾斜時，筆畫的位置和粗細都跟著走。
+ */
+export type PaintStroke = { points: PathPoint[]; color: string; width: number; opacity: number };
 export type ShapeSpec = { kind: ShapeKind; fill: string; stroke: string; strokeWidth: number; radius?: number; icon?: string; sides?: number; gradient?: ShapeGradient; softness?: number;
   /** 只有 kind = "path"（鋼筆）用：節點，以及是否封閉（封閉才有「裡面」，能填色、能當遮色片）。 */
   points?: PathPoint[]; closed?: boolean };
@@ -48,6 +54,8 @@ export type SavedLayer = {
   clipTo?: string | null;
   /** 傾斜（角度）：水平／垂直。 */
   skewX?: number; skewY?: number;
+  /** 畫在這張圖片上的筆畫（圖層內繪製）。 */
+  paint?: PaintStroke[];
 };
 export function savedToLayerData(sl: SavedLayer): LayerData {
   const semanticId: SemanticId = sl.type === "independent_text" ? "text" : sl.type === "drawing" ? "decoration" : (sl.type as SemanticId);
@@ -65,6 +73,7 @@ export function savedToLayerData(sl: SavedLayer): LayerData {
       ...(sl.isText ? { style: { text: sl.text, fontSizePx: sl.fontSize, fontWeight: sl.fontWeight, color: sl.color, align: sl.align, fontFamily: sl.fontFamily, fx: sl.fx ?? null, ...(sl.textLayout ? { layout: sl.textLayout } : {}), ...(sl.runs ? { runs: sl.runs } : {}) }, textObject: { text: sl.text } } : {}),
       ...(sl.isArt ? { isArt: true, artText: sl.text ?? "", ...(sl.artRefImage ? { artRefImage: sl.artRefImage } : {}) } : {}),
       ...(sl.shape ? { shape: sl.shape } : {}),
+      ...(sl.paint?.length ? { paint: sl.paint } : {}),
     },
   };
 }

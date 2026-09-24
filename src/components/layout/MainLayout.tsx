@@ -12,7 +12,8 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
   // 固定之後左右兩欄各自在裡面捲動，互不影響。
   return (
     <div className={fullBleed ? "flex h-dvh overflow-hidden bg-gray-50" : "flex min-h-screen bg-gray-50"}>
-      <Sidebar />
+      {/* 自由畫布是全螢幕編輯器：網站的側邊選單收起來，改用編輯器自己最左邊那排圖示（Logo 可回首頁） */}
+      {!fullBleed && <Sidebar />}
       <div className={fullBleed ? "flex min-h-0 min-w-0 flex-1 flex-col" : "flex min-w-0 flex-1 flex-col"}>
         <TopHeader />
         <main className={fullBleed ? "min-h-0 flex-1 overflow-hidden" : "flex-1 overflow-auto p-4 sm:p-8"}>{children}</main>

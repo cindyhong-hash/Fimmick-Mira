@@ -18,7 +18,7 @@ export type { SavedLayer } from "@/lib/magic-layers/saved-layer.ts";
 /** 多頁設計的一頁（像 Canva 的頁面）：尺寸＋圖層。 */
 export type SavedPage = { docW: number; docH: number; layers: SavedLayer[]; /** 頁面名稱（例如「封面」）；空的就顯示「第 N 頁」。 */ name?: string };
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalDistributeCenter, AlignStartHorizontal, AlignStartVertical, AlignVerticalDistributeCenter, ChevronUp, ChevronDown, Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowLeft, Plus, Download, Image as ImageIcon, Upload, Type, BadgeCheck, Square, Star, Minus, Pencil, Undo2, Redo2, Eraser, Maximize2, GripVertical, WandSparkles, Save, Layers, LayoutTemplate, Wrench, PenTool } from "lucide-react";
+import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalDistributeCenter, AlignStartHorizontal, AlignStartVertical, AlignVerticalDistributeCenter, ChevronUp, ChevronDown, ChevronLeft, Scissors, Sparkles, Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowLeft, Plus, Download, Image as ImageIcon, Upload, Type, BadgeCheck, Square, Star, Minus, Pencil, Undo2, Redo2, Eraser, Maximize2, GripVertical, WandSparkles, Save, Layers, LayoutTemplate, Wrench, PenTool } from "lucide-react";
 import type { LayerData, FragmentationReport } from "@/lib/magic-layers/types.ts";
 import { extractLayer } from "@/lib/magic-layers/extract-browser.ts";
 import { alphaHit } from "@/lib/magic-layers/alpha-hit-test.ts";
@@ -64,6 +64,15 @@ type EL = {
  */
 const SHOW_MAGIC_FILL = false;
 
+type LeftTab = "templates" | "materials" | "ai" | "tools" | "upload";
+const LEFT_TABS: { id: LeftTab; label: string; Icon: typeof Wrench }[] = [
+  { id: "templates", label: "範本", Icon: LayoutTemplate },
+  { id: "materials", label: "素材", Icon: ImageIcon },
+  { id: "ai", label: "AI 設計", Icon: WandSparkles },
+  { id: "tools", label: "工具", Icon: Wrench },
+  { id: "upload", label: "上傳", Icon: Upload },
+];
+
 const TYPE_LABEL: Record<string, string> = { background: "背景", product: "產品", person: "人物", object: "物件", decoration: "裝飾", drawing: "繪製", independent_text: "文字" };
 
 /** One serialized layer in a saved 排版 (stored in LibraryImage.paramsJson). */
@@ -94,21 +103,16 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const [outpaintResult, setOutpaintResult] = useState<{ variants: string[]; targetW: number; targetH: number; offsetX: number; offsetY: number } | null>(null);
   const [magicFillBusy, setMagicFillBusy] = useState(false);
   const [magicFillResult, setMagicFillResult] = useState<string[] | null>(null);
-  const [toolsOpen, setToolsOpen] = useState(true);           // 左側「工具」可收合
-  const [bgOpen, setBgOpen] = useState(true);                 // 左側「素材庫」可收合
+  // 左側：一排圖示（範本｜素材｜AI 設計｜工具｜上傳），點了才展開那一格的面板，再點一次收起來（像 Canva）
+  const [leftTab, setLeftTab] = useState<LeftTab | null>(null);
   // 範本庫（共用，全品牌看得到；目前只做 1:1）
-  const [tplOpen, setTplOpen] = useState(true);
   const [templates, setTemplates] = useState<{ id: string; name: string; previewUrl: string | null; builtin?: boolean }[]>([]);
   const [tplSaving, setTplSaving] = useState(false);
   const [layersOpen, setLayersOpen] = useState(true);         // 右下「圖層」可收合
   // 可拖曳調整的高度，記在這台瀏覽器（圖層區含標題列；範本庫、素材庫是縮圖格的高度）
   const [layersH, startLayersResize] = useStoredHeight(LAYERS_H_KEY, 340, 150);
-  const [tplH, startTplResize] = useStoredHeight("ml-tpl-h", 200, 90);
-  const [bgH, startBgResize] = useStoredHeight("ml-bg-h", 168, 90);
   const rpanelRef = useRef<HTMLElement>(null);
-  const lpanelRef = useRef<HTMLElement>(null);
   /** 左欄拉高某一區時，至少留一點給下面的工具列。 */
-  const leftMax = () => Math.max(120, (lpanelRef.current?.clientHeight ?? 800) - 260);
   const [panelTab, setPanelTab] = useState<"design" | "settings">("design");
   const [renaming, setRenaming] = useState(false);            // 重新命名這個設計
   const [renamingLayerId, setRenamingLayerId] = useState<string | null>(null);
@@ -738,6 +742,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
    */
   const fitRef = useRef(fit);
   useEffect(() => { fitRef.current = fit; });
+  // 面板展開／收起時畫布區變寬變窄：等版面更新完再重新縮放置中，畫布才不會被擠到一邊、被右欄擋住
+  const leftOpen = leftTab !== null;
+  useEffect(() => { const id = requestAnimationFrame(() => fitRef.current()); return () => cancelAnimationFrame(id); }, [leftOpen]);
   useEffect(() => { requestAnimationFrame(() => fitRef.current()); }, [doc.w, doc.h]);
 
   useEffect(() => {
@@ -1738,10 +1745,6 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
             {adding ? "去背中…" : "去背"}
           </button>
         )}
-        <button style={{ ...S.tbtn, border: "1px solid #ddd6fe", color: "#7c3aed", background: "#f5f3ff" }} onClick={() => addProdRef.current?.click()} disabled={adding} title="上傳一張產品圖，自動去背後加入為新圖層">
-          {adding ? "去背中…" : <><Plus size={15} />加入產品</>}
-        </button>
-        <input ref={addProdRef} type="file" accept="image/*" onChange={addProduct} style={{ display: "none" }} />
         {onSave && (
           <>
             <span style={S.divider} />
@@ -1754,19 +1757,41 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       </div>
 
       <div style={S.body}>
-        <aside ref={lpanelRef} style={S.panel}>
-          {/* 範本庫：共用（全品牌看得到），目前只做 1:1。放在素材庫上面——
-              開一張新畫布時第一件事通常是挑版，不是挑背景。 */}
-          <div style={{ borderBottom: "1px solid #e5e7eb", flex: "0 0 auto" }}>
-            <SectionHeader icon={<LayoutTemplate size={16} color="#7c3aed" />} title="範本庫" hint="點擊套用" count={templates.length || undefined} open={tplOpen} onToggle={() => setTplOpen((v) => !v)} />
-            {tplOpen && (
-              <div style={{ padding: "10px 10px 0" }}>
+        {/* 最左邊：編輯器專用的圖示列（進自由畫布後，網站的側邊選單會收起來）。
+            最上面的 Logo 回首頁，跟「返回」一樣會先問要不要儲存。 */}
+        <nav aria-label="編輯工具" style={S.rail}>
+          <button onClick={() => guard(() => { window.location.href = clientId ? `/clients/${clientId}` : "/"; })} title="回首頁（會先問要不要儲存）" aria-label="回首頁"
+            style={{ width: 44, height: 44, margin: "10px 0 8px", border: "none", background: "none", padding: 0, cursor: "pointer", display: "grid", placeItems: "center" }}>
+            <img src="/mira-mark.png" alt="MIRA" style={{ width: 32, height: 32, objectFit: "contain" }} />
+          </button>
+          {LEFT_TABS.map((t) => {
+            const on = leftTab === t.id;
+            return (
+              <button key={t.id} onClick={() => setLeftTab(on ? null : t.id)} aria-pressed={on} title={on ? `收起${t.label}` : t.label}
+                style={{ ...S.railBtn, ...(on ? { background: "#f5f3ff", color: "#6d28d9" } : {}) }}>
+                <t.Icon size={20} />
+                <span style={{ fontSize: 11, fontWeight: on ? 700 : 500, lineHeight: 1.2 }}>{t.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+        {leftTab && (
+        <aside style={S.panel} aria-label={LEFT_TABS.find((t) => t.id === leftTab)?.label}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "14px 14px 10px", borderBottom: "1px solid #f3f4f6", flex: "0 0 auto" }}>
+            <span style={{ fontSize: 15, fontWeight: 800, color: "#111827", marginRight: "auto" }}>{LEFT_TABS.find((t) => t.id === leftTab)?.label}</span>
+            {leftTab === "templates" && templates.length > 0 && <span style={{ fontSize: 11, color: "#9ca3af" }}>{templates.length} 個・點擊套用</span>}
+            {leftTab === "materials" && backgrounds?.length ? <span style={{ fontSize: 11, color: "#9ca3af" }}>設為背景・加入畫布</span> : null}
+            <button onClick={() => setLeftTab(null)} title="收起面板" aria-label="收起面板" style={{ ...S.icon, width: 28, height: 28 }}><ChevronLeft size={16} /></button>
+          </div>
+          <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: leftTab === "templates" || leftTab === "materials" ? "10px 10px 14px" : "8px 6px 14px" }}>
+            {leftTab === "templates" && (<>
+              {/* 範本庫：共用（全品牌看得到），目前只做 1:1 */}
                 {templates.length === 0 ? (
                   <div style={{ fontSize: 11, color: "#9ca3af", lineHeight: 1.6 }}>
                     範本載入中……如果一直沒出現，重新整理一次。
                   </div>
                 ) : (
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6, maxHeight: tplH, overflowY: "auto" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6 }}>
                     {templates.map((t) => (
                       <div key={t.id} style={{ position: "relative" }}>
                         <button onClick={() => applyTemplate(t.id)} title={`${t.name}（點擊套用，會換掉目前畫布內容；可用復原還原）`}
@@ -1788,41 +1813,23 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                   style={{ ...S.tool, width: "100%", marginTop: 8, justifyContent: "center", opacity: tplSaving ? .6 : 1 }}>
                   <Save size={15} />{tplSaving ? "儲存中…" : "把目前畫布存成範本"}
                 </button>
-              </div>
-            )}
-            {tplOpen && <ResizeHandle label="拖曳調整範本庫高度" onPointerDown={(e) => startTplResize(e, 1, leftMax())} />}
-          </div>
-          {backgrounds && backgrounds.length > 0 && (
-            <div style={{ borderBottom: "1px solid #e5e7eb", flex: "0 0 auto" }}>
-              {/* 原本「背景庫」和工具裡的「素材庫」是同一批圖、只差點下去做什麼，合成這一區：
-                  每張圖都能選設為背景或加入畫布，也能直接拖到畫布上 */}
-              <SectionHeader icon={<ImageIcon size={16} color="#7c3aed" />} title="素材庫" hint="設為背景・加入畫布" count={backgrounds.length} open={bgOpen} onToggle={() => setBgOpen((v) => !v)} />
-              {bgOpen && (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6, maxHeight: bgH, overflowY: "auto", padding: "10px 10px 0" }}>
+            </>)}
+            {leftTab === "materials" && (
+              backgrounds && backgrounds.length > 0 ? (
+                /* 原本「背景庫」和「素材庫」是同一批圖、只差點下去做什麼，合成這一區：
+                   每張圖都能選設為背景或加入畫布，也能直接拖到畫布上 */
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6 }}>
                   {backgrounds.map((b, i) => (
                     <MaterialThumb key={i} url={b.url} label={b.label ?? ""}
                       onUseAsBackground={() => replaceBackground(b.url)}
                       onAddToCanvas={() => void pushImageLayer(b.url, b.label || "圖片")} />
                   ))}
                 </div>
-              )}
-              {bgOpen && <ResizeHandle label="拖曳調整素材庫高度" onPointerDown={(e) => startBgResize(e, 1, leftMax())} />}
-            </div>
-          )}
-          <SectionHeader icon={<Wrench size={16} color="#7c3aed" />} title="工具" open={toolsOpen} onToggle={() => setToolsOpen((v) => !v)} />
-          <div style={{ borderBottom: "1px solid #e5e7eb", padding: toolsOpen ? "8px 6px 12px" : 0, flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
-            {toolsOpen && (<>
-              <button style={S.tool} onClick={() => uploadImgRef.current?.click()}><Upload size={16} />上傳圖片</button>
-              <button style={S.tool} onClick={addTextLayer}><Type size={16} />文字</button>
-              <button style={S.tool} onClick={addLogo}><BadgeCheck size={16} />Logo</button>
-              <button style={{ ...S.tool, ...(tool === "draw" ? { border: "1px solid #7c3aed", color: "#7c3aed", background: "#f5f3ff" } : {}) }}
-                onClick={() => { if (tool === "draw") exitDraw(); else { setTool("draw"); if (!keepsPaintSelection(layersRef.current, selectedIdsRef.current)) applySelection([]); } }} title="繪製：按住拖曳畫任意線條（Shift＋P）">
-                <Pencil size={16} />繪製{tool === "draw" ? "（開）" : ""}
-              </button>
-              <button style={S.tool} onClick={addShape}><Square size={16} />形狀</button>
-              <button style={S.tool} onClick={() => setShowIcon(true)}><Star size={16} />圖標</button>
-              <button style={S.tool} onClick={addLine}><Minus size={16} />線條</button>
-              <button style={S.tool} onClick={() => { setOutpaintResult(null); setShowOutpaint(true); }}><Maximize2 size={16} />擴圖／改尺寸</button>
+              ) : (
+                <div style={{ fontSize: 12, color: "#9ca3af", lineHeight: 1.7, padding: 4 }}>素材庫目前沒有圖片。可以到「上傳」加入自己的圖。</div>
+              )
+            )}
+            {leftTab === "ai" && (<>
               {SHOW_MAGIC_FILL && (
                 <button style={S.tool} onClick={generateMagicFill} disabled={magicFillBusy}><WandSparkles size={16} />{magicFillBusy ? "偵測並延伸中…" : "魔術棒補空白"}</button>
               )}
@@ -1842,6 +1849,28 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                   在圖上拖出一個框。要清掉東西按「移除」；要畫東西就打字再按「生成」。只會改背景，字和產品請直接選取後刪除。
                 </div>
               )}
+              <button style={S.tool} onClick={() => { setOutpaintResult(null); setShowOutpaint(true); }}><Maximize2 size={16} />擴圖／改尺寸</button>
+              <button style={{ ...S.tool, ...(selectedIsImage ? {} : { opacity: .5, cursor: "not-allowed" }) }} disabled={!selectedIsImage || adding}
+                onClick={() => void cutoutSelected()} title={selectedIsImage ? "移除這個圖層的背景（會呼叫付費去背服務）" : "先在畫布上選一張圖片"}>
+                <Scissors size={16} />{adding ? "去背中…" : "去背"}
+              </button>
+              <button style={{ ...S.tool, ...(selEl?.isText ? {} : { opacity: .5, cursor: "not-allowed" }) }} disabled={!selEl?.isText}
+                onClick={() => { setPanelTab("design"); setArtView("setup"); }} title={selEl?.isText ? "把選取的文字做成 AI 藝術字" : "先在畫布上選一段文字"}>
+                <Sparkles size={16} />AI 文字藝術字
+              </button>
+              {!(selectedIsImage || selEl?.isText) && (
+                <div style={{ fontSize: 11, color: "#9ca3af", padding: "6px 4px 0", lineHeight: 1.6 }}>去背要先選一張圖片；AI 文字藝術字要先選一段文字。</div>
+              )}
+            </>)}
+            {leftTab === "tools" && (<>
+              <button style={S.tool} onClick={addTextLayer}><Type size={16} />文字</button>
+              <button style={{ ...S.tool, ...(tool === "draw" ? { border: "1px solid #7c3aed", color: "#7c3aed", background: "#f5f3ff" } : {}) }}
+                onClick={() => { if (tool === "draw") exitDraw(); else { setTool("draw"); if (!keepsPaintSelection(layersRef.current, selectedIdsRef.current)) applySelection([]); } }} title="繪製：按住拖曳畫任意線條（Shift＋P）">
+                <Pencil size={16} />繪製{tool === "draw" ? "（開）" : ""}
+              </button>
+              <button style={S.tool} onClick={addShape}><Square size={16} />形狀</button>
+              <button style={S.tool} onClick={() => setShowIcon(true)}><Star size={16} />圖標</button>
+              <button style={S.tool} onClick={addLine}><Minus size={16} />線條</button>
               <button
                 style={{ ...S.tool, ...(tool === "erase" ? { border: "1px solid #7c3aed", color: "#7c3aed", background: "#f5f3ff" } : {}) }}
                 onClick={() => { setTool((t) => (t === "erase" ? "select" : "erase")); erasePt.current = null; if (canvasRef.current) canvasRef.current.style.cursor = "default"; render(); }}
@@ -1856,9 +1885,20 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                 </div>
               )}
             </>)}
-            <input ref={uploadImgRef} type="file" accept="image/*" onChange={onUploadImage} style={{ display: "none" }} />
+            {leftTab === "upload" && (<>
+              <button style={S.tool} onClick={() => uploadImgRef.current?.click()}><Upload size={16} />上傳圖片</button>
+              <button style={S.tool} onClick={() => addProdRef.current?.click()} disabled={adding} title="上傳一張產品圖，自動去背後加入為新圖層">
+                <Plus size={16} />{adding ? "去背中…" : "加入產品（自動去背）"}
+              </button>
+              <button style={S.tool} onClick={addLogo}><BadgeCheck size={16} />Logo</button>
+              <div style={{ fontSize: 11, color: "#9ca3af", padding: "8px 4px 0", lineHeight: 1.6 }}>也可以把「素材」裡的圖直接拖到畫布上。</div>
+            </>)}
           </div>
         </aside>
+        )}
+        {/* 檔案選擇框一直留著：面板收起來時快捷操作、其他地方的按鈕也要用得到 */}
+        <input ref={uploadImgRef} type="file" accept="image/*" onChange={onUploadImage} style={{ display: "none" }} />
+        <input ref={addProdRef} type="file" accept="image/*" onChange={addProduct} style={{ display: "none" }} />
 
         {/* 畫布＋下方的頁面列 */}
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
@@ -3250,7 +3290,9 @@ const S: Record<string, React.CSSProperties> = {
   tbtn: { height: 34, padding: "0 12px", border: "1px solid #e5e7eb", background: "#ffffff", color: "#374151", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 },
   body: { flex: 1, display: "flex", minHeight: 0 },
   // overflowY：範本庫、素材庫都拉很高時，整欄可以捲，不會把外框撐高
-  panel: { width: 288, flex: "0 0 auto", background: "#ffffff", borderRight: "1px solid #e5e7eb", display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" },
+  panel: { width: 280, flex: "0 0 auto", background: "#ffffff", borderRight: "1px solid #e5e7eb", display: "flex", flexDirection: "column", minHeight: 0 },
+  rail: { width: 72, flex: "0 0 auto", background: "#ffffff", borderRight: "1px solid #e5e7eb", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minHeight: 0, overflowY: "auto" },
+  railBtn: { width: 60, height: 58, border: "none", borderRadius: 10, background: "transparent", color: "#4b5563", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, padding: 0 },
   panelHead: { height: 44, display: "flex", alignItems: "center", padding: "0 14px", borderBottom: "1px solid #e5e7eb", fontSize: 12, letterSpacing: ".06em", textTransform: "uppercase", color: "#9ca3af", fontWeight: 700 },
   row: { display: "flex", alignItems: "center", gap: 9, padding: "8px 9px", borderRadius: 12, background: "#f9fafb", border: "1px solid transparent", cursor: "pointer" },
   rowSel: { border: "1px solid #7c3aed", background: "#f5f3ff" },

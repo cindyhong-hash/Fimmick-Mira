@@ -10,7 +10,7 @@ export function QuickStartCards({ clientId }: { clientId: string }) {
   const cards: { title: string; sub: string; icon: typeof ShoppingBag; href?: string; onClick?: () => void; tint: string; preview: string }[] = [
     { title: "社群圖+文", sub: "單圖 / 多圖，一次完成圖文", icon: ShoppingBag, href: `/clients/${clientId}/activities/new`, tint: "bg-[#fff0f6] text-pink-500", preview: "/quickstart/ad.png" },
     { title: "商品情境", sub: "一個產品，快速生成整套商品素材", icon: ImageIcon, href: `/clients/${clientId}/components?tab=products&new=1`, tint: "bg-[#e6f7ff] text-blue-500", preview: "/quickstart/scene.png" },
-    { title: "AI 幫我設計", sub: "選擇一種開始方式，AI 完成後仍可進入畫布自由調整", icon: Sparkles, onClick: () => setShowAiDesign(true), tint: "bg-[#ecdfff] text-violet-600", preview: "/quickstart/ai-design.webp" },
+    { title: "AI 幫我設計", sub: "選一種方式開始，完成後可自由調整", icon: Sparkles, onClick: () => setShowAiDesign(true), tint: "bg-[#ecdfff] text-violet-600", preview: "/quickstart/ai-design.webp" },
   ];
   return (
     <section data-tour="home-quickstart">
@@ -18,16 +18,17 @@ export function QuickStartCards({ clientId }: { clientId: string }) {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {cards.map((c) => (
           <CardShell key={c.title} href={c.href} onClick={c.onClick}>
-            {/* 標題列：icon + 標題/副標 + 箭頭 */}
+            {/* 標題列：icon + 標題/副標 + 箭頭。
+                13 吋筆電（1280）三張卡片很窄，副標會被切掉：比 2xl（1536）窄時圖示縮小、箭頭收起來（整張卡本來就能點） */}
             <div className="flex items-center gap-3">
-              <span className={`flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-full ${c.tint}`}>
-                <c.icon className="h-6 w-6" />
+              <span className={`flex h-10 w-10 2xl:h-[52px] 2xl:w-[52px] shrink-0 items-center justify-center rounded-full ${c.tint}`}>
+                <c.icon className="h-5 w-5 2xl:h-6 2xl:w-6" />
               </span>
               <div className="min-w-0 flex-1">
                 <div className="text-base font-bold text-gray-900">{c.title}</div>
                 <div className="mt-0.5 text-xs text-gray-500 line-clamp-2">{c.sub}</div>
               </div>
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-xl bg-[#f3e8ff] text-violet-600 transition-colors group-hover:bg-violet-200">
+              <span className="hidden 2xl:flex h-6 w-6 shrink-0 items-center justify-center rounded-xl bg-[#f3e8ff] text-violet-600 transition-colors group-hover:bg-violet-200">
                 <ChevronRight className="h-3.5 w-3.5" />
               </span>
             </div>

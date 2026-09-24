@@ -2,6 +2,8 @@
 import { clipToShape, drawEditableShape, drawIcon, EDITABLE_ICON_NAMES, isFillableShape } from "@/lib/magic-layers/editable-shape.ts";
 import { applyLayerTransform, docToLayer, layerCorners, layerToDoc } from "@/lib/magic-layers/layer-transform.ts";
 import { alignOffsets, unitCount, type AlignMode } from "@/lib/magic-layers/align.ts";
+import { buildRebuildSavedLayers, shrinkForUpload } from "@/lib/magic-layers/reference-rebuild/client.ts";
+import type { RebuildResult } from "@/lib/magic-layers/reference-rebuild/types.ts";
 import { DEFAULT_GLOW, drawGlow, type LayerGlow } from "@/lib/magic-layers/layer-glow.ts";
 import { distanceToPolyline, drawPaint, paintHits, samplePath, smoothStroke, strokeToPaint } from "@/lib/magic-layers/freehand.ts";
 /* ============================================================
@@ -105,6 +107,13 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const [magicFillResult, setMagicFillResult] = useState<string[] | null>(null);
   // 左側：一排圖示（範本｜素材｜AI 設計｜工具｜上傳），點了才展開那一格的面板，再點一次收起來（像 Canva）
   const [leftTab, setLeftTab] = useState<LeftTab | null>(null);
+  // AI 設計：生成背景、照參考圖重做
+  const [bgPrompt, setBgPrompt] = useState("");
+  const [bgRef, setBgRef] = useState<string | null>(null);
+  const [aiBusy, setAiBusy] = useState<null | "bg" | "rebuild">(null);
+  const [aiMsg, setAiMsg] = useState<string | null>(null);
+  const bgRefInput = useRef<HTMLInputElement>(null);
+  const rebuildInput = useRef<HTMLInputElement>(null);
   // 範本庫（共用，全品牌看得到；目前只做 1:1）
   const [templates, setTemplates] = useState<{ id: string; name: string; previewUrl: string | null; builtin?: boolean }[]>([]);
   const [tplSaving, setTplSaving] = useState(false);
@@ -1460,6 +1469,59 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     setPagesChanged(true);
     void activatePage(pageIdxRef.current + 1);
   }, [stashCurrentPage, activatePage]);
+  /** 在目前這頁後面加一頁，放進現成的圖層（照參考圖重做的結果），尺寸可以跟目前這頁不同。 */
+  const addPageWith = useCallback((name: string, els: EL[], w: number, h: number) => {
+    stashCurrentPage();
+    const page: EditorPage = { id: `page-${crypto.randomUUID().slice(0, 8)}`, name, w, h, els, loading: null, history: [], histIdx: 0, savedIdx: 0, thumb: flattenEls(els, w, h, PAGE_THUMB) };
+    pagesRef.current.splice(pageIdxRef.current + 1, 0, page);
+    setPagesChanged(true);
+    void activatePage(pageIdxRef.current + 1);
+  }, [stashCurrentPage, activatePage]);
+
+  /**
+   * AI 生成背景：打字描述（可附參考圖）→ 生成一張符合目前畫布比例的底圖 → 換成背景。
+   * 其他圖層都不動；換背景是一個復原步驟，不滿意按 ⌘Z。
+   */
+  const generateBackground = useCallback(async () => {
+    if (!bgPrompt.trim() || aiBusy) return;
+    setAiBusy("bg"); setAiMsg(null);
+    try {
+      const ar = doc.w / doc.h;
+      const ratio = (["1:1", "4:5", "3:4", "16:9", "9:16", "4:3"] as const).reduce((best, r) => {
+        const [a, b] = r.split(":").map(Number), [c, d] = best.split(":").map(Number);
+        return Math.abs(Math.log(a / b / ar)) < Math.abs(Math.log(c / d / ar)) ? r : best;
+      }, "1:1" as string);
+      const r = await fetch("/api/magic-layers/compose", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ backgroundPrompt: bgPrompt.trim(), backgroundRefUrl: bgRef || undefined, ratio, productImageUrls: [], texts: [] }) });
+      const d = await r.json().catch(() => ({})) as { backgroundUrl?: string; error?: string };
+      if (!r.ok || !d.backgroundUrl) throw new Error(d.error ?? "生成失敗，請稍後再試");
+      await replaceBackground(d.backgroundUrl);
+      setAiMsg("已換上新背景。不滿意可以按 ⌘Z 回到原本的背景，或改一下描述再生成一次。");
+    } catch (e) { setAiMsg("生成背景失敗：" + (e instanceof Error ? e.message : String(e))); }
+    finally { setAiBusy(null); }
+  }, [bgPrompt, bgRef, aiBusy, doc.w, doc.h, replaceBackground]);
+
+  /**
+   * 照參考圖重做：上傳一張設計圖，AI 拆成可編輯的圖層，放進「新的一頁」——目前的畫布完全不動。
+   * 跟「建立圖文 → AI 幫我設計」是同一套（/api/magic-layers/rebuild），約 30–60 秒。
+   */
+  const rebuildFromReference = useCallback(async (file: File) => {
+    if (aiBusy) return;
+    setAiBusy("rebuild"); setAiMsg(null);
+    try {
+      const dataUrl = await new Promise<string>((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result)); fr.onerror = () => rej(new Error("讀不到這張圖片")); fr.readAsDataURL(file); });
+      const image = await shrinkForUpload(dataUrl);
+      const r = await fetch("/api/magic-layers/rebuild", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((d as { error?: string }).error ?? "重做失敗，請稍後再試");
+      const result = d as RebuildResult;
+      const els = await Promise.all((await buildRebuildSavedLayers(result)).map((sl) => elFromSavedLayer(sl)));
+      addPageWith("參考圖重做", els, result.docW, result.docH);
+      setAiMsg("已放進新的一頁「參考圖重做」，原本的畫布沒有動。");
+    } catch (e) { setAiMsg("照參考圖重做失敗：" + (e instanceof Error ? e.message : String(e))); }
+    finally { setAiBusy(null); }
+  }, [aiBusy, elFromSavedLayer, addPageWith]);
+
   const deletePage = useCallback((i: number) => {
     const pages = pagesRef.current;
     if (pages.length <= 1 || !window.confirm(`刪除第 ${i + 1} 頁？（可以用復原以外的方式找回：只要還沒存檔，重新整理就會回到上次存的樣子）`)) return;
@@ -1830,6 +1892,36 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
               )
             )}
             {leftTab === "ai" && (<>
+              {/* 生成背景：打字描述（可附參考圖）→ 換成背景，其他圖層不動 */}
+              <div style={S.aiCard}>
+                <div style={S.aiCardTitle}><ImageIcon size={15} color="#7c3aed" />生成背景</div>
+                <textarea value={bgPrompt} onChange={(e) => setBgPrompt(e.target.value)} disabled={!!aiBusy} rows={3}
+                  placeholder="例：夏日海灘，清爽日系廣告風格，陽光燦爛、乾淨簡約"
+                  style={{ ...S.rinput, height: "auto", padding: "8px 10px", resize: "vertical", fontSize: 12, lineHeight: 1.6 }} />
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+                  {bgRef ? (<>
+                    <img src={bgRef} alt="參考圖" style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 6, border: "1px solid #e5e7eb" }} />
+                    <button onClick={() => setBgRef(null)} disabled={!!aiBusy} style={{ ...S.rbtn, height: 26, padding: "0 8px", fontSize: 11 }}>移除參考圖</button>
+                  </>) : (
+                    <button onClick={() => bgRefInput.current?.click()} disabled={!!aiBusy} style={{ ...S.rbtn, height: 26, padding: "0 8px", fontSize: 11 }}>＋ 參考圖（選填）</button>
+                  )}
+                </div>
+                <button onClick={() => void generateBackground()} disabled={!bgPrompt.trim() || !!aiBusy}
+                  style={{ ...S.aiCardBtn, ...(!bgPrompt.trim() || aiBusy ? { opacity: .5, cursor: "not-allowed" } : {}) }}>
+                  {aiBusy === "bg" ? "生成中…（約 15–30 秒）" : "生成背景"}
+                </button>
+              </div>
+              {/* 照參考圖重做：上傳設計圖 → 拆成可編輯的圖層，放進新的一頁 */}
+              <div style={S.aiCard}>
+                <div style={S.aiCardTitle}><Layers size={15} color="#7c3aed" />照參考圖重做</div>
+                <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.6 }}>上傳一張設計圖，AI 拆成可以改的文字、產品和色塊，放在新的一頁（目前的畫布不會動）。</div>
+                <button onClick={() => rebuildInput.current?.click()} disabled={!!aiBusy}
+                  style={{ ...S.aiCardBtn, ...(aiBusy ? { opacity: .5, cursor: "not-allowed" } : {}) }}>
+                  {aiBusy === "rebuild" ? "AI 拆解版面中…（約 30–60 秒）" : "上傳參考圖"}
+                </button>
+              </div>
+              {aiMsg && <div role="status" style={{ fontSize: 11, color: aiMsg.includes("失敗") ? "#b91c1c" : "#15803d", background: aiMsg.includes("失敗") ? "#fef2f2" : "#f0fdf4", borderRadius: 8, padding: "8px 10px", margin: "0 4px 10px", lineHeight: 1.6 }}>{aiMsg}</div>}
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", padding: "4px 6px 6px" }}>編輯目前的畫面</div>
               {SHOW_MAGIC_FILL && (
                 <button style={S.tool} onClick={generateMagicFill} disabled={magicFillBusy}><WandSparkles size={16} />{magicFillBusy ? "偵測並延伸中…" : "魔術棒補空白"}</button>
               )}
@@ -1899,6 +1991,13 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         {/* 檔案選擇框一直留著：面板收起來時快捷操作、其他地方的按鈕也要用得到 */}
         <input ref={uploadImgRef} type="file" accept="image/*" onChange={onUploadImage} style={{ display: "none" }} />
         <input ref={addProdRef} type="file" accept="image/*" onChange={addProduct} style={{ display: "none" }} />
+        <input ref={bgRefInput} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => {
+          const f = e.target.files?.[0]; e.target.value = ""; if (!f) return;
+          const fr = new FileReader(); fr.onload = () => setBgRef(String(fr.result)); fr.readAsDataURL(f);
+        }} />
+        <input ref={rebuildInput} type="file" accept="image/png,image/jpeg,image/webp" style={{ display: "none" }} onChange={(e) => {
+          const f = e.target.files?.[0]; e.target.value = ""; if (f) void rebuildFromReference(f);
+        }} />
 
         {/* 畫布＋下方的頁面列 */}
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
@@ -3291,6 +3390,9 @@ const S: Record<string, React.CSSProperties> = {
   body: { flex: 1, display: "flex", minHeight: 0 },
   // overflowY：範本庫、素材庫都拉很高時，整欄可以捲，不會把外框撐高
   panel: { width: 280, flex: "0 0 auto", background: "#ffffff", borderRight: "1px solid #e5e7eb", display: "flex", flexDirection: "column", minHeight: 0 },
+  aiCard: { border: "1px solid #ede9fe", background: "#faf8ff", borderRadius: 12, padding: 12, margin: "0 4px 10px", display: "flex", flexDirection: "column", gap: 6 },
+  aiCardTitle: { display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 800, color: "#374151" },
+  aiCardBtn: { marginTop: 6, height: 34, border: "none", borderRadius: 8, background: "#7c3aed", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" },
   rail: { width: 72, flex: "0 0 auto", background: "#ffffff", borderRight: "1px solid #e5e7eb", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minHeight: 0, overflowY: "auto" },
   railBtn: { width: 60, height: 58, border: "none", borderRadius: 10, background: "transparent", color: "#4b5563", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, padding: 0 },
   panelHead: { height: 44, display: "flex", alignItems: "center", padding: "0 14px", borderBottom: "1px solid #e5e7eb", fontSize: 12, letterSpacing: ".06em", textTransform: "uppercase", color: "#9ca3af", fontWeight: 700 },

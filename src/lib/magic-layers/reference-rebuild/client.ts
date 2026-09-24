@@ -3,7 +3,8 @@
    ============================================================ */
 import type { LayerData } from "../types.ts";
 import { canvasMeasure, fitText, fontFor } from "./fit-text.ts";
-import { rebuildToLayers } from "./to-layers.ts";
+import { rebuildToLayers, rebuildToSavedLayers } from "./to-layers.ts";
+import type { SavedLayer } from "../saved-layer.ts";
 import type { RebuildResult } from "./types.ts";
 
 /**
@@ -22,10 +23,16 @@ export async function shrinkForUpload(dataUrl: string, maxSide = 1600): Promise<
   return c.toDataURL("image/jpeg", 0.92);
 }
 
-/** 用編輯器實際載入的字體量字，排好每段文字，組成圖層。 */
-export async function buildRebuildLayers(result: RebuildResult): Promise<LayerData[]> {
-  // 先把用到的字體載進來：中文字體依字元分包，要帶實際文字才會下載對的那包，
-  // 沒載好就量，量到的是替代字體的寬度，排出來會歪。
+/** 同 buildRebuildLayers，但回傳存檔格式：編輯器裡直接把結果放成新的一頁。 */
+export async function buildRebuildSavedLayers(result: RebuildResult): Promise<SavedLayer[]> {
+  return rebuildToSavedLayers(result, await fitRebuildTexts(result));
+}
+
+/**
+ * 先把用到的字體載進來：中文字體依字元分包，要帶實際文字才會下載對的那包，
+ * 沒載好就量，量到的是替代字體的寬度，排出來會歪。
+ */
+async function fitRebuildTexts(result: RebuildResult) {
   await Promise.all(result.texts.map((t) => {
     const { family, weight } = fontFor(t);
     return document.fonts.load(`${weight} 40px ${family}`, t.text).catch(() => []);
@@ -33,5 +40,10 @@ export async function buildRebuildLayers(result: RebuildResult): Promise<LayerDa
   const ctx = document.createElement("canvas").getContext("2d");
   if (!ctx) throw new Error("瀏覽器不支援畫布");
   const measure = canvasMeasure(ctx);
-  return rebuildToLayers(result, result.texts.map((t) => fitText(t, measure)));
+  return result.texts.map((t) => fitText(t, measure));
+}
+
+/** 用編輯器實際載入的字體量字，排好每段文字，組成圖層。 */
+export async function buildRebuildLayers(result: RebuildResult): Promise<LayerData[]> {
+  return rebuildToLayers(result, await fitRebuildTexts(result));
 }

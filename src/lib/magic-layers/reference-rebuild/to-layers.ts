@@ -11,6 +11,11 @@ import type { FittedText } from "./fit-text.ts";
 import type { RebuildResult } from "./types.ts";
 
 export function rebuildToLayers(result: RebuildResult, texts: FittedText[]): LayerData[] {
+  return rebuildToSavedLayers(result, texts).map(savedToLayerData);
+}
+
+/** 同一份圖層、存檔格式（SavedLayer）：編輯器裡「照參考圖重做」直接放成新頁面時用。 */
+export function rebuildToSavedLayers(result: RebuildResult, texts: FittedText[]): SavedLayer[] {
   const out: SavedLayer[] = [];
   const push = (l: Omit<SavedLayer, "zIndex" | "visible" | "opacity" | "locked"> & { opacity?: number }) =>
     out.push({ visible: true, locked: false, opacity: 1, ...l, zIndex: out.length });
@@ -34,5 +39,5 @@ export function rebuildToLayers(result: RebuildResult, texts: FittedText[]): Lay
     x: p.box.x, y: p.box.y, w: p.box.w, h: p.box.h, rotation: 0, image: p.url,
   }));
   texts.forEach((t, i) => { if (!t.behindProduct) text(t, i); });
-  return out.map(savedToLayerData);
+  return out;
 }

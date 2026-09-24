@@ -2054,6 +2054,22 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                       <button style={{ ...S.rbtn, flex: 1, ...(selEl.fx?.shadow ? { border: "1px solid #7c3aed", color: "#7c3aed" } : {}) }} onClick={() => updateFx({ shadow: !selEl.fx?.shadow })}>陰影</button>
                       <button style={{ ...S.rbtn, flex: 1, ...(selEl.fx?.italic ? { border: "1px solid #7c3aed", color: "#7c3aed" } : {}) }} onClick={() => updateFx({ italic: !selEl.fx?.italic })}>斜體</button>
                     </div>
+                    {/* 外框：顏色＋粗細（像 PS 的「筆畫 1 像素」）。粗細以畫面上看得到的外框寬度（px）顯示，
+                        存成字級的比例，文字放大縮小外框跟著等比變 */}
+                    {selEl.fx?.strokeW ? (() => {
+                      const fs = selEl.fontSize * (selEl.w / (selEl.naturalW || selEl.w));
+                      const px = Math.max(1, Math.round((fs * selEl.fx.strokeW) / 2));
+                      const setPx = (v: number) => updateFx({ strokeW: (Math.max(1, Math.min(60, v || 1)) * 2) / Math.max(1, fs) });
+                      return (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, padding: "8px 10px", border: "1px solid #e5e7eb", borderRadius: 10 }}>
+                          <span style={{ fontSize: 12, color: "#6b7280", whiteSpace: "nowrap" }}>外框</span>
+                          <input type="color" aria-label="外框顏色" title="外框顏色" value={toHex(selEl.fx.strokeColor || "#ffffff")} onChange={(e) => updateFx({ strokeColor: e.target.value })} style={{ width: 32, height: 28, border: "1px solid #e5e7eb", borderRadius: 6, padding: 0, cursor: "pointer", flex: "0 0 auto" }} />
+                          <input type="range" aria-label="外框粗細" min={1} max={60} value={Math.min(60, px)} onChange={(e) => setPx(Number(e.target.value))} style={{ flex: 1, minWidth: 0, accentColor: "#7c3aed" }} />
+                          <input type="number" aria-label="外框粗細（像素）" min={1} max={60} value={px} onChange={(e) => setPx(Number(e.target.value))} style={{ ...S.rinput, width: 56, height: 28, padding: "0 6px", flex: "0 0 auto" }} />
+                          <span style={{ fontSize: 12, color: "#9ca3af" }}>px</span>
+                        </div>
+                      );
+                    })() : null}
                     <label style={S.rlabel}>字距 <span style={{ float: "right", color: "#9ca3af" }}>{selEl.fx?.letterSpacing ?? 0}px</span></label>
                     <input type="range" min={-12} max={48} step={1} value={selEl.fx?.letterSpacing ?? 0} onChange={(e) => updateFx({ letterSpacing: Number(e.target.value) })} style={{ width: "100%", accentColor: "#7c3aed" }} />
                     <label style={S.rlabel}>文字路徑</label>
@@ -2065,12 +2081,6 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                       <input type="range" min={5} max={100} value={selEl.fx?.warpAmount ?? 35} onChange={(e) => updateFx({ warpAmount: Number(e.target.value) })} style={{ width: "100%", accentColor: "#7c3aed" }} />
                       {selEl.fx?.warp === "wave" && <><label style={S.rlabel}>波浪數</label><input type="range" min={1} max={5} step={1} value={selEl.fx?.waveCount ?? 2} onChange={(e) => updateFx({ waveCount: Number(e.target.value) })} style={{ width: "100%", accentColor: "#7c3aed" }} /></>}
                     </>)}
-                    {selEl.fx?.strokeW ? (
-                      <>
-                        <label style={S.rlabel}>外框顏色</label>
-                        <input type="color" value={toHex(selEl.fx.strokeColor || "#ffffff")} onChange={(e) => updateFx({ strokeColor: e.target.value })} style={{ width: 40, height: 34, border: "1px solid #e5e7eb", borderRadius: 8, padding: 0, cursor: "pointer" }} />
-                      </>
-                    ) : null}
                     {/* AI 文字藝術字入口 */}
                     <div style={{ height: 1, background: "#e5e7eb", margin: "18px 0" }} />
                     <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>想做更特殊的文字效果？</div>

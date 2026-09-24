@@ -3,7 +3,7 @@
 // 家族氣質：節慶社群圖＋知識型輪播的第一張。左半暖黃、右半夜空明月，
 // 中間一枚綠色花邊圓牌放標題與提問，底部綠帶放「右滑看…」引導下一張。
 // 參考：品牌中秋節柚子知識貼文（2026-09-24 使用者提供）。
-// 參考圖的人物插畫做不出來（範本只有形狀＋文字），用月亮、星星、雲帶過；兔子用橢圓組成剪影。
+// 參考圖的人物插畫做不出來，用月亮、星星、雲帶過；兔子搗麻糬是 AI 生成後轉成的剪影圖。
 // 套用後可以自己放插圖進來。
 import { L, S } from "./template-kit.mjs";
 
@@ -29,25 +29,10 @@ function scallopPoints(n = 24, bulge = 0.2) {
 }
 
 /**
- * 兔子剪影（跳舞的樣子）：頭、兩隻長耳、身體、舉起的手、兩條腿、尾巴，全部用橢圓組成。
- * flip＝面向左（左右鏡像）。整隻設成同一個群組，拖的時候整隻一起動。
+ * 兔子搗麻糬剪影（米白、透明背景）。AI 插畫模型只會畫線條稿，所以生成後自己轉成剪影：
+ * 跟背景色不同的地方（填色＋線條）全部塗成同一個米白色，背景變透明。1252×967。
  */
-function rabbit(x, y, flip, group, colour = "#fbeec2") {
-  const W = 130;
-  const part = (name, dx, dy, w, h, rot) => L.shape(name, flip ? x + W - dx - w : x + dx, y + dy, w, h,
-    { kind: "ellipse", fill: colour }, { rotation: (flip ? -rot : rot) * (Math.PI / 180), groupId: group });
-  return [
-    part("兔耳", 26, -58, 20, 78, -16),
-    part("兔耳", 50, -52, 20, 72, 12),
-    part("兔頭", 18, 6, 62, 54, 0),
-    part("兔身", 22, 50, 74, 104, -14),
-    part("兔手", 80, 44, 18, 64, 48),
-    part("兔手", 10, 70, 18, 56, -30),
-    part("兔腳", 30, 140, 24, 66, 24),
-    part("兔腳", 70, 136, 24, 64, -34),
-    part("兔尾", 2, 120, 26, 26, 0),
-  ];
-}
+const RABBITS = "https://v16uryj9gfmy6re4.public.blob.vercel-storage.com/1790240286627-2dfgva68xtn.png";
 
 /** 一朵雲：三顆重疊的圓＋一條平底。 */
 const cloud = (x, y, w, colour) => [
@@ -105,9 +90,8 @@ export const FAMILY = [
 
       // 底部綠帶＋右滑引導
       L.shape("底帶", 0, 1040, S, 160, { kind: "rect", fill: GREEN }),
-      // 左下兩隻跳舞的兔子（面對面），站在底帶上面（排在底帶後面才不會被蓋住腳）
-      ...rabbit(40, 930, false, "rabbit-a"),
-      ...rabbit(190, 915, true, "rabbit-b"),
+      // 左下兔子搗麻糬剪影，站在底帶上面（排在底帶後面才不會被蓋住腳）
+      L.shape("兔子剪影", 24, 846, 420, Math.round(420 * 967 / 1252), { kind: "rect" }, { image: RABBITS, shape: undefined }),
       L.shape("引導膠囊", 540, 1075, 610, 92, { kind: "rect", fill: "#ffffff", radius: 46 }),
       L.text("引導", "右滑看哪裡不一樣 ▶▶▶", 540, 1075, 610, 92, { fontSize: 44, color: GREEN, fontWeight: 900 }),
     ],

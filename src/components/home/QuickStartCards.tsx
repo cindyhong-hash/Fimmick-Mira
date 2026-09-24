@@ -9,7 +9,7 @@ export function QuickStartCards({ clientId }: { clientId: string }) {
   const [showAiDesign, setShowAiDesign] = useState(false);
   const cards: { title: string; sub: string; icon: typeof ShoppingBag; href?: string; onClick?: () => void; tint: string; preview: string }[] = [
     { title: "社群圖+文", sub: "單圖 / 多圖，一次完成圖文", icon: ShoppingBag, href: `/clients/${clientId}/activities/new`, tint: "bg-[#fff0f6] text-pink-500", preview: "/quickstart/ad.png" },
-    { title: "商品情境", sub: "一個產品，快速生成整套商品素材", icon: ImageIcon, href: `/clients/${clientId}/components?tab=products`, tint: "bg-[#e6f7ff] text-blue-500", preview: "/quickstart/scene.png" },
+    { title: "商品情境", sub: "一個產品，快速生成整套商品素材", icon: ImageIcon, href: `/clients/${clientId}/components?tab=products&new=1`, tint: "bg-[#e6f7ff] text-blue-500", preview: "/quickstart/scene.png" },
     { title: "AI 幫我設計", sub: "選擇一種開始方式，AI 完成後仍可進入畫布自由調整", icon: Sparkles, onClick: () => setShowAiDesign(true), tint: "bg-[#ecdfff] text-violet-600", preview: "/quickstart/ai-design.webp" },
   ];
   return (

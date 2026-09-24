@@ -21,11 +21,23 @@ export default function BrandComponentsPage({ params }: { params: Promise<{ clie
     if (clientId) setLastClientTab(clientId, "components");
   }, [clientId]);
 
-  // 從 URL ?tab=products 進來（首頁「商品情境」卡）時，直接開「產品」分頁
+  // 從 URL ?tab=products 進來（首頁「商品情境」卡）時，直接開「產品」分頁；
+  // 帶 &new=1 就順便打開「新增產品」視窗（關掉就停在產品列表，可以選已經建好的產品）。
+  // 用完把 new=1 拿掉，重新整理才不會一直跳出來。
   useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 依 URL 參數決定初始分頁（client-only，避免 useSearchParams 需 Suspense）
-    if (new URLSearchParams(window.location.search).get("tab") === "products") setTab("products");
+    if (sp.get("tab") === "products") setTab("products");
   }, []);
+  // 產品列表要等 clientId 到了才會畫出來，所以「打開新增產品」要等它在
+  useEffect(() => {
+    if (!clientId) return;
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get("new") !== "1") return;
+    productRef.current?.openNew();
+    sp.delete("new");
+    window.history.replaceState(null, "", `${window.location.pathname}?${sp.toString()}`);
+  }, [clientId]);
 
   if (!clientId) return <div className="text-gray-400">載入中...</div>;
 

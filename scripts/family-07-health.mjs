@@ -3,7 +3,7 @@
 // 家族氣質：醫師／診所的衛教貼文。左邊一張滿版人物照撐起情緒（健康、正向），
 // 左上手寫感的粉紅標題＋藍色標籤點出主題，右邊一欄淺藍底三格重點（線條圖示＋粉紅標題＋灰色說明）。
 // 參考：婦產科醫師的更年期衛教貼文（2026-09-24 使用者提供）。
-// 人物照、三個線條圖示都是 AI 生成的示意素材（圖示生成後去白底、加粗、統一成粉紅）；
+// 人物照、三個線條圖示都是 AI 生成的示意素材（圖示生成後去白底、統一粗細、統一成粉紅）；
 // 套用後換成自己的照片，或把圖示換成別的主題。
 import { L, S, DEG } from "./template-kit.mjs";
 
@@ -14,9 +14,10 @@ const BLUE = "#5aa9e6";
 const BLOB = "https://v16uryj9gfmy6re4.public.blob.vercel-storage.com/";
 const PHOTO = `${BLOB}1790240665356-beb8cdptnri.jpg`;   // 627×1024，跟左欄 735×1200 同比例
 const ICONS = {
-  heart: `${BLOB}1790240666017-vcyz002u8r.png`,
-  bone: `${BLOB}1790240666735-4rsfr3bc4a.png`,
-  pelvis: `${BLOB}1790240667450-ao9bur9xoto.png`,
+  // 2026-09-24 使用者要再簡化：改成粗線條的簡單圖示（只有外輪廓、幾乎沒有內部細節）
+  heart: `${BLOB}1790241019464-8upud5wmza3.png`,
+  bone: `${BLOB}1790241019892-keeims341d.png`,
+  pelvis: `${BLOB}1790241020285-mym9ppy36h.png`,
 };
 
 /** 圖片圖層（不是示意商品，名字自己給）。 */

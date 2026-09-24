@@ -2,10 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertCircle, ArrowLeft, Check, Download, Loader2, MoreHorizontal, PencilRuler, RefreshCw, Sparkles, Trash2, X, ZoomIn } from "lucide-react";
-import { AdLayoutModal } from "@/components/adcreation/AdLayoutModal";
+import { AlertCircle, ArrowLeft, Check, Download, Loader2, MoreHorizontal, PencilRuler, RefreshCw, Trash2, X, ZoomIn } from "lucide-react";
 import { ML_WIZARD_SEED_KEY } from "@/components/activities/RolePickerModal";
-import { useAdLayoutEnabled } from "@/lib/feature-flags";
 import type { ImageSetArtDirection } from "@/lib/products/product-visual-analysis";
 import { imageSetSubtypeLabel } from "@/lib/products/image-set-subtype-labels";
 import type { ImageSetCategory, ImageSetPlanItem } from "@/lib/products/image-set-kit";
@@ -49,14 +47,12 @@ export function VisualAssetBoard({ clientId, productId, batchId, productName }: 
   productName: string;
 }) {
   const router = useRouter();
-  const adLayoutEnabled = useAdLayoutEnabled();
   const [data, setData] = useState<BoardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [deletingKit, setDeletingKit] = useState(false);
   const [showKitActions, setShowKitActions] = useState(false);
-  const [showAdLayout, setShowAdLayout] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<BoardAsset | null>(null);
 
   const load = useCallback(async () => {
@@ -159,7 +155,7 @@ export function VisualAssetBoard({ clientId, productId, batchId, productName }: 
     <button type="button" onClick={() => router.push(`/clients/${clientId}/products/${productId}`)} className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-900"><ArrowLeft className="h-4 w-4" />返回產品</button>
     <header className="mt-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div><p className="text-xs font-bold uppercase tracking-[0.14em] text-violet-600">Visual Asset Kit</p><h1 className="mt-1 text-2xl font-bold text-gray-950 sm:text-3xl">{productName} 視覺套組</h1><p className="mt-2 text-sm text-gray-500">{data?.theme?.label ?? "常態品牌素材"} · {counts.done}/{counts.total} 張完成</p></div>
-      <div className="flex flex-wrap items-center gap-2 text-xs font-bold"><span className="rounded-full bg-emerald-50 px-3 py-1.5 text-emerald-700">完成 {counts.done}</span>{counts.active > 0 && <span className="rounded-full bg-violet-50 px-3 py-1.5 text-violet-700">處理中 {counts.active}</span>}{counts.failed > 0 && <span className="rounded-full bg-red-50 px-3 py-1.5 text-red-700">失敗 {counts.failed}</span>}{selection.assetIds.length > 0 && <button type="button" onClick={openInEditor} className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-white px-4 py-2 text-violet-700 hover:bg-violet-50"><PencilRuler className="h-3.5 w-3.5" />加入自由畫布</button>}{adLayoutEnabled && selection.assetIds.length > 0 && <button type="button" onClick={() => setShowAdLayout(true)} className="inline-flex items-center gap-1.5 rounded-full bg-violet-600 px-4 py-2 text-white hover:bg-violet-700"><Sparkles className="h-3.5 w-3.5" />AI 幫我排版</button>}<div className="relative"><button type="button" aria-label="管理這組素材" aria-haspopup="menu" aria-expanded={showKitActions} onClick={() => setShowKitActions((open) => !open)} className="rounded-full border border-gray-200 bg-white p-2 text-gray-500 hover:bg-gray-50 hover:text-gray-800"><MoreHorizontal className="h-4 w-4" /></button>{showKitActions && <div role="menu" className="absolute right-0 top-full z-20 mt-2 w-36 rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg"><button type="button" role="menuitem" onClick={() => { setShowKitActions(false); void removeKit(); }} disabled={counts.active > 0 || deletingKit} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-bold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-gray-300"><Trash2 className="h-3.5 w-3.5" />{deletingKit ? "刪除中…" : counts.active > 0 ? "生成中不可刪除" : "刪除整組"}</button></div>}</div></div>
+      <div className="flex flex-wrap items-center gap-2 text-xs font-bold"><span className="rounded-full bg-emerald-50 px-3 py-1.5 text-emerald-700">完成 {counts.done}</span>{counts.active > 0 && <span className="rounded-full bg-violet-50 px-3 py-1.5 text-violet-700">處理中 {counts.active}</span>}{counts.failed > 0 && <span className="rounded-full bg-red-50 px-3 py-1.5 text-red-700">失敗 {counts.failed}</span>}{selection.assetIds.length > 0 && <button type="button" onClick={openInEditor} className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-white px-4 py-2 text-violet-700 hover:bg-violet-50"><PencilRuler className="h-3.5 w-3.5" />加入自由畫布</button>}<div className="relative"><button type="button" aria-label="管理這組素材" aria-haspopup="menu" aria-expanded={showKitActions} onClick={() => setShowKitActions((open) => !open)} className="rounded-full border border-gray-200 bg-white p-2 text-gray-500 hover:bg-gray-50 hover:text-gray-800"><MoreHorizontal className="h-4 w-4" /></button>{showKitActions && <div role="menu" className="absolute right-0 top-full z-20 mt-2 w-36 rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg"><button type="button" role="menuitem" onClick={() => { setShowKitActions(false); void removeKit(); }} disabled={counts.active > 0 || deletingKit} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-bold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-gray-300"><Trash2 className="h-3.5 w-3.5" />{deletingKit ? "刪除中…" : counts.active > 0 ? "生成中不可刪除" : "刪除整組"}</button></div>}</div></div>
     </header>
     {error && <div role="alert" className="mt-5 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
@@ -203,6 +199,5 @@ export function VisualAssetBoard({ clientId, productId, batchId, productName }: 
         </div>
       </div>
     </div>}
-    {showAdLayout && <AdLayoutModal clientId={clientId} productId={productId} productName={productName} assetKit={{ batchId, assetIds: selection.assetIds }} onClose={() => setShowAdLayout(false)} />}
   </div>;
 }

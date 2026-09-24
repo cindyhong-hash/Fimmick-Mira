@@ -1,3 +1,4 @@
+import { classifyAndStoreAssetType } from "@/lib/library/classify-asset";
 import { NextResponse } from "next/server";
 import { after } from "next/server";
 import sharp from "sharp";
@@ -47,7 +48,8 @@ export async function POST(request: Request) {
     },
   });
 
-  after(() => runGeneration(row.id, body ?? {}, host));
+  // 生成完再看圖決定素材庫分類（跟 genType 分開；失敗就照舊規則顯示）
+  after(() => runGeneration(row.id, body ?? {}, host).then(() => classifyAndStoreAssetType(row.id)));
 
   return NextResponse.json({ id: row.id, status: "GENERATING" });
 }

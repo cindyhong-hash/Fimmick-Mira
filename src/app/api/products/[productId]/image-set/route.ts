@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db";
 import { protectPaidRoute } from "@/lib/site-gate";
 import { dailyQuota } from "@/lib/paid-quota";
+import { classifyBatchAssets } from "@/lib/library/classify-asset";
 import { parseBenefitIconStyle } from "@/lib/products/image-set-kit";
 import {
   claimProductPaidOperationLease,
@@ -122,7 +123,11 @@ export const POST = protectPaidRoute(async (
       });
       return failed.count === rowIds.length;
     },
-    scheduleAfter: (callback) => after(callback),
+    // 整批生成、套圖狀態都更新完之後，再看圖補素材庫分類（生成角色 ≠ 素材庫分類）。
+    // 放在最後：不會讓套圖多顯示「處理中」；最多多花 20 秒，失敗不影響套圖
+    scheduleAfter: (callback) => after(async () => {
+      try { await callback(); } finally { if (typeof body.batchId === "string" && body.batchId) await classifyBatchAssets(body.batchId); }
+    }),
     runBatch: (input, value) => runImageSetBatch(input, undefined, value),
     readBatchStatuses: async (batchId, ownerProductId) => (await db.libraryImage.findMany({
       where: { batchId, productId: ownerProductId },

@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useState, useCallback, useImperativeHandle, forwardRef, useRef } from "react";
+import { readAssetType } from "@/lib/library/asset-type";
 import {
   ArrowRightCircle, LayoutTemplate, Palette, MessageSquare,
   LayoutGrid, Plus, Trash2, Mountain,
@@ -412,6 +413,11 @@ function isSeriesTemplate(item: GalleryItem): boolean {
  *  而且「背景」篩選永遠是 0。 */
 function generatedKind(item: GalleryItem): "person" | "illustration" | "product" | "uploaded" | "material" | null {
   if (item.kind !== "generated") return null;
+  // 素材庫分類（assetType）優先：生成完 AI 看圖判斷、或使用者在詳細視窗改過的。
+  // 生成類型（genType）／商品套組的生成角色只是「怎麼生出來的」，不等於圖裡是什麼；
+  // 沒有 assetType 的舊素材才照下面的舊規則推。
+  const explicit = readAssetType(item.paramsJson)?.type;
+  if (explicit) return explicit;
   try {
     const g = JSON.parse(item.paramsJson ?? "{}").genType;
     if (g === "person") return "person";

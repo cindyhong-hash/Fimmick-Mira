@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { isAssetType, keepAssetType, withAssetType } from "@/lib/library/asset-type";
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -110,14 +111,19 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       data.paramsJson = JSON.stringify(parsed);
     } else if (body.paramsJson !== undefined) {
       // 直接整份覆寫（生成流程「揀一張留低」確認時，用嗰刻最終 metadata 完善呢筆記錄）。
-      data.paramsJson = body.paramsJson;
+      // 素材庫分類（assetType）要帶過去：生成完 AI 已經判斷好、或使用者改過的，不能被洗掉。
+      data.paramsJson = keepAssetType(existing.paramsJson, body.paramsJson);
+    } else if (body.assetType !== undefined) {
+      // 使用者手動改素材庫分類：記成 user，之後 AI 不會再覆蓋
+      if (!isAssetType(body.assetType)) return NextResponse.json({ error: "分類不正確" }, { status: 400 });
+      data.paramsJson = withAssetType(existing.paramsJson, body.assetType, "user");
     }
     if (body.copyText !== undefined) data.copyText = body.copyText;
     if (body.subject !== undefined) data.subject = body.subject || null; // editable photo title
     if (body.clientId !== undefined) data.clientId = body.clientId; // 專案 re-homing (null = 全部)
     // 「調整風格積木」＝改 metadata，唔算重新生成 → 唔好 bump createdAt（唔好令舊圖跳去 gallery 最新）。
     // 只有真正改到圖內容（文案 / 標題）先 re-sort。
-    const blockOnlyEdit = (body.blockEdits !== undefined || body.slots !== undefined)
+    const blockOnlyEdit = (body.blockEdits !== undefined || body.slots !== undefined || body.assetType !== undefined)
       && body.copyText === undefined && body.subject === undefined;
     if (Object.keys(data).length > 0 && !blockOnlyEdit) data.createdAt = new Date();
 

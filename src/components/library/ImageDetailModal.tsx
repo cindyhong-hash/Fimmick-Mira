@@ -8,6 +8,7 @@
  * the generated copy and offers 「分析此圖加入素材」.
  */
 import { useEffect, useState } from "react";
+import { ASSET_TYPE_LABEL, ASSET_TYPES, type AssetType } from "@/lib/library/asset-type";
 import { X, ArrowRightCircle, Sparkles, Paperclip, Mountain, UserRound, Palette, Package, Pencil, RefreshCw, Trash2, Download, Check, Loader2, Image as ImageIcon, Target } from "lucide-react";
 import type { StyleComponent, ComponentCategory } from "@/types/library";
 import { CATEGORY_META, getColors } from "@/types/library";
@@ -24,6 +25,8 @@ type Props = {
   libraryImageId?: string;
   /** 生成類型（人像/插畫）→ 純成圖，popup 唔顯示積木/分析。 */
   genType?: string;
+  /** 素材庫分類（跟生成類型分開；AI 看圖判斷或使用者改過）。沒有＝舊素材，照生成類型推。 */
+  assetType?: AssetType;
   /** 生成時的引擎 mode（e.g. "flux-scene", "nano-banana"）— 用於「重新生成」時預填引擎。 */
   mode?: string;
   /** 生成時使用的參考風格圖 URL（可能是 /uploads 本地路徑）。 */
@@ -91,6 +94,7 @@ export function ImageDetailModal({
   prompt,
   libraryImageId,
   genType,
+  assetType,
   mode,
   refImageUrl,
   sourceImages,
@@ -117,6 +121,37 @@ export function ImageDetailModal({
   const [savedTitle, setSavedTitle] = useState<string | null>(null);
   const [savingTitle, setSavingTitle] = useState(false);
   const displaySubject = savedTitle ?? subject;
+  // 素材庫分類：改了馬上顯示，並通知素材庫重新整理（標籤、篩選跟著變）
+  const [category, setCategory] = useState<AssetType | undefined>(assetType);
+  const [savingCategory, setSavingCategory] = useState(false);
+  async function saveCategory(next: AssetType) {
+    if (!libraryImageId || next === category) return;
+    setSavingCategory(true);
+    try {
+      const res = await fetch(`/api/library/images/${libraryImageId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ assetType: next }),
+      });
+      if (res.ok) { setCategory(next); onRefresh?.(); }
+    } finally { setSavingCategory(false); }
+  }
+  /** 分類選單（只有 AI 生成的素材才有；上傳的參考圖不能改）。 */
+  function categoryControl() {
+    if (!libraryImageId) return null;
+    return (
+      <label className="flex items-center gap-1 shrink-0 text-xs font-normal text-gray-500" title="素材庫分類：決定這張圖出現在哪個篩選裡">
+        分類
+        <select value={category ?? fallbackCategory()} disabled={savingCategory} onChange={(e) => void saveCategory(e.target.value as AssetType)}
+          className="rounded-md border border-gray-200 bg-white px-1.5 py-0.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-violet-400 disabled:opacity-50">
+          {ASSET_TYPES.map((t) => <option key={t} value={t}>{ASSET_TYPE_LABEL[t]}</option>)}
+        </select>
+      </label>
+    );
+  }
+  /** 沒有明確分類的舊素材：跟素材庫網格同一套舊規則推回去，選單才顯示得對。 */
+  function fallbackCategory(): AssetType {
+    return genType === "person" ? "person" : genType === "illustration" ? "illustration" : genType === "reference" ? "uploaded"
+      : (genType === "scene" || genType === "background" || genType === "material") ? "material" : "product";
+  }
   // 下載檔名用嘅原始 px 尺寸（由 ImageWithSize 個 onLoad 交返嚟，冇得就淨係唔加呢段）。
   const [imgDims, setImgDims] = useState<{ w: number; h: number } | null>(null);
 
@@ -185,7 +220,7 @@ export function ImageDetailModal({
     // 同 LayoutPicker.tsx 用返同一套命名格式（見 src/lib/download-filename.ts）：
     // {品牌名}-{類型}-{寬x高}-{可讀標題}.ext，缺邊截就跳過，唔再係亂碼檔名。
     const isMaterial = genType === "material" || (!loading && bgComp && sorted.length === 0);
-    const typeLabel = isMaterial ? "背景素材"
+    const typeLabel = category ? (category === "material" ? "背景素材" : ASSET_TYPE_LABEL[category]) : isMaterial ? "背景素材"
       : genType === "person" ? "人像"
       : genType === "illustration" ? "插畫"
       : (genType === "reference" || !libraryImageId) ? "參考圖"
@@ -256,8 +291,8 @@ export function ImageDetailModal({
           <div className="flex items-center justify-between px-5 py-3.5 border-b shrink-0 gap-3 min-w-0">
             <h2 className="text-sm font-semibold flex items-center gap-1.5 min-w-0 truncate">
               <Mountain className="h-4 w-4 text-teal-500 shrink-0" />
-              <span className="shrink-0">背景</span>
-              {renameControl()}
+              <span className="shrink-0">{category ? ASSET_TYPE_LABEL[category] : "背景"}</span>
+              {renameControl()}{categoryControl()}
             </h2>
             {!loading && (
               <div className="flex items-center gap-1.5 shrink-0">
@@ -366,8 +401,8 @@ export function ImageDetailModal({
               ) : (
                 <Palette className="h-4 w-4 shrink-0 text-amber-500" />
               )}
-              <span className="shrink-0">{genType === "person" ? "人像" : "插畫"}</span>
-              {renameControl()}
+              <span className="shrink-0">{category ? ASSET_TYPE_LABEL[category] : genType === "person" ? "人像" : "插畫"}</span>
+              {renameControl()}{categoryControl()}
             </h2>
             <div className="flex items-center gap-1.5 shrink-0">
               {/* 重新生成（紫）統一擺 header（IMG_02）*/}
@@ -454,8 +489,8 @@ export function ImageDetailModal({
             ) : (
               <Package className="h-4 w-4 shrink-0 text-[#C9A227]" />
             )}
-            <span className="shrink-0">{genType === "reference" || !libraryImageId ? "參考圖" : "產品成圖"}</span>
-            {renameControl()}
+            <span className="shrink-0">{category ? ASSET_TYPE_LABEL[category] : genType === "reference" || !libraryImageId ? "參考圖" : "產品成圖"}</span>
+            {renameControl()}{categoryControl()}
           </h2>
           <div className="flex items-center gap-1.5 shrink-0">
             {/* header 順序統一（IMG_02）：[重新生成][調整]│[下載]│[刪除][✕]

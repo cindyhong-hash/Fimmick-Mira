@@ -13,6 +13,7 @@
  * clientId=null + unassigned=true → 未分組視圖（收 clientId 為 null 嘅素材）。
  */
 import { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle } from "react";
+import { readAssetType } from "@/lib/library/asset-type";
 import { useRouter } from "next/navigation";
 import { Check } from "lucide-react";
 import { ComponentGrid, type ComponentGridHandle } from "@/components/library/ComponentGrid";
@@ -201,6 +202,7 @@ export const LibraryWorkspace = forwardRef<LibraryWorkspaceHandle, { clientId: s
           prompt={detail.prompt}
           libraryImageId={detail.libraryImageId}
           genType={(() => { try { return JSON.parse(detail.regenerateParams || "{}").genType as string | undefined; } catch { return undefined; } })()}
+          assetType={readAssetType(detail.regenerateParams)?.type}
           mode={(() => { try { return JSON.parse(detail.regenerateParams || "{}").mode as string | undefined; } catch { return undefined; } })()}
           refImageUrl={(() => { try { return JSON.parse(detail.regenerateParams || "{}").refImageUrl as string | undefined; } catch { return undefined; } })()}
           sourceImages={(() => { try { const p = JSON.parse(detail.regenerateParams || "{}"); const arr = (Array.isArray(p.productImageUrls) && p.productImageUrls.length ? p.productImageUrls : (p.productImageUrl ? [p.productImageUrl] : [])) as string[]; return arr.filter(Boolean); } catch { return []; } })()}

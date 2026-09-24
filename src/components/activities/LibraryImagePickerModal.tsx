@@ -5,6 +5,7 @@
  * 搜尋涵蓋 標題 + AI Prompt 文字。點一張即回傳 imageUrl。
  */
 import { useEffect, useMemo, useState } from "react";
+import { readAssetType } from "@/lib/library/asset-type";
 import { X, Search, LayoutGrid, Package, Mountain, UserRound, Palette, Paperclip, type LucideIcon } from "lucide-react";
 
 type GalleryItem = {
@@ -36,6 +37,9 @@ const CHIP_IDLE = "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
 function itemType(it: GalleryItem): TypeKey {
   if (it.kind === "material") return "background";
   if (it.kind === "uploaded") return "reference";
+  // 素材庫分類（生成完 AI 看圖判斷、或使用者改過）優先；沒有的舊素材才照生成類型推
+  const explicit = readAssetType(it.paramsJson)?.type;
+  if (explicit) return ({ material: "background", uploaded: "reference", person: "person", illustration: "illustration", product: "product" } as const)[explicit];
   try {
     const g = JSON.parse(it.paramsJson ?? "{}").genType as string | undefined;
     if (g === "person") return "person";

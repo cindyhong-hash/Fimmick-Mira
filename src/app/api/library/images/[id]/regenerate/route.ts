@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db";
 import { protectPaidRoute } from "@/lib/site-gate";
 import { dailyQuota } from "@/lib/paid-quota";
+import { readUserAssetType, restoreOrReclassify } from "@/lib/library/classify-asset";
 import {
   createImageSetExecution,
   prepareImageSetRegeneration,
@@ -64,7 +65,12 @@ export const POST = protectPaidRoute(async (
       return rolledBack.count === 1;
     },
     scheduleAfter: (callback) => after(callback),
-    regenerate: regenerateImageSetItem,
+    // 重新生成會整份覆寫 paramsJson：使用者改過的素材庫分類寫回去，沒改過就依新圖重新判斷
+    regenerate: async (rowId, prepared, value) => {
+      const userType = await readUserAssetType(rowId);
+      try { return await regenerateImageSetItem(rowId, prepared, value); }
+      finally { await restoreOrReclassify(rowId, userType); }
+    },
     logError: (...values) => console.error(...values),
   });
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });

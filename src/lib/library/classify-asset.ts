@@ -31,7 +31,11 @@ async function loadSmall(imageUrl: string): Promise<string | null> {
   } else if (imageUrl.startsWith("data:")) {
     buf = Buffer.from(imageUrl.split(",")[1] ?? "", "base64");
   } else if (imageUrl.startsWith("/")) {
-    buf = await readFile(path.join(process.cwd(), "public", imageUrl));   // 本機 /uploads
+    // 本機 /uploads：只准讀 public 資料夾裡面的檔案（擋掉 /../../.env 這種路徑）
+    const root = path.join(process.cwd(), "public");
+    const file = path.resolve(root, "." + imageUrl.split("?")[0]);
+    if (!file.startsWith(root + path.sep)) return null;
+    buf = await readFile(file);
   } else return null;
   const small = await sharp(buf).resize(512, 512, { fit: "inside", withoutEnlargement: true }).flatten({ background: "#ffffff" }).jpeg({ quality: 80 }).toBuffer();
   return `data:image/jpeg;base64,${small.toString("base64")}`;

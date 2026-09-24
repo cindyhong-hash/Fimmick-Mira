@@ -118,6 +118,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const [templates, setTemplates] = useState<{ id: string; name: string; previewUrl: string | null; builtin?: boolean }[]>([]);
   // 範本放大預覽（第幾個；null＝沒開）。點縮圖先預覽，確定了才套用——套用會換掉整個畫布
   const [tplPreview, setTplPreview] = useState<number | null>(null);
+  const [matPreview, setMatPreview] = useState<number | null>(null);   // 素材放大預覽
   const [tplSaving, setTplSaving] = useState(false);
   const [layersOpen, setLayersOpen] = useState(true);         // 右下「圖層」可收合
   // 可拖曳調整的高度，記在這台瀏覽器（圖層區含標題列；範本庫、素材庫是縮圖格的高度）
@@ -1885,6 +1886,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6 }}>
                   {backgrounds.map((b, i) => (
                     <MaterialThumb key={i} url={b.url} label={b.label ?? ""}
+                      onPreview={() => setMatPreview(i)}
                       onUseAsBackground={() => replaceBackground(b.url)}
                       onAddToCanvas={() => void pushImageLayer(b.url, b.label || "圖片")} />
                   ))}
@@ -2463,8 +2465,16 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       </div>
 
       {tplPreview !== null && templates[tplPreview] && (
-        <TemplatePreview templates={templates} index={tplPreview} onIndex={setTplPreview} onClose={() => setTplPreview(null)}
-          onApply={(id) => { setTplPreview(null); void applyTemplate(id); }} />
+        <ImagePreview items={templates.map((t) => ({ url: t.previewUrl, name: t.name }))} index={tplPreview} onIndex={setTplPreview} onClose={() => setTplPreview(null)}
+          hint="套用會換掉目前畫布，可以按 ⌘Z 復原"
+          actions={[{ label: "套用這個範本", title: "會換掉目前畫布的內容，可以用 ⌘Z 復原", onClick: (i) => { setTplPreview(null); void applyTemplate(templates[i].id); } }]} />
+      )}
+      {matPreview !== null && backgrounds?.[matPreview] && (
+        <ImagePreview items={backgrounds.map((b) => ({ url: b.url, name: b.label ?? "" }))} index={matPreview} onIndex={setMatPreview} onClose={() => setMatPreview(null)}
+          actions={[
+            { label: "設為背景", title: "換掉目前的背景", onClick: (i) => { setMatPreview(null); void replaceBackground(backgrounds[i].url); } },
+            { label: "加入畫布", title: "加成一張可以移動縮放的圖", onClick: (i) => { setMatPreview(null); void pushImageLayer(backgrounds[i].url, backgrounds[i].label || "圖片"); } },
+          ]} />
       )}
       {showOutpaint && (
         <div style={{ position: "fixed", inset: 0, zIndex: 90, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -3040,11 +3050,11 @@ function GradientEditor({ g, onChange }: { g: NonNullable<ShapeSpec["gradient"]>
 }
 
 /**
- * 素材庫的一張縮圖。滑鼠移上去（觸控裝置點一下）出現兩個用途：
- * 設為背景（換掉目前的背景）、加入畫布（加成一張可以移動縮放的圖）。
+ * 素材庫的一張縮圖。滑鼠移上去（觸控裝置點一下）出現：
+ * 設為背景（換掉目前的背景）、加入畫布（加成一張可以移動縮放的圖）、放大看（預覽大圖）。
  * 也可以直接拖到畫布上想放的位置。
  */
-function MaterialThumb({ url, label, onUseAsBackground, onAddToCanvas }: { url: string; label: string; onUseAsBackground: () => void; onAddToCanvas: () => void }) {
+function MaterialThumb({ url, label, onPreview, onUseAsBackground, onAddToCanvas }: { url: string; label: string; onPreview: () => void; onUseAsBackground: () => void; onAddToCanvas: () => void }) {
   const [active, setActive] = useState(false);
   const btn: React.CSSProperties = { width: "100%", height: 24, border: "none", borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: "pointer" };
   return (
@@ -3058,23 +3068,28 @@ function MaterialThumb({ url, label, onUseAsBackground, onAddToCanvas }: { url: 
         <div style={{ position: "absolute", inset: 0, background: "rgba(17,24,39,.55)", display: "flex", flexDirection: "column", justifyContent: "center", gap: 5, padding: 6 }}>
           <button onClick={(e) => { e.stopPropagation(); setActive(false); onUseAsBackground(); }} style={{ ...btn, background: "#fff", color: "#1f2937" }}>設為背景</button>
           <button onClick={(e) => { e.stopPropagation(); setActive(false); onAddToCanvas(); }} style={{ ...btn, background: "#7c3aed", color: "#fff" }}>加入畫布</button>
+          <button onClick={(e) => { e.stopPropagation(); setActive(false); onPreview(); }} style={{ ...btn, height: 20, background: "transparent", color: "#fff", fontWeight: 600 }}>🔍 放大看</button>
         </div>
       )}
     </div>
   );
 }
 
-/** 傾斜：水平傾斜把方塊推成平行四邊形（斜的標籤），垂直傾斜則是上下方向。文字、形狀、圖片都能用。 */
 /**
- * 範本放大預覽：大圖＋上一個／下一個（‹ › 或鍵盤左右鍵）＋「套用這個範本」。
+ * 圖片放大預覽（範本、素材共用）：大圖＋上一個／下一個（‹ › 或鍵盤左右鍵）＋底下的動作按鈕。
+ * Enter 做主要動作（actions 的最後一個）。
  * 鍵盤事件在這裡攔下來，不讓編輯器收到——不然左右鍵會去移動畫布上選取的圖層、Esc 會取消選取。
  */
-function TemplatePreview({ templates, index, onIndex, onClose, onApply }: {
-  templates: { id: string; name: string; previewUrl: string | null }[];
-  index: number; onIndex: (i: number) => void; onClose: () => void; onApply: (id: string) => void;
+function ImagePreview({ items, index, onIndex, onClose, actions, hint }: {
+  items: { url: string | null; name: string }[];
+  index: number; onIndex: (i: number) => void; onClose: () => void;
+  /** 底下的按鈕；最後一個是主要動作（紫色、Enter）。 */
+  actions: { label: string; title?: string; onClick: (i: number) => void }[];
+  hint?: string;
 }) {
-  const t = templates[index], n = templates.length;
+  const t = items[index], n = items.length;
   const go = (d: number) => onIndex((index + d + n) % n);
+  const main = actions[actions.length - 1];
   const arrow = (d: number, label: string) => (
     <button onClick={() => go(d)} aria-label={label} title={label}
       style={{ position: "absolute", top: "50%", [d < 0 ? "left" : "right"]: -56, transform: "translateY(-50%)", width: 40, height: 40, borderRadius: 20, border: "none", background: "rgba(255,255,255,.92)", color: "#374151", fontSize: 22, lineHeight: "40px", cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,.2)" }}>
@@ -3082,34 +3097,37 @@ function TemplatePreview({ templates, index, onIndex, onClose, onApply }: {
     </button>
   );
   return (
-    <div role="dialog" aria-label={`範本預覽：${t.name}`} tabIndex={-1} autoFocus
+    <div role="dialog" aria-label={`預覽：${t.name}`} tabIndex={-1}
       ref={(el) => el?.focus()}
       onKeyDown={(e) => {
         e.stopPropagation();
         if (e.key === "ArrowLeft") { e.preventDefault(); go(-1); }
         else if (e.key === "ArrowRight") { e.preventDefault(); go(1); }
         else if (e.key === "Escape") { e.preventDefault(); onClose(); }
-        else if (e.key === "Enter") { e.preventDefault(); onApply(t.id); }
+        else if (e.key === "Enter" && main) { e.preventDefault(); main.onClick(index); }
       }}
       style={{ position: "fixed", inset: 0, zIndex: 95, display: "flex", alignItems: "center", justifyContent: "center", outline: "none" }}>
       <div style={{ position: "absolute", inset: 0, background: "rgba(17,24,39,.6)" }} onClick={onClose} />
       <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
         <div style={{ position: "relative" }}>
-          {t.previewUrl
-            ? <img src={t.previewUrl} alt={t.name} style={{ display: "block", width: "min(640px, 72vh, calc(100vw - 160px))", aspectRatio: "1", objectFit: "contain", background: "#fff", borderRadius: 14, boxShadow: "0 20px 50px rgba(0,0,0,.35)" }} />
+          {t.url
+            ? <img src={t.url} alt={t.name} style={{ display: "block", maxWidth: "min(640px, calc(100vw - 160px))", maxHeight: "72vh", minWidth: 240, minHeight: 240, objectFit: "contain", background: "#fff", borderRadius: 14, boxShadow: "0 20px 50px rgba(0,0,0,.35)" }} />
             : <div style={{ width: "min(640px, 72vh)", aspectRatio: "1", display: "grid", placeItems: "center", background: "#fff", borderRadius: 14, color: "#9ca3af" }}>無縮圖</div>}
-          {n > 1 && arrow(-1, "上一個範本")}
-          {n > 1 && arrow(1, "下一個範本")}
+          {n > 1 && arrow(-1, "上一個")}
+          {n > 1 && arrow(1, "下一個")}
           <button onClick={onClose} aria-label="關閉預覽" title="關閉（Esc）"
             style={{ position: "absolute", top: -14, right: -14, width: 30, height: 30, borderRadius: 15, border: "none", background: "#fff", color: "#374151", fontSize: 16, cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,.25)" }}>×</button>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, background: "#fff", borderRadius: 12, padding: "10px 12px 10px 16px", boxShadow: "0 10px 30px rgba(0,0,0,.2)" }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: "#111827", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#fff", borderRadius: 12, padding: "10px 12px 10px 16px", boxShadow: "0 10px 30px rgba(0,0,0,.2)" }}>
+          {t.name && <span style={{ fontSize: 14, fontWeight: 700, color: "#111827", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}</span>}
           <span style={{ fontSize: 12, color: "#9ca3af" }}>{index + 1} / {n}</span>
-          <button onClick={() => onApply(t.id)} title="會換掉目前畫布的內容，可以用 ⌘Z 復原"
-            style={{ height: 34, padding: "0 16px", border: "none", borderRadius: 8, background: "#7c3aed", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>套用這個範本</button>
+          {actions.map((a, i) => (
+            <button key={a.label} onClick={() => a.onClick(index)} title={a.title}
+              style={{ height: 34, padding: "0 16px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer",
+                ...(i === actions.length - 1 ? { border: "none", background: "#7c3aed", color: "#fff" } : { border: "1px solid #e5e7eb", background: "#fff", color: "#374151" }) }}>{a.label}</button>
+          ))}
         </div>
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,.8)" }}>← → 切換範本　Enter 套用　Esc 關閉　（套用會換掉目前畫布，可以按 ⌘Z 復原）</div>
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,.8)" }}>← → 切換　Enter {main?.label}　Esc 關閉{hint ? `　（${hint}）` : ""}</div>
       </div>
     </div>
   );
@@ -3176,6 +3194,7 @@ function GlowControls({ glow, onChange }: { glow: LayerGlow | null; onChange: (g
   );
 }
 
+/** 傾斜：水平傾斜把方塊推成平行四邊形（斜的標籤），垂直傾斜則是上下方向。文字、形狀、圖片都能用。 */
 function SkewControls({ skewX, skewY, onChange }: { skewX: number; skewY: number; onChange: (patch: { skewX?: number; skewY?: number }) => void }) {
   const row = (label: string, value: number, key: "skewX" | "skewY") => (<>
     <label style={S.rlabel}>{label} <span style={{ float: "right", color: "#9ca3af", fontVariantNumeric: "tabular-nums" }}>{Math.round(value)}°</span></label>

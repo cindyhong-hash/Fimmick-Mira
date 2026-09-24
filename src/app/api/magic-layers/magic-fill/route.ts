@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { inpaintImageFal } from "@/lib/fal";
 import { translateBriefToEnglishPrompt } from "@/lib/generate";
 import { saveBuffer } from "@/lib/storage";
+import { eraseWithLama } from "@/lib/magic-layers/background-inpaint.ts";
 
 export const maxDuration = 180;
 
@@ -9,8 +10,8 @@ export async function POST(req: Request) {
   try {
     const body = await req.json() as { imageDataUrl?: string; maskDataUrl?: string; variants?: number; prompt?: string; mode?: "fill" | "remove" };
     if (!body.imageDataUrl?.startsWith("data:image/") || !body.maskDataUrl?.startsWith("data:image/")) return NextResponse.json({ error: "缺少圖片或空白區遮罩" }, { status: 400 });
-    const src = Buffer.from(body.imageDataUrl.split(",")[1] ?? "", "base64");
-    const sourceUrl = await saveBuffer(src, "png", "magic-fill-source-");
+    // 原圖存成網址給 flux 用（LaMa 直接吃 data URL，移除成功時用不到）
+    const saveSource = () => saveBuffer(Buffer.from(body.imageDataUrl!.split(",")[1] ?? "", "base64"), "png", "magic-fill-source-");
     const count = Math.min(4, Math.max(2, Math.round(body.variants ?? 2)));
     // 提示詞只描述「那塊要變成什麼」，而且一定是英文。
     //
@@ -33,6 +34,17 @@ export async function POST(req: Request) {
     const prompt = removing
       ? CLEAR_SURFACE
       : (await translateBriefToEnglishPrompt(typed!)) || CLEAR_SURFACE;
+    if (removing) {
+      // 移除只用 LaMa：它專門擦東西、接回周圍背景。flux fill 會在框起來的空白處畫新東西
+      // （實測擦緞帶時又畫出一條新的橫條），所以不再拿它當第二個版本，只在 LaMa 失敗時備用。
+      try {
+        return NextResponse.json({ variants: [await eraseWithLama(body.imageDataUrl, body.maskDataUrl)] });
+      } catch (e) {
+        console.warn("[magic-layers/magic-fill] LaMa failed, falling back to flux:", e);
+        return NextResponse.json({ variants: [await inpaintImageFal({ imageUrl: await saveSource(), maskDataUrl: body.maskDataUrl, prompt })] });
+      }
+    }
+    const sourceUrl = await saveSource();
     const variants = await Promise.all(Array.from({ length: count }, () => inpaintImageFal({ imageUrl: sourceUrl, maskDataUrl: body.maskDataUrl!, prompt })));
     return NextResponse.json({ variants });
   } catch (e) {

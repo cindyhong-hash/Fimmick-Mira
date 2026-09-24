@@ -54,3 +54,23 @@ export async function reconstructBackground(
     return null;
   }
 }
+
+/**
+ * 生成式填色的「移除」：用 LaMa 把框起來的東西擦掉、接回周圍的背景。
+ * LaMa 只會延續周圍的紋理，不會像 flux fill 那樣在空白處「畫點東西」
+ * （實測 flux 會補出一條緞帶、一塊色塊之類原本沒有的東西）。
+ * 白色＝要擦掉的地方。回傳存好的圖片網址；失敗就丟錯，讓呼叫端改用別的版本。
+ */
+export async function eraseWithLama(imageDataUrl: string, maskDataUrl: string): Promise<string> {
+  initFal();
+  const [imageUrl, maskUrl] = await Promise.all([
+    fal.storage.upload(new File([new Uint8Array(dataUrlToBuffer(imageDataUrl))], "img.png", { type: "image/png" })),
+    fal.storage.upload(new File([new Uint8Array(dataUrlToBuffer(maskDataUrl))], "mask.png", { type: "image/png" })),
+  ]);
+  const r = await fal.run("fal-ai/lama", { input: { image_url: imageUrl, mask_image_url: maskUrl } }) as { data?: { image?: { url?: string } }; image?: { url?: string } };
+  const url = r?.data?.image?.url ?? r?.image?.url;
+  if (!url) throw new Error("LaMa 沒有回傳圖片");
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("LaMa 結果下載失敗");
+  return saveBuffer(Buffer.from(await res.arrayBuffer()), "png", "magic-fill-erase-");
+}

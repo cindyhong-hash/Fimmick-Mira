@@ -3,7 +3,7 @@
 // 家族氣質：節慶社群圖＋知識型輪播的第一張。左半暖黃、右半夜空明月，
 // 中間一枚綠色花邊圓牌放標題與提問，底部綠帶放「右滑看…」引導下一張。
 // 參考：品牌中秋節柚子知識貼文（2026-09-24 使用者提供）。
-// 參考圖的人物插畫、兔子剪影做不出來（範本只有形狀＋文字），用月亮、星星、雲帶過；
+// 參考圖的人物插畫做不出來（範本只有形狀＋文字），用月亮、星星、雲帶過；兔子用橢圓組成剪影。
 // 套用後可以自己放插圖進來。
 import { L, S } from "./template-kit.mjs";
 
@@ -26,6 +26,27 @@ function scallopPoints(n = 24, bulge = 0.2) {
     pts.push({ x: p.x, y: p.y, ox: out.x - p.x, oy: out.y - p.y, ix: inn.x - p.x, iy: inn.y - p.y });
   }
   return pts;
+}
+
+/**
+ * 兔子剪影（跳舞的樣子）：頭、兩隻長耳、身體、舉起的手、兩條腿、尾巴，全部用橢圓組成。
+ * flip＝面向左（左右鏡像）。整隻設成同一個群組，拖的時候整隻一起動。
+ */
+function rabbit(x, y, flip, group, colour = "#fbeec2") {
+  const W = 130;
+  const part = (name, dx, dy, w, h, rot) => L.shape(name, flip ? x + W - dx - w : x + dx, y + dy, w, h,
+    { kind: "ellipse", fill: colour }, { rotation: (flip ? -rot : rot) * (Math.PI / 180), groupId: group });
+  return [
+    part("兔耳", 26, -58, 20, 78, -16),
+    part("兔耳", 50, -52, 20, 72, 12),
+    part("兔頭", 18, 6, 62, 54, 0),
+    part("兔身", 22, 50, 74, 104, -14),
+    part("兔手", 80, 44, 18, 64, 48),
+    part("兔手", 10, 70, 18, 56, -30),
+    part("兔腳", 30, 140, 24, 66, 24),
+    part("兔腳", 70, 136, 24, 64, -34),
+    part("兔尾", 2, 120, 26, 26, 0),
+  ];
 }
 
 /** 一朵雲：三顆重疊的圓＋一條平底。 */
@@ -60,16 +81,13 @@ export const FAMILY = [
       L.icon("星星", "sparkle", 1120, 360, 30, "#fdf1c0", { opacity: 0.8 }),
       L.icon("星星", "sparkle", 760, 420, 24, "#fdf1c0", { opacity: 0.7 }),
       ...cloud(900, 880, 250, "#f3e3b8"),
-      ...cloud(60, 900, 190, "#fbeec2"),
 
       // 品牌標誌方塊
       L.shape("品牌底", 40, 34, 210, 92, { kind: "rect", fill: GREEN, radius: 14 }),
       L.text("品牌", "品牌名稱", 40, 34, 210, 92, { fontSize: 38, color: "#ffffff", fontWeight: 900 }),
 
-      // 花邊圓牌：綠色花邊＋白圓＋細綠圈
-      L.shape("花邊", 110, 160, 820, 820, { kind: "path", fill: GREEN, stroke: "none", strokeWidth: 0, closed: true, points: scallopPoints() }),
-      L.shape("白底", 170, 220, 700, 700, { kind: "ellipse", fill: "#ffffff" }),
-      L.shape("細圈", 196, 246, 648, 648, { kind: "ellipse", fill: "none", stroke: GREEN, strokeWidth: 4 }),
+      // 花邊圓牌：白底＋綠色波浪花邊線（一條鋼筆路徑，24 個弧）
+      L.shape("花邊圓牌", 110, 160, 820, 820, { kind: "path", fill: "#ffffff", stroke: GREEN, strokeWidth: 8, closed: true, points: scallopPoints(24, 0.14) }),
 
       L.shape("標題上裝飾", 460, 300, 120, 8, { kind: "rect", fill: GREEN, radius: 4 }),
       L.shape("標題上裝飾", 490, 318, 60, 6, { kind: "rect", fill: GREEN, radius: 3 }),
@@ -87,6 +105,9 @@ export const FAMILY = [
 
       // 底部綠帶＋右滑引導
       L.shape("底帶", 0, 1040, S, 160, { kind: "rect", fill: GREEN }),
+      // 左下兩隻跳舞的兔子（面對面），站在底帶上面（排在底帶後面才不會被蓋住腳）
+      ...rabbit(40, 930, false, "rabbit-a"),
+      ...rabbit(190, 915, true, "rabbit-b"),
       L.shape("引導膠囊", 540, 1075, 610, 92, { kind: "rect", fill: "#ffffff", radius: 46 }),
       L.text("引導", "右滑看哪裡不一樣 ▶▶▶", 540, 1075, 610, 92, { fontSize: 44, color: GREEN, fontWeight: 900 }),
     ],

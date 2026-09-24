@@ -10,6 +10,9 @@ const SANS = "'Noto Sans TC',system-ui,sans-serif";
 const SERIF = "'Noto Serif TC',serif";
 const INK = "#3d3431";
 const ORANGE = "#ef6034";
+/** 背景照：米白牆＋窗光＋大理石檯面（2026-09-24 使用者提供）。檯面上緣約在 y=990。 */
+const BG_PHOTO = "https://v16uryj9gfmy6re4.public.blob.vercel-storage.com/1790238915313-7ac7y8vdxsf.jpg";
+const SHELF = 1045;   // 商品底部：站在照片的檯面上
 
 /** 示意商品依圖片原比例給框（高度固定），底部才對得齊檯面、卡片裡才不會一大一小。 */
 const RATIO = { blue: 437 / 939, green: 213 / 694, white: 268 / 727, amber: 217 / 673, pink: 436 / 451 };
@@ -56,16 +59,12 @@ export const FAMILY = [
       readingDirection: "left→right, top→bottom",
       negativeSpace: 0.18,
       rationale:
-        "左六右四：左邊是檔期主視覺，大標與「83 折」的橘色數字先抓住視線，商品站在檯面上撐起下半部；右邊三張白卡用同一套格式（圓標／商品／品名／限時價）排成一欄，讓人一眼比價。暖米色底配柔光，折扣只用一種橘色，不跟商品搶。",
+        "左六右四：左邊是檔期主視覺，大標與「83 折」的橘色數字先抓住視線，商品站在大理石檯面上撐起下半部；右邊三張白卡用同一套格式（圓標／商品／品名／限時價）排成一欄，讓人一眼比價。米白牆＋窗光的實景照當底，折扣只用一種橘色，不跟商品搶。",
       recommendedFor: "電商通路檔期、品牌聯名、多品項折扣",
     },
     layers: () => [
-      L.bg("#f4ede4", "#d9c8b6", "diagonal"),
-      // 窗光：左上一團柔白，讓底色不死板
-      L.shape("窗光", -160, -120, 760, 620, { kind: "ellipse", fill: "#ffffff", softness: 0.95 }, { opacity: 0.55 }),
-      // 檯面
-      L.shape("檯面", 0, 1010, 760, 190, { kind: "rect", fill: "#ece3d8" }),
-      L.shape("檯面亮邊", 0, 1008, 760, 4, { kind: "rect", fill: "#ffffff" }, { opacity: 0.8 }),
+      // 背景照（整張鋪滿、鎖定）；窗光和檯面都在照片裡，不用另外畫
+      L.shape("背景", 0, 0, S, S, { kind: "rect" }, { type: "background", locked: true, image: BG_PHOTO, shape: undefined }),
 
       L.text("品牌×通路", "你的品牌  ×  通路", 40, 60, 680, 70, {
         fontSize: 46, color: "#6b5d52", fontFamily: SERIF, fontWeight: 700,
@@ -83,13 +82,13 @@ export const FAMILY = [
       L.text("贈品", "指定好禮送給你", 330, 430, 310, 66, { fontSize: 30, color: "#ffffff", fontWeight: 700 }),
 
       // 商品站在檯面上（由左到右、由小到大）
-      ...standing("green", 96, 1012, 300),
-      ...standing("pink", 206, 1012, 140),
-      ...standing("amber", 360, 1012, 450),
-      ...standing("blue", 520, 1012, 480),
+      ...standing("green", 96, SHELF, 300),
+      ...standing("pink", 206, SHELF, 140),
+      ...standing("amber", 360, SHELF, 450),
+      ...standing("blue", 520, SHELF, 480),
 
-      L.shape("按鈕", 330, 1086, 260, 70, { kind: "rect", fill: INK, radius: 14 }),
-      L.text("按鈕字", "立即搶購 >", 330, 1086, 260, 70, { fontSize: 32, color: "#ffffff", fontWeight: 900 }),
+      L.shape("按鈕", 330, 1090, 260, 70, { kind: "rect", fill: INK, radius: 14 }),
+      L.text("按鈕字", "立即搶購 >", 330, 1090, 260, 70, { fontSize: 32, color: "#ffffff", fontWeight: 900 }),
 
       ...card(50, { off: "9折", offSize: 44, items: ["blue"], name: "人氣精華液", price: "限時價$405" }),
       ...card(430, { off: "85折", offSize: 40, items: ["amber", "amber"], name: "淨透卸妝油2入", price: "限時價$550/件" }),

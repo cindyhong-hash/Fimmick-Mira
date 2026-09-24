@@ -1845,7 +1845,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "14px 14px 10px", borderBottom: "1px solid #f3f4f6", flex: "0 0 auto" }}>
             <span style={{ fontSize: 15, fontWeight: 800, color: "#111827", marginRight: "auto" }}>{LEFT_TABS.find((t) => t.id === leftTab)?.label}</span>
             {leftTab === "templates" && templates.length > 0 && <span style={{ fontSize: 11, color: "#9ca3af" }}>{templates.length} 個・點擊套用</span>}
-            {leftTab === "materials" && backgrounds?.length ? <span style={{ fontSize: 11, color: "#9ca3af" }}>設為背景・加入畫布</span> : null}
+            {leftTab === "materials" && backgrounds?.length ? <span style={{ fontSize: 11, color: "#9ca3af" }}>加入畫布・放大看・可拖曳</span> : null}
             <button onClick={() => setLeftTab(null)} title="收起面板" aria-label="收起面板" style={{ ...S.icon, width: 28, height: 28 }}><ChevronLeft size={16} /></button>
           </div>
           <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: leftTab === "templates" || leftTab === "materials" ? "10px 10px 14px" : "8px 6px 14px" }}>
@@ -1882,12 +1882,11 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
             {leftTab === "materials" && (
               backgrounds && backgrounds.length > 0 ? (
                 /* 原本「背景庫」和「素材庫」是同一批圖、只差點下去做什麼，合成這一區：
-                   每張圖都能選設為背景或加入畫布，也能直接拖到畫布上 */
+                   每張圖都能加入畫布、放大看，也能直接拖到畫布上 */
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6 }}>
                   {backgrounds.map((b, i) => (
                     <MaterialThumb key={i} url={b.url} label={b.label ?? ""}
                       onPreview={() => setMatPreview(i)}
-                      onUseAsBackground={() => replaceBackground(b.url)}
                       onAddToCanvas={() => void pushImageLayer(b.url, b.label || "圖片")} />
                   ))}
                 </div>
@@ -2472,7 +2471,6 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       {matPreview !== null && backgrounds?.[matPreview] && (
         <ImagePreview items={backgrounds.map((b) => ({ url: b.url, name: b.label ?? "" }))} index={matPreview} onIndex={setMatPreview} onClose={() => setMatPreview(null)}
           actions={[
-            { label: "設為背景", title: "換掉目前的背景", onClick: (i) => { setMatPreview(null); void replaceBackground(backgrounds[i].url); } },
             { label: "加入畫布", title: "加成一張可以移動縮放的圖", onClick: (i) => { setMatPreview(null); void pushImageLayer(backgrounds[i].url, backgrounds[i].label || "圖片"); } },
           ]} />
       )}
@@ -3051,10 +3049,11 @@ function GradientEditor({ g, onChange }: { g: NonNullable<ShapeSpec["gradient"]>
 
 /**
  * 素材庫的一張縮圖。滑鼠移上去（觸控裝置點一下）出現：
- * 設為背景（換掉目前的背景）、加入畫布（加成一張可以移動縮放的圖）、放大看（預覽大圖）。
+ * 加入畫布（加成一張可以移動縮放的圖）、放大看（預覽大圖）。
+ * 原本還有「設為背景」，使用者覺得跟加入畫布重複，只留加入畫布（要當背景就加入後拉滿、放到最底層）。
  * 也可以直接拖到畫布上想放的位置。
  */
-function MaterialThumb({ url, label, onPreview, onUseAsBackground, onAddToCanvas }: { url: string; label: string; onPreview: () => void; onUseAsBackground: () => void; onAddToCanvas: () => void }) {
+function MaterialThumb({ url, label, onPreview, onAddToCanvas }: { url: string; label: string; onPreview: () => void; onAddToCanvas: () => void }) {
   const [active, setActive] = useState(false);
   const btn: React.CSSProperties = { width: "100%", height: 24, border: "none", borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: "pointer" };
   return (
@@ -3066,7 +3065,6 @@ function MaterialThumb({ url, label, onPreview, onUseAsBackground, onAddToCanvas
         style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", cursor: "grab" }} />
       {active && (
         <div style={{ position: "absolute", inset: 0, background: "rgba(17,24,39,.55)", display: "flex", flexDirection: "column", justifyContent: "center", gap: 5, padding: 6 }}>
-          <button onClick={(e) => { e.stopPropagation(); setActive(false); onUseAsBackground(); }} style={{ ...btn, background: "#fff", color: "#1f2937" }}>設為背景</button>
           <button onClick={(e) => { e.stopPropagation(); setActive(false); onAddToCanvas(); }} style={{ ...btn, background: "#7c3aed", color: "#fff" }}>加入畫布</button>
           <button onClick={(e) => { e.stopPropagation(); setActive(false); onPreview(); }} style={{ ...btn, height: 20, background: "transparent", color: "#fff", fontWeight: 600 }}>🔍 放大看</button>
         </div>

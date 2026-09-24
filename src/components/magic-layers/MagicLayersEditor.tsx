@@ -1,6 +1,7 @@
 "use client";
 import { clipToShape, drawEditableShape, drawIcon, EDITABLE_ICON_NAMES, isFillableShape } from "@/lib/magic-layers/editable-shape.ts";
 import { applyLayerTransform, docToLayer, layerCorners, layerToDoc } from "@/lib/magic-layers/layer-transform.ts";
+import { DEFAULT_GLOW, drawGlow, type LayerGlow } from "@/lib/magic-layers/layer-glow.ts";
 import { distanceToPolyline, drawPaint, paintHits, samplePath, smoothStroke, strokeToPaint } from "@/lib/magic-layers/freehand.ts";
 /* ============================================================
    Magic Layers — React editor
@@ -51,6 +52,8 @@ type EL = {
    * 跟著圖片移動／縮放／旋轉／複製／隱藏／刪除，不會在圖層列表多出一堆「繪製」圖層。
    */
   paint?: PaintStroke[];
+  /** 外光暈（沿著內容輪廓往外發光）；null/undefined＝沒有。 */
+  glow?: LayerGlow | null;
 };
 
 /**
@@ -249,6 +252,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           clipTo: (l.meta?.clipTo as string | undefined) ?? null,
           skewX: (l.meta?.skewX as number | undefined) ?? 0, skewY: (l.meta?.skewY as number | undefined) ?? 0,
           paint: (l.meta?.paint as PaintStroke[] | undefined) ?? undefined,
+          glow: (l.meta?.glow as LayerGlow | undefined) ?? null,
           embeddedText: l.embeddedText.map((t) => ({ text: t.text })), thumb: null,
         };
         if (isText && !st && !canvas) el.color = sampleColor(sctx, l.x, l.y, l.width, l.height);
@@ -1356,6 +1360,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       opacity: sl.opacity ?? 1, embeddedText: [], thumb: null, groupId: sl.groupId ?? null, clipTo: sl.clipTo ?? null,
       skewX: sl.skewX ?? 0, skewY: sl.skewY ?? 0,
       ...(sl.paint?.length ? { paint: sl.paint } : {}),
+      ...(sl.glow ? { glow: sl.glow } : {}),
     };
     el.thumb = makeThumb(el);
     return el;
@@ -2233,6 +2238,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                 {selEl.type !== "background" && (
                   <SkewControls skewX={selEl.skewX ?? 0} skewY={selEl.skewY ?? 0} onChange={(patch) => updateText(patch)} />
                 )}
+                {selEl.type !== "background" && (
+                  <GlowControls glow={selEl.glow ?? null} onChange={(glow) => updateText({ glow })} />
+                )}
               </div>
             ) : (
               <div style={{ padding: 16 }}>
@@ -2449,10 +2457,15 @@ function confBadge(c: number) {
 }
 /** 畫一個圖層的內容（已經換到圖層座標系）：圖片／文字／形狀，再加上畫在圖片上的筆畫。 */
 function drawElBody(ctx: CanvasRenderingContext2D, l: EL) {
+  // 外光暈先畫（在內容底下）；文字自己的「陰影」效果在光暈那一趟關掉，不然會蓋掉光暈的設定
+  if (l.glow) drawGlow(ctx, l.glow, () => drawElContent(ctx, l.fx?.shadow ? { ...l, fx: { ...l.fx, shadow: false } } : l));
+  drawElContent(ctx, l);
+  drawPaint(ctx, l.paint, l.w, l.h);
+}
+function drawElContent(ctx: CanvasRenderingContext2D, l: EL) {
   if (l.canvas) { ctx.imageSmoothingQuality = "high"; ctx.drawImage(l.canvas, -l.w / 2, -l.h / 2, l.w, l.h); }
   else if (l.isText) drawTextEl(ctx, l);
   else if (l.shape) drawEditableShape(ctx, l.w, l.h, l.shape);
-  drawPaint(ctx, l.paint, l.w, l.h);
 }
 
 /** 可以「畫在上面」的圖層：圖片圖層（產品照、背景、合併後的圖…），文字、形狀、繪製線條不算。 */
@@ -2653,6 +2666,7 @@ function serializeEls(els: EL[]): SavedLayer[] {
     ...(l.clipTo ? { clipTo: l.clipTo } : {}),
     ...(l.skewX ? { skewX: l.skewX } : {}), ...(l.skewY ? { skewY: l.skewY } : {}),
     ...(l.paint?.length ? { paint: l.paint } : {}),
+    ...(l.glow ? { glow: { ...l.glow } } : {}),
     ...(l.isText
       ? { isText: true, text: l.text, color: l.color, fontSize: l.fontSize * (l.w / (l.naturalW || l.w)), fontFamily: l.fontFamily, fontWeight: l.fontWeight, align: l.align, ...(l.fx ? { fx: l.fx } : {}), ...(l.textLayout ? { textLayout: { ...l.textLayout, letterSpacing: l.textLayout.letterSpacing * (l.w / (l.naturalW || l.w)) } } : {}),
           // 分段樣式的字級跟著圖層縮放一起換算，否則存檔重開會跑掉
@@ -2778,7 +2792,7 @@ function PageStrip({ pages, current, currentThumb, onSelect, onAdd, onDuplicate,
 }
 
 function cloneEL(el: EL): EL {
-  return { ...el, textLayout: el.textLayout ? { ...el.textLayout } : undefined, shape: el.shape ? { ...el.shape } : null, fx: el.fx ? { ...el.fx } : el.fx, embeddedText: el.embeddedText.map((t) => ({ ...t })), paint: el.paint?.slice() };
+  return { ...el, textLayout: el.textLayout ? { ...el.textLayout } : undefined, shape: el.shape ? { ...el.shape } : null, fx: el.fx ? { ...el.fx } : el.fx, embeddedText: el.embeddedText.map((t) => ({ ...t })), paint: el.paint?.slice(), glow: el.glow ? { ...el.glow } : el.glow };
 }
 function iconPreview(name: string): string {
   const c = document.createElement("canvas"); c.width = 40; c.height = 40;
@@ -2885,6 +2899,35 @@ function MaterialThumb({ url, label, onUseAsBackground, onAddToCanvas }: { url: 
 }
 
 /** 傾斜：水平傾斜把方塊推成平行四邊形（斜的標籤），垂直傾斜則是上下方向。文字、形狀、圖片都能用。 */
+/**
+ * 外光暈（像 PS 圖層樣式）：開關＋顏色／大小／透明度／強度。
+ * 物件、形狀、文字都能用；光暈沿著內容輪廓，去背的產品就沿著產品邊緣發光。
+ */
+function GlowControls({ glow, onChange }: { glow: LayerGlow | null; onChange: (glow: LayerGlow | null) => void }) {
+  const row = (label: string, value: number, min: number, max: number, unit: string, set: (v: number) => void) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+      <span style={{ width: 44, fontSize: 12, color: "#6b7280", flex: "0 0 auto" }}>{label}</span>
+      <input type="range" aria-label={`外光暈${label}`} min={min} max={max} value={value} onChange={(e) => set(Number(e.target.value))} style={{ flex: 1, minWidth: 0, accentColor: "#7c3aed" }} />
+      <span style={{ width: 42, textAlign: "right", fontSize: 12, color: "#374151", fontVariantNumeric: "tabular-nums" }}>{value}{unit}</span>
+    </div>
+  );
+  return (
+    <div style={{ marginTop: 14, padding: "10px 12px", border: "1px solid #e5e7eb", borderRadius: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: "#374151", marginRight: "auto" }}>外光暈</span>
+        {glow && <input type="color" aria-label="外光暈顏色" title="光暈顏色" value={hexColor(glow.color)} onChange={(e) => onChange({ ...glow, color: e.target.value })} style={{ width: 32, height: 26, border: "1px solid #e5e7eb", borderRadius: 6, padding: 0, cursor: "pointer" }} />}
+        <button onClick={() => onChange(glow ? null : { ...DEFAULT_GLOW })} aria-pressed={!!glow}
+          style={{ ...S.rbtn, height: 28, padding: "0 12px", fontSize: 12, ...(glow ? { border: "1px solid #7c3aed", color: "#7c3aed", background: "#f5f3ff" } : {}) }}>{glow ? "關閉" : "加上光暈"}</button>
+      </div>
+      {glow && (<>
+        {row("大小", glow.size, 1, 120, "px", (v) => onChange({ ...glow, size: v }))}
+        {row("透明度", Math.round(glow.opacity * 100), 5, 100, "%", (v) => onChange({ ...glow, opacity: v / 100 }))}
+        {row("強度", glow.strength, 1, 5, "", (v) => onChange({ ...glow, strength: v }))}
+      </>)}
+    </div>
+  );
+}
+
 function SkewControls({ skewX, skewY, onChange }: { skewX: number; skewY: number; onChange: (patch: { skewX?: number; skewY?: number }) => void }) {
   const row = (label: string, value: number, key: "skewX" | "skewY") => (<>
     <label style={S.rlabel}>{label} <span style={{ float: "right", color: "#9ca3af", fontVariantNumeric: "tabular-nums" }}>{Math.round(value)}°</span></label>
@@ -2957,6 +3000,7 @@ function cloneLayerDeep(l: EL): EL {
     textLayout: l.textLayout ? { ...l.textLayout } : l.textLayout,
     embeddedText: l.embeddedText.map((t) => ({ ...t })),
     paint: l.paint?.map((st) => ({ ...st, points: st.points.map((p) => ({ ...p })) })),
+    glow: l.glow ? { ...l.glow } : l.glow,
   };
 }
 

@@ -11,7 +11,7 @@ import { useMobileNav } from "@/lib/useMobileNav";
 const TOUR_STEPS: TourStep[] = [
   { anchor: '[data-tour="nav-settings"]', title: "① 先設定品牌規範", desc: "填品牌名稱、簡介、色彩與產業，AI 生成才會貼近你的品牌調性。" },
   { anchor: '[data-tour="home-create"]', title: "② 快速生成", desc: "直接說出想做的畫面或文字，還能附上產品圖／風格參考，AI 依品牌記憶判斷最快的做法幫你生成。" },
-  { anchor: '[data-tour="home-quickstart"]', title: "③ 開始創作", desc: "想更有方向？選「社群圖+文」做單圖／多圖、「商品情境」快速生成整套商品素材，或用「空白畫布設計」自由排版。" },
+  { anchor: '[data-tour="home-quickstart"]', title: "③ 開始創作", desc: "想更有方向？選「社群圖+文」做單圖／多圖、「商品情境」快速生成整套商品素材，或用「AI 幫我設計」照參考圖重做、描述背景生成。" },
   { anchor: '[data-tour="nav-inspiration"]', title: "④ 靈感中心", desc: "不知道發什麼？AI 依你的品牌與近期趨勢，找出值得做的內容，一鍵帶進「建立圖文」。" },
   { anchor: '[data-tour="nav-library"]', title: "⑤ 素材庫", desc: "產品圖、背景、素材集中管理；還能為每支產品建立可重複使用的商品套圖。" },
   { anchor: '[data-tour="help"]', title: "隨時回來看說明", desc: "點這顆問號，可看目前頁面說明，或再看一次這個教學。" },

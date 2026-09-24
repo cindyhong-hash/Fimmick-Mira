@@ -28,9 +28,13 @@ function fileToDataUrl(f: File): Promise<string> {
   return new Promise((res) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.readAsDataURL(f); });
 }
 
-export function FreeLayoutWizard({ clientId, onClose }: { clientId: string; onClose: () => void }) {
+export function FreeLayoutWizard({ clientId, onClose, startAt = "method" }: {
+  clientId: string; onClose: () => void;
+  /** 從哪一步開始：首頁「AI 幫我設計」卡片直接開在 aiChoice（這時「返回」就是關掉視窗）。 */
+  startAt?: "method" | "aiChoice";
+}) {
   const router = useRouter();
-  const [step, setStep] = useState<Step>("method");
+  const [step, setStep] = useState<Step>(startAt);
   const [branch, setBranch] = useState<Branch>(null);
   const [bgUrl, setBgUrl] = useState<string>("");
   const [materialTab, setMaterialTab] = useState<"library" | "upload">("library");
@@ -287,7 +291,7 @@ export function FreeLayoutWizard({ clientId, onClose }: { clientId: string; onCl
         {step === "aiChoice" && (
           <div className="p-6">
             <div className="flex items-center justify-between mb-5">
-              <button type="button" onClick={() => setStep("method")} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800">
+              <button type="button" onClick={() => (startAt === "aiChoice" ? onClose() : setStep("method"))} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800">
                 <ChevronLeft className="h-4 w-4" /> 返回
               </button>
               <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600">

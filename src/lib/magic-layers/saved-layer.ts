@@ -1,6 +1,6 @@
 import type { LayerData, SemanticId } from "./types.ts";
 import type { TextLayout } from "./editable-text.ts";
-import type { LayerGlow } from "./layer-glow.ts";
+import type { LayerGlow, LayerShadow } from "./layer-glow.ts";
 /**
  * 漸層填色。from／to 是 #rrggbb 或 #rrggbbaa（可帶透明度）。
  * vertical 上→下、horizontal 左→右、diagonal 左上→右下、radial 由中間往外。
@@ -59,6 +59,8 @@ export type SavedLayer = {
   paint?: PaintStroke[];
   /** 外光暈。 */
   glow?: LayerGlow;
+  /** 陰影（有方向的投影）。 */
+  shadow?: LayerShadow;
 };
 export function savedToLayerData(sl: SavedLayer): LayerData {
   const semanticId: SemanticId = sl.type === "independent_text" ? "text" : sl.type === "drawing" ? "decoration" : (sl.type as SemanticId);
@@ -78,6 +80,7 @@ export function savedToLayerData(sl: SavedLayer): LayerData {
       ...(sl.shape ? { shape: sl.shape } : {}),
       ...(sl.paint?.length ? { paint: sl.paint } : {}),
       ...(sl.glow ? { glow: sl.glow } : {}),
+      ...(sl.shadow ? { shadow: sl.shadow } : {}),
     },
   };
 }

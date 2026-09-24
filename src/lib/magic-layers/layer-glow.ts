@@ -47,3 +47,43 @@ export function drawGlow(ctx: CanvasRenderingContext2D, glow: LayerGlow | null |
   for (let i = 0; i < glowPasses(glow.strength); i++) draw();
   ctx.restore();
 }
+
+/* ---------- 陰影（像 PS 的投影）：有方向、有距離的影子 ---------- */
+
+export type LayerShadow = {
+  color: string;       // #rrggbb
+  opacity: number;     // 0–1
+  distance: number;    // 影子離物件多遠（畫布 px）
+  blur: number;        // 邊緣多柔（畫布 px）
+  angle: number;       // 影子往哪個方向落：0＝往右、90＝往下、180＝往左、270＝往上（度）
+};
+
+/** 預設往右下落（60°，偏下方）、淡淡的，商品照最常見的樣子。 */
+export const DEFAULT_SHADOW: LayerShadow = { color: "#000000", opacity: 0.3, distance: 16, blur: 24, angle: 60 };
+
+/** 影子在畫布上的位移（畫布 px）。方向固定跟畫布走，物件旋轉時影子不會跟著轉（跟 PS 的全域光一樣）。 */
+export function shadowOffset(s: Pick<LayerShadow, "distance" | "angle">): { dx: number; dy: number } {
+  const r = (s.angle * Math.PI) / 180;
+  const round = (v: number) => Math.round(v * 1000) / 1000 + 0;
+  return { dx: round(Math.cos(r) * s.distance), dy: round(Math.sin(r) * s.distance) };
+}
+
+/**
+ * 畫出 draw() 內容的陰影（只有影子，不含內容本身；呼叫端之後再畫內容，影子才會在底下）。
+ * 做法跟外光暈一樣：內容畫到畫面外，再用陰影位移搬回來，順便加上影子自己的方向位移。
+ * canvas 的陰影位移、模糊都是螢幕像素，不吃縮放，所以要乘上目前的縮放倍率。
+ */
+export function drawShadow(ctx: CanvasRenderingContext2D, shadow: LayerShadow | null | undefined, draw: () => void) {
+  if (!shadow || shadow.opacity <= 0) return;
+  const m = ctx.getTransform();
+  const scale = Math.hypot(m.a, m.b) || 1;
+  const OFF = 20000;
+  const { dx, dy } = shadowOffset(shadow);
+  ctx.save();
+  ctx.setTransform(new DOMMatrix().translateSelf(-OFF, 0).multiplySelf(m));
+  ctx.shadowColor = glowColor(shadow.color, shadow.opacity);
+  ctx.shadowBlur = Math.max(0, shadow.blur) * scale;
+  ctx.shadowOffsetX = OFF + dx * scale; ctx.shadowOffsetY = dy * scale;
+  draw();
+  ctx.restore();
+}

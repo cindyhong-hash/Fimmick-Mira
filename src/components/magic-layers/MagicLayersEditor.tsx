@@ -4,7 +4,7 @@ import { applyLayerTransform, docToLayer, layerCorners, layerToDoc } from "@/lib
 import { alignOffsets, unitCount, type AlignMode } from "@/lib/magic-layers/align.ts";
 import { buildRebuildSavedLayers, shrinkForUpload } from "@/lib/magic-layers/reference-rebuild/client.ts";
 import type { RebuildResult } from "@/lib/magic-layers/reference-rebuild/types.ts";
-import { DEFAULT_GLOW, drawGlow, type LayerGlow } from "@/lib/magic-layers/layer-glow.ts";
+import { DEFAULT_GLOW, DEFAULT_SHADOW, drawGlow, drawShadow, type LayerGlow, type LayerShadow } from "@/lib/magic-layers/layer-glow.ts";
 import { distanceToPolyline, drawPaint, paintHits, samplePath, smoothStroke, strokeToPaint } from "@/lib/magic-layers/freehand.ts";
 /* ============================================================
    Magic Layers — React editor
@@ -57,6 +57,8 @@ type EL = {
   paint?: PaintStroke[];
   /** 外光暈（沿著內容輪廓往外發光）；null/undefined＝沒有。 */
   glow?: LayerGlow | null;
+  /** 陰影（有方向、有距離的投影）；null/undefined＝沒有。 */
+  shadow?: LayerShadow | null;
 };
 
 /**
@@ -270,6 +272,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           skewX: (l.meta?.skewX as number | undefined) ?? 0, skewY: (l.meta?.skewY as number | undefined) ?? 0,
           paint: (l.meta?.paint as PaintStroke[] | undefined) ?? undefined,
           glow: (l.meta?.glow as LayerGlow | undefined) ?? null,
+          shadow: (l.meta?.shadow as LayerShadow | undefined) ?? null,
           embeddedText: l.embeddedText.map((t) => ({ text: t.text })), thumb: null,
         };
         if (isText && !st && !canvas) el.color = sampleColor(sctx, l.x, l.y, l.width, l.height);
@@ -1396,6 +1399,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       skewX: sl.skewX ?? 0, skewY: sl.skewY ?? 0,
       ...(sl.paint?.length ? { paint: sl.paint } : {}),
       ...(sl.glow ? { glow: sl.glow } : {}),
+      ...(sl.shadow ? { shadow: sl.shadow } : {}),
     };
     el.thumb = makeThumb(el);
     return el;
@@ -2404,6 +2408,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                   <SkewControls skewX={selEl.skewX ?? 0} skewY={selEl.skewY ?? 0} onChange={(patch) => updateText(patch)} />
                 )}
                 {selEl.type !== "background" && (
+                  <ShadowControls shadow={selEl.shadow ?? null} onChange={(shadow) => updateText({ shadow })} />
+                )}
+                {selEl.type !== "background" && (
                   <GlowControls glow={selEl.glow ?? null} onChange={(glow) => updateText({ glow })} />
                 )}
               </div>
@@ -2633,8 +2640,10 @@ function confBadge(c: number) {
 }
 /** 畫一個圖層的內容（已經換到圖層座標系）：圖片／文字／形狀，再加上畫在圖片上的筆畫。 */
 function drawElBody(ctx: CanvasRenderingContext2D, l: EL) {
-  // 外光暈先畫（在內容底下）；文字自己的「陰影」效果在光暈那一趟關掉，不然會蓋掉光暈的設定
-  if (l.glow) drawGlow(ctx, l.glow, () => drawElContent(ctx, l.fx?.shadow ? { ...l, fx: { ...l.fx, shadow: false } } : l));
+  // 陰影、外光暈先畫（在內容底下）；文字自己的「陰影」效果在這兩趟關掉，不然會蓋掉這裡的設定
+  const plain = l.fx?.shadow ? { ...l, fx: { ...l.fx, shadow: false } } : l;
+  if (l.shadow) drawShadow(ctx, l.shadow, () => drawElContent(ctx, plain));
+  if (l.glow) drawGlow(ctx, l.glow, () => drawElContent(ctx, plain));
   drawElContent(ctx, l);
   drawPaint(ctx, l.paint, l.w, l.h);
 }
@@ -2843,6 +2852,7 @@ function serializeEls(els: EL[]): SavedLayer[] {
     ...(l.skewX ? { skewX: l.skewX } : {}), ...(l.skewY ? { skewY: l.skewY } : {}),
     ...(l.paint?.length ? { paint: l.paint } : {}),
     ...(l.glow ? { glow: { ...l.glow } } : {}),
+    ...(l.shadow ? { shadow: { ...l.shadow } } : {}),
     ...(l.isText
       ? { isText: true, text: l.text, color: l.color, fontSize: l.fontSize * (l.w / (l.naturalW || l.w)), fontFamily: l.fontFamily, fontWeight: l.fontWeight, align: l.align, ...(l.fx ? { fx: l.fx } : {}), ...(l.textLayout ? { textLayout: { ...l.textLayout, letterSpacing: l.textLayout.letterSpacing * (l.w / (l.naturalW || l.w)) } } : {}),
           // 分段樣式的字級跟著圖層縮放一起換算，否則存檔重開會跑掉
@@ -2968,7 +2978,7 @@ function PageStrip({ pages, current, currentThumb, onSelect, onAdd, onDuplicate,
 }
 
 function cloneEL(el: EL): EL {
-  return { ...el, textLayout: el.textLayout ? { ...el.textLayout } : undefined, shape: el.shape ? { ...el.shape } : null, fx: el.fx ? { ...el.fx } : el.fx, embeddedText: el.embeddedText.map((t) => ({ ...t })), paint: el.paint?.slice(), glow: el.glow ? { ...el.glow } : el.glow };
+  return { ...el, textLayout: el.textLayout ? { ...el.textLayout } : undefined, shape: el.shape ? { ...el.shape } : null, fx: el.fx ? { ...el.fx } : el.fx, embeddedText: el.embeddedText.map((t) => ({ ...t })), paint: el.paint?.slice(), glow: el.glow ? { ...el.glow } : el.glow, shadow: el.shadow ? { ...el.shadow } : el.shadow };
 }
 function iconPreview(name: string): string {
   const c = document.createElement("canvas"); c.width = 40; c.height = 40;
@@ -3166,6 +3176,42 @@ function AlignBar({ units, onAlign }: { units: number; onAlign: (mode: AlignMode
 }
 
 /**
+ * 陰影（像 PS 的投影）：開關＋顏色／透明度／距離／模糊／方向。
+ * 物件、形狀、文字都能用；影子沿著內容輪廓落下，去背產品就是產品形狀的影子。
+ */
+function ShadowControls({ shadow, onChange }: { shadow: LayerShadow | null; onChange: (shadow: LayerShadow | null) => void }) {
+  const row = (label: string, value: number, min: number, max: number, unit: string, set: (v: number) => void) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+      <span style={{ width: 44, fontSize: 12, color: "#6b7280", flex: "0 0 auto" }}>{label}</span>
+      <input type="range" aria-label={`陰影${label}`} min={min} max={max} value={value} onChange={(e) => set(Number(e.target.value))} style={{ flex: 1, minWidth: 0, accentColor: "#7c3aed" }} />
+      <span style={{ width: 42, textAlign: "right", fontSize: 12, color: "#374151", fontVariantNumeric: "tabular-nums" }}>{value}{unit}</span>
+    </div>
+  );
+  return (
+    <div style={{ marginTop: 14, padding: "10px 12px", border: "1px solid #e5e7eb", borderRadius: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: "#374151", marginRight: "auto" }}>陰影</span>
+        {shadow && <input type="color" aria-label="陰影顏色" title="陰影顏色" value={hexColor(shadow.color)} onChange={(e) => onChange({ ...shadow, color: e.target.value })} style={{ width: 32, height: 26, border: "1px solid #e5e7eb", borderRadius: 6, padding: 0, cursor: "pointer" }} />}
+        <button onClick={() => onChange(shadow ? null : { ...DEFAULT_SHADOW })} aria-pressed={!!shadow}
+          style={{ ...S.rbtn, height: 28, padding: "0 12px", fontSize: 12, ...(shadow ? { border: "1px solid #7c3aed", color: "#7c3aed", background: "#f5f3ff" } : {}) }}>{shadow ? "關閉" : "加上陰影"}</button>
+      </div>
+      {shadow && (<>
+        {row("透明度", Math.round(shadow.opacity * 100), 5, 100, "%", (v) => onChange({ ...shadow, opacity: v / 100 }))}
+        {row("距離", shadow.distance, 0, 120, "px", (v) => onChange({ ...shadow, distance: v }))}
+        {row("模糊", shadow.blur, 0, 120, "px", (v) => onChange({ ...shadow, blur: v }))}
+        {row("方向", shadow.angle, 0, 359, "°", (v) => onChange({ ...shadow, angle: v }))}
+        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+          {([["右下", 60], ["正下", 90], ["左下", 120], ["右上", 300]] as const).map(([t, a]) => (
+            <button key={t} onClick={() => onChange({ ...shadow, angle: a })}
+              style={{ ...S.rbtn, flex: 1, height: 26, padding: 0, fontSize: 11, ...(shadow.angle === a ? { border: "1px solid #7c3aed", color: "#7c3aed" } : {}) }}>{t}</button>
+          ))}
+        </div>
+      </>)}
+    </div>
+  );
+}
+
+/**
  * 外光暈（像 PS 圖層樣式）：開關＋顏色／大小／透明度／強度。
  * 物件、形狀、文字都能用；光暈沿著內容輪廓，去背的產品就沿著產品邊緣發光。
  */
@@ -3268,6 +3314,7 @@ function cloneLayerDeep(l: EL): EL {
     embeddedText: l.embeddedText.map((t) => ({ ...t })),
     paint: l.paint?.map((st) => ({ ...st, points: st.points.map((p) => ({ ...p })) })),
     glow: l.glow ? { ...l.glow } : l.glow,
+    shadow: l.shadow ? { ...l.shadow } : l.shadow,
   };
 }
 

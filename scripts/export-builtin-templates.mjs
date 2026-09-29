@@ -32,6 +32,7 @@ import { FAMILY as F17 } from "./family-17-sunny-kids.mjs";
 import { FAMILY as F18 } from "./family-18-clinic-ticket.mjs";
 import { FAMILY as F19 } from "./family-19-anniversary-events.mjs";
 import { FAMILY as F20 } from "./family-20-timeline-capsules.mjs";
+import { FAMILY as F21 } from "./family-21-bingo-circle.mjs";
 
 const DB = "prisma/dev-release.db";
 const OUT = "src/lib/magic-layers/builtin-templates.json";
@@ -76,7 +77,7 @@ const DRAFT = process.argv.includes("--draft");
 const thumbs = thumbnails();
 const entries = [
   ...LEGACY.slice(10).map((t) => ({ name: t.name, layers: t.layers(), art: null })),
-  ...[...F1, ...F2, ...F3, ...F4, ...SHOWCASE, ...F5, ...F6, ...F7, ...F8, ...F9, ...F10, ...F11, ...F12, ...F13, ...F14, ...F15, ...F16, ...F17, ...F18, ...F19, ...F20].map((f) => ({
+  ...[...F1, ...F2, ...F3, ...F4, ...SHOWCASE, ...F5, ...F6, ...F7, ...F8, ...F9, ...F10, ...F11, ...F12, ...F13, ...F14, ...F15, ...F16, ...F17, ...F18, ...F19, ...F20, ...F21].map((f) => ({
     name: f.art.name, layers: f.layers(),
     // 直式範本在 art 裡帶自己的尺寸（預設 1200×1200）
     docW: f.art.docW, docH: f.art.docH,

@@ -989,7 +989,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       const psd = buildPsdDocument(layersRef.current, doc);
       const buf = writePsd(psd as unknown as Parameters<typeof writePsd>[0], { noBackground: true, generateThumbnail: true });
       const url = URL.createObjectURL(new Blob([buf], { type: "image/vnd.adobe.photoshop" }));
-      const a = document.createElement("a"); a.href = url; a.download = psdFileName(name); a.click();
+      const a = document.createElement("a"); a.href = url; a.download = psdFileName(name || layersRef.current.find((l) => l.isText)?.text); a.click();
       setTimeout(() => URL.revokeObjectURL(url), 30_000);
     } catch (err) {
       alert("下載 PSD 失敗：" + (err instanceof Error ? err.message : String(err)));
@@ -1647,7 +1647,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     } catch (e) { alert("刪除範本失敗：" + (e instanceof Error ? e.message : String(e))); }
   }, [loadTemplates]);
 
-  const doSave = useCallback(async (download: boolean) => {
+  const doSave = useCallback(async (download: boolean, format: "png" | "jpg" = "png") => {
     if (!onSave || saving) return;
     setSaving(true);
     try {
@@ -1670,13 +1670,14 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       if (download) {
         const nameLayer = layersRef.current.find((l) => l.isText);
         const base = (nameLayer?.text || "magic-layout").slice(0, 40);
-        const files = pageImages ?? (imageDataUrl ? [imageDataUrl] : []);
+        const pngs = pageImages ?? (imageDataUrl ? [imageDataUrl] : []);
+        const files = format === "jpg" ? await Promise.all(pngs.map(toJpegDataUrl)) : pngs;
         files.forEach((href, i) => {
           // 瀏覽器連續下載需要一點間隔，不然只會留最後一張
           setTimeout(() => {
             const a = document.createElement("a");
             const pageName = pages[i]?.name ? pages[i].name.replace(/[\\/:*?"<>|]/g, "") : String(i + 1);
-            a.download = files.length > 1 ? `${base}-${pageName}.png` : `${base}.png`;
+            a.download = files.length > 1 ? `${base}-${pageName}.${format}` : `${base}.${format}`;
             a.href = href; document.body.appendChild(a); a.click(); a.remove();
           }, i * 350);
         });
@@ -1865,11 +1866,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           <>
             <span style={S.divider} />
             {(saving || saved) && <span aria-live="polite" style={{ fontSize: 12, color: saved ? "#16a34a" : "#9ca3af" }}>{saving ? "儲存中…" : "✓ 已自動儲存"}</span>}
-            <button style={S.tbtn} onClick={() => void downloadPsd()} disabled={psdBusy}
-              title="下載成 Photoshop 檔（.psd）：每個圖層分開，文字可以直接改字；Illustrator 也能打開">
-              <Layers size={15} />{psdBusy ? "產生中…" : "下載 PSD"}
-            </button>
-            <button style={{ ...S.tbtn, border: "1px solid #7c3aed", background: "#7c3aed", color: "#fff" }} onClick={() => doSave(true)} disabled={saving} title="下載成 PNG，並存進素材庫"><Download size={15} />下載並存入素材庫</button>
+            <DownloadMenu busy={saving || psdBusy}
+              onPick={(f) => { if (f === "psd") void downloadPsd(); else void doSave(true, f); }} />
           </>
         )}
         <span style={{ flex: 1 }} />
@@ -3436,6 +3434,62 @@ function snapImage(l: EL): ImageSnap {
   return { canvas: l.canvas, src: l.src, w: l.w, h: l.h, naturalW: l.naturalW, naturalH: l.naturalH, thumb: l.thumb };
 }
 function restoreImage(l: EL, s: ImageSnap) { Object.assign(l, s); }
+
+/** PNG data URL → JPG（白底，畫質 0.92）。 */
+function toJpegDataUrl(png: string): Promise<string> {
+  return new Promise((resolve) => {
+    const im = new Image();
+    im.onload = () => {
+      const c = document.createElement("canvas"); c.width = im.naturalWidth; c.height = im.naturalHeight;
+      const g = c.getContext("2d")!; g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); g.drawImage(im, 0, 0);
+      resolve(c.toDataURL("image/jpeg", 0.92));
+    };
+    im.onerror = () => resolve(png);
+    im.src = png;
+  });
+}
+
+type DownloadFormat = "jpg" | "png" | "psd";
+const DOWNLOAD_OPTIONS: { f: DownloadFormat; label: string; hint: string }[] = [
+  { f: "jpg", label: "JPG 圖片", hint: "檔案小，適合直接發文" },
+  { f: "png", label: "PNG 圖片", hint: "畫質無損" },
+  { f: "psd", label: "PSD（Photoshop）", hint: "每個圖層分開，文字可以改；Illustrator 也能開" },
+];
+
+/** 工具列的「下載」：一顆按鈕，點開選格式。 */
+function DownloadMenu({ busy, onPick }: { busy: boolean; onPick: (f: DownloadFormat) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
+    document.addEventListener("mousedown", close);
+    window.addEventListener("keydown", esc, true);
+    return () => { document.removeEventListener("mousedown", close); window.removeEventListener("keydown", esc, true); };
+  }, [open]);
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button style={{ ...S.tbtn, border: "1px solid #7c3aed", background: "#7c3aed", color: "#fff" }} disabled={busy}
+        onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open} title="下載這張設計">
+        <Download size={15} />{busy ? "處理中…" : "下載"}<ChevronDown size={14} />
+      </button>
+      {open && (
+        <div role="menu" style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 50, width: 260, padding: 6, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, boxShadow: "0 12px 32px rgba(17,24,39,.14)" }}>
+          {DOWNLOAD_OPTIONS.map((o) => (
+            <button key={o.f} role="menuitem" onClick={() => { setOpen(false); onPick(o.f); }}
+              style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 10px", border: "none", borderRadius: 8, background: "transparent", cursor: "pointer" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#f5f3ff"; }} onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#1f2937" }}>{o.label}</div>
+              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{o.hint}</div>
+            </button>
+          ))}
+          <div style={{ fontSize: 11, color: "#9ca3af", padding: "6px 10px 4px", borderTop: "1px solid #f3f4f6", marginTop: 4 }}>JPG、PNG 會同時存一份到素材庫</div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /**
  * 右側面板「AI 換圖」：選一張圖、描述想要的畫面，出兩張挑一張換上（位置、大小、效果都保留）。

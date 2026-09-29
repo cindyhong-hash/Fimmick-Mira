@@ -978,6 +978,16 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     } finally { setAdding(false); }
   }, [adding, refresh, render]);
 
+  /* ---------- AI 換圖：把選到的圖換成生成的新圖（框不動） ---------- */
+  const replaceLayerImage = useCallback(async (id: string, v: ReplaceVariant, cutout: boolean) => {
+    const target = layersRef.current.find((l) => l.id === id);
+    if (!target) throw new Error("找不到這個圖層");
+    const canvas = await loadToCanvas(v.url);
+    if (!canvas) throw new Error("讀取新圖失敗");
+    applyReplacedImage(target, canvas, v.url, cutout);
+    markDirty(); refresh(); render();
+  }, [markDirty, refresh, render]);
+
   /* ---------- insert tools: image / upload / text / logo ---------- */
   const FONT = "'Noto Sans TC',system-ui,sans-serif";
   // 插入一張圖片圖層（不去背）：素材庫 / 上傳圖片 / Logo 共用
@@ -2384,6 +2394,12 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                     <div style={{ height: 1, background: "#e5e7eb", margin: "18px 0" }} />
                   </>
                 )}
+                {selEl.canvas && !selEl.isText && !selEl.shape && !selEl.isArt && selectedIds.length === 1 && (
+                  <ReplaceImagePanel key={selEl.id} layerId={selEl.id} aspect={selEl.w / (selEl.h || 1)}
+                    isCutout={() => { const l = layersRef.current.find((x) => x.id === selectedIdsRef.current[0]); return !!l?.canvas && l.type !== "background" && hasTransparency(l.canvas); }}
+                    getSource={(cutout) => { const l = layersRef.current.find((x) => x.id === selectedIdsRef.current[0]); return l?.canvas ? sourceDataUrl(l.canvas, cutout) : null; }}
+                    onApply={(v, cutout) => replaceLayerImage(selEl.id, v, cutout)} />
+                )}
                 {selEl.canvas && !selEl.isText && !selEl.shape && selEl.type !== "background" && (
                   <ClipPanel
                     frameName={selEl.clipTo ? (panel.find((l) => l.id === selEl.clipTo)?.name ?? null) : null}
@@ -3260,6 +3276,129 @@ function SkewControls({ skewX, skewY, onChange }: { skewX: number; skewY: number
 }
 
 /** 右側面板「放進形狀（剪裁遮色片）」：選到圖片時出現。 */
+/** 圖片有沒有透明的地方（去背過的商品、人物）：縮小取樣看 alpha。 */
+function hasTransparency(c: HTMLCanvasElement): boolean {
+  const t = document.createElement("canvas"); t.width = 48; t.height = 48;
+  const g = t.getContext("2d", { willReadFrequently: true });
+  if (!g) return false;
+  g.drawImage(c, 0, 0, 48, 48);
+  const d = g.getImageData(0, 0, 48, 48).data;
+  let clear = 0;
+  for (let i = 3; i < d.length; i += 4) if (d[i] < 200) clear++;
+  return clear > 48 * 48 * 0.02;
+}
+
+/** 送給「改這張」的原圖：長邊縮到 1280 以內，去背的保留透明（PNG），其餘用 JPG 省流量。 */
+function sourceDataUrl(c: HTMLCanvasElement, cutout: boolean): string {
+  const s = Math.min(1, 1280 / Math.max(c.width, c.height));
+  const t = document.createElement("canvas"); t.width = Math.max(1, Math.round(c.width * s)); t.height = Math.max(1, Math.round(c.height * s));
+  t.getContext("2d")!.drawImage(c, 0, 0, t.width, t.height);
+  return cutout ? t.toDataURL("image/png") : t.toDataURL("image/jpeg", 0.9);
+}
+
+/** 把換好的圖放回圖層：框的位置不動；去背的圖依自己的比例縮進原本的框（置中）。 */
+function applyReplacedImage(target: EL, canvas: HTMLCanvasElement, url: string, cutout: boolean) {
+  if (cutout) {
+    const ar = canvas.width / (canvas.height || 1);
+    let w = target.w, h = w / ar;
+    if (h > target.h) { h = target.h; w = h * ar; }
+    target.w = w; target.h = h;
+  }
+  target.canvas = canvas; target.naturalW = canvas.width; target.naturalH = canvas.height; target.src = url;
+  target.thumb = makeThumb(target);
+}
+
+type ReplaceVariant = { url: string; width: number; height: number };
+
+/**
+ * 右側面板「AI 換圖」：選一張圖、描述想要的畫面，出兩張挑一張換上（位置、大小、效果都保留）。
+ * 「改這張」拿原圖當參考只改描述的部分；「全新生成」照描述重畫。
+ */
+function ReplaceImagePanel({ layerId, aspect, getSource, isCutout, onApply }: {
+  layerId: string; aspect: number;
+  getSource: (cutout: boolean) => string | null;
+  isCutout: () => boolean;
+  onApply: (v: ReplaceVariant, cutout: boolean) => Promise<void>;
+}) {
+  const [prompt, setPrompt] = useState("");
+  const [mode, setMode] = useState<"edit" | "new">("edit");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [result, setResult] = useState<{ layerId: string; cutout: boolean; variants: ReplaceVariant[] } | null>(null);
+  const shown = result && result.layerId === layerId ? result : null;
+
+  const run = async () => {
+    if (busy || !prompt.trim()) return;
+    setBusy(true); setErr(null); setResult(null);
+    try {
+      const cutout = isCutout();
+      const imageDataUrl = mode === "edit" ? getSource(cutout) : null;
+      if (mode === "edit" && !imageDataUrl) throw new Error("讀不到這張圖");
+      const r = await fetch("/api/magic-layers/replace-image", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: prompt.trim(), mode, aspect, cutout, imageDataUrl }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !Array.isArray(d.variants) || !d.variants.length) throw new Error(d.error ?? "生成失敗");
+      setResult({ layerId, cutout, variants: d.variants });
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  };
+
+  const pick = async (v: ReplaceVariant) => {
+    if (!shown) return;
+    try { await onApply(v, shown.cutout); setResult(null); }
+    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+  };
+
+  const modeBtn = (m: "edit" | "new", label: string) => (
+    <button onClick={() => setMode(m)} disabled={busy}
+      style={{ flex: 1, height: 30, borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer",
+        border: `1px solid ${mode === m ? "#7c3aed" : "#e5e7eb"}`, background: mode === m ? "#f5f3ff" : "#fff", color: mode === m ? "#6d28d9" : "#4b5563" }}>
+      {label}
+    </button>
+  );
+
+  return (
+    <div style={{ margin: "0 0 14px", padding: 12, borderRadius: 12, border: "1px solid #ede9fe", background: "#faf8ff" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 700, color: "#1f2937", marginBottom: 8 }}>
+        <WandSparkles size={15} color="#7c3aed" />AI 換圖
+      </div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+        {modeBtn("edit", "改這張")}
+        {modeBtn("new", "全新生成")}
+      </div>
+      <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3} maxLength={400} disabled={busy}
+        onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void run(); }}
+        placeholder={mode === "edit" ? "要改哪裡？例如：換成短髮、背景改成臥室" : "想要什麼畫面？例如：亞洲女生在浴室對鏡子刷牙，明亮白色調"}
+        style={{ width: "100%", boxSizing: "border-box", padding: "8px 10px", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 12, resize: "vertical", fontFamily: "inherit", background: "#fff" }} />
+      <button onClick={() => void run()} disabled={busy || !prompt.trim()}
+        style={{ width: "100%", marginTop: 8, height: 36, borderRadius: 10, border: "none", color: "#fff", fontSize: 13, fontWeight: 700,
+          cursor: busy || !prompt.trim() ? "default" : "pointer", background: busy ? "#a78bfa" : !prompt.trim() ? "#c4b5fd" : "linear-gradient(135deg,#8b5cf6,#7c3aed)" }}>
+        {busy ? "生成中…（約 15–40 秒）" : "✨ 生成兩張"}
+      </button>
+      {err && <div role="alert" style={{ marginTop: 8, fontSize: 11, color: "#b91c1c", background: "#fef2f2", borderRadius: 8, padding: "6px 8px", lineHeight: 1.5 }}>{err}</div>}
+      {shown && (
+        <>
+          <div style={{ fontSize: 11, color: "#6b7280", margin: "10px 0 6px" }}>點一張換上（可以按上一步退回原圖）</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {shown.variants.map((v) => (
+              <button key={v.url} onClick={() => void pick(v)} title="換成這張"
+                style={{ padding: 0, border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden", cursor: "pointer", aspectRatio: String(aspect), display: "flex", alignItems: "center", justifyContent: "center",
+                  background: shown.cutout ? "repeating-conic-gradient(#f3f4f6 0% 25%, #fff 0% 50%) 50% / 12px 12px" : "#fff" }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={v.url} alt="生成結果" style={{ width: "100%", height: "100%", objectFit: shown.cutout ? "contain" : "cover", display: "block" }} />
+              </button>
+            ))}
+          </div>
+          <button onClick={() => setResult(null)} style={{ ...S.rbtn, width: "100%", marginTop: 8 }}>都不要</button>
+        </>
+      )}
+      <p style={{ margin: "8px 0 0", fontSize: 11, color: "#9ca3af", lineHeight: 1.5 }}>位置、大小、陰影等效果都會保留；去背的圖換上後也會自動去背。</p>
+    </div>
+  );
+}
+
 function ClipPanel({ frameName, frames, onPut, onFit, onTakeOut }: {
   frameName: string | null;
   frames: { id: string; name: string; shape: ShapeSpec }[];

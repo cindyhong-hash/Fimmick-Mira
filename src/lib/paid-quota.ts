@@ -26,6 +26,7 @@ export const PAID_BUCKETS = {
   "image-set-retry": { label: "套圖重新生成", limit: 60 },
   "library-regenerate": { label: "素材重新生成", limit: 60 },
   "compose": { label: "AI 生成背景／合成設計稿", limit: 80 },
+  "replace-image": { label: "AI 換圖", limit: 60 },
 } as const;
 export type PaidBucket = keyof typeof PAID_BUCKETS;
 

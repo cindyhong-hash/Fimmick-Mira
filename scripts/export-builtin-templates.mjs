@@ -28,6 +28,7 @@ import { FAMILY as F13 } from "./family-13-whiteboard-tips.mjs";
 import { FAMILY as F14 } from "./family-14-keyword-tags.mjs";
 import { FAMILY as F15 } from "./family-15-storage-cards.mjs";
 import { FAMILY as F16 } from "./family-16-envy-story.mjs";
+import { FAMILY as F17 } from "./family-17-sunny-kids.mjs";
 
 const DB = "prisma/dev-release.db";
 const OUT = "src/lib/magic-layers/builtin-templates.json";
@@ -68,7 +69,7 @@ const DRAFT = process.argv.includes("--draft");
 const thumbs = thumbnails();
 const entries = [
   ...LEGACY.slice(10).map((t) => ({ name: t.name, layers: t.layers(), art: null })),
-  ...[...F1, ...F2, ...F3, ...F4, ...SHOWCASE, ...F5, ...F6, ...F7, ...F8, ...F9, ...F10, ...F11, ...F12, ...F13, ...F14, ...F15, ...F16].map((f) => ({
+  ...[...F1, ...F2, ...F3, ...F4, ...SHOWCASE, ...F5, ...F6, ...F7, ...F8, ...F9, ...F10, ...F11, ...F12, ...F13, ...F14, ...F15, ...F16, ...F17].map((f) => ({
     name: f.art.name, layers: f.layers(),
     // 直式範本在 art 裡帶自己的尺寸（預設 1200×1200）
     docW: f.art.docW, docH: f.art.docH,

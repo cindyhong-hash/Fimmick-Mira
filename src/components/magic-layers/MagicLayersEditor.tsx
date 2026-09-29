@@ -3179,7 +3179,8 @@ function drawTextEl(ctx: CanvasRenderingContext2D, l: EL) {
   if (fx?.strokeW && fx.strokeW > 0) {
     ctx.lineWidth = fs * fx.strokeW; ctx.strokeStyle = fx.strokeColor || "#ffffff";
     ctx.lineJoin = "round"; ctx.miterLimit = 2;
-    if (lines) lines.forEach((line, i) => ctx.strokeText(line, tx, firstY + i * lineHeight));
+    // 有分段樣式的字由 drawRunText 一段一段描邊；這裡再描整行會多出一圈位置不對的殘影
+    if (lines && !l.runs?.length) lines.forEach((line, i) => ctx.strokeText(line, tx, firstY + i * lineHeight));
   }
   if (fx?.shadow) { ctx.shadowColor = "rgba(0,0,0,.4)"; ctx.shadowBlur = fs * 0.1; ctx.shadowOffsetX = fs * 0.03; ctx.shadowOffsetY = fs * 0.06; }
   ctx.fillStyle = fill;

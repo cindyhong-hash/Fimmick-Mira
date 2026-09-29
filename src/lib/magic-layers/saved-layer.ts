@@ -61,6 +61,8 @@ export type SavedLayer = {
   glow?: LayerGlow;
   /** 陰影（有方向的投影）。 */
   shadow?: LayerShadow;
+  /** 文字寬度：沒有＝自動寬度（框跟著字變寬）；true＝固定寬度（字在框裡自動換行）。 */
+  wrap?: boolean;
 };
 export function savedToLayerData(sl: SavedLayer): LayerData {
   const semanticId: SemanticId = sl.type === "independent_text" ? "text" : sl.type === "drawing" ? "decoration" : (sl.type as SemanticId);
@@ -75,6 +77,7 @@ export function savedToLayerData(sl: SavedLayer): LayerData {
       visible: sl.visible, locked: sl.locked, opacity: sl.opacity, groupId: sl.groupId ?? null,
       ...(sl.clipTo ? { clipTo: sl.clipTo } : {}),
       ...(sl.skewX ? { skewX: sl.skewX } : {}), ...(sl.skewY ? { skewY: sl.skewY } : {}),
+      ...(sl.wrap ? { wrap: true } : {}),
       ...(sl.isText ? { style: { text: sl.text, fontSizePx: sl.fontSize, fontWeight: sl.fontWeight, color: sl.color, align: sl.align, fontFamily: sl.fontFamily, fx: sl.fx ?? null, ...(sl.textLayout ? { layout: sl.textLayout } : {}), ...(sl.runs ? { runs: sl.runs } : {}) }, textObject: { text: sl.text } } : {}),
       ...(sl.isArt ? { isArt: true, artText: sl.text ?? "", ...(sl.artRefImage ? { artRefImage: sl.artRefImage } : {}) } : {}),
       ...(sl.shape ? { shape: sl.shape } : {}),

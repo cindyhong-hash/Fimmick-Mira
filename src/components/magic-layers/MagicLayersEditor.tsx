@@ -14,6 +14,7 @@ import { distanceToPolyline, drawPaint, paintHits, samplePath, smoothStroke, str
    Ported from the verified vanilla engine.
    ============================================================ */
 import { drawEditableText, layoutText, readTextLayout, DEFAULT_TEXT_LAYOUT, type TextLayout } from "@/lib/magic-layers/editable-text.ts";
+import { anchorShift, autoWidth, shiftRuns, caretLines, indexAt, selectionSpans, verticalMove, widestLine, wrapRanges, type CaretLine, type TextLineRange } from "@/lib/magic-layers/text-caret.ts";
 import { hexToRgb, isEditableInPsd, psdFileName, psdFontName, psdTextEffects, styleRunsFor } from "@/lib/magic-layers/psd-export.ts";
 import { useBrandFonts } from "@/lib/fonts/useBrandFonts";
 import type { PaintStroke, SavedLayer, TextFx, TextRun, ShapeKind, ShapeSpec } from "@/lib/magic-layers/saved-layer.ts";
@@ -60,6 +61,11 @@ type EL = {
   glow?: LayerGlow | null;
   /** 陰影（有方向、有距離的投影）；null/undefined＝沒有。 */
   shadow?: LayerShadow | null;
+  /**
+   * 文字寬度：false/undefined＝自動寬度（打字時框跟著字變寬）；true＝固定寬度（字在框裡自動換行）。
+   * 拖文字框左右兩邊、或自動變寬碰到畫布邊緣時會變成固定寬度。有 textLayout 的文字本來就會換行，不看這個。
+   */
+  wrap?: boolean;
 };
 
 /**
@@ -195,11 +201,25 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const readSel = useCallback((t: HTMLTextAreaElement) => {
     setTextSel(t.selectionStart === t.selectionEnd ? null : { start: t.selectionStart, end: t.selectionEnd });
   }, []);
-  const [editingText, setEditingText] = useState<{
-    id: string; value: string;
-    left: number; top: number; width: number; height: number;
-    rotation: number; font: string; color: string; align: "left" | "center" | "right";
-  } | null>(null);
+  /**
+   * 畫布上直接改字（雙擊文字進入）。輸入交給一個看不見的 textarea（中文輸入法才正常），
+   * 游標、反白、組字底線都由畫布畫（drawTextEditing），位置跟畫出來的字一模一樣。
+   * left/top 是「選取的字」工具列要放的位置（螢幕座標）。
+   */
+  const [editingText, setEditingText] = useState<{ id: string; original: string; left: number; top: number } | null>(null);
+  const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
+  /** 正在編輯的文字圖層 id：事件處理和 render 讀這個（不用等 state 更新）。 */
+  const editingRef = useRef<string | null>(null);
+  const editingOriginalRef = useRef("");
+  /** 輸入法組字開始的位置；null＝沒有在組字。 */
+  const compStartRef = useRef<number | null>(null);
+  const caretOnRef = useRef(true);
+  /** 進入編輯時要放的游標位置（textarea 掛上去之後才放得了）。 */
+  const pendingCaretRef = useRef<{ start: number; end: number } | null>(null);
+  /** 進入編輯前的框（沒改字就還原）。 */
+  const editGeomRef = useRef<TextGeom | null>(null);
+  const startTextEditRef = useRef<(l: EL, range?: { start: number; end: number }) => void>(() => {});
+  const exitTextEditRef = useRef<() => void>(() => {});
   // 生成式填色：在畫布上框一塊，只有那一塊交給 AI 重畫（補東西或移除東西）。
   // marqueeRef 是拖曳中的即時矩形（給 render 畫虛線框用，不觸發 re-render）；
   // marquee 是放開滑鼠後定案的那一塊，有值才會跳出輸入框。
@@ -271,6 +291,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           groupId: (l.meta?.groupId as string | undefined) ?? null,
           clipTo: (l.meta?.clipTo as string | undefined) ?? null,
           skewX: (l.meta?.skewX as number | undefined) ?? 0, skewY: (l.meta?.skewY as number | undefined) ?? 0,
+          wrap: (l.meta?.wrap as boolean | undefined) ?? false,
           paint: (l.meta?.paint as PaintStroke[] | undefined) ?? undefined,
           glow: (l.meta?.glow as LayerGlow | undefined) ?? null,
           shadow: (l.meta?.shadow as LayerShadow | undefined) ?? null,
@@ -308,6 +329,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const toLocal = (l: EL, dx: number, dy: number) => docToLayer(l, dx, dy);
   const sel = () => layersRef.current.find((l) => l.id === selectedId) ?? null;
   const applySelection = (ids: string[], primary: string | null = ids[0] ?? null) => {
+    // 選到別的東西（圖層列表、快捷鍵…）就結束畫布上的改字
+    if (editingRef.current && !ids.includes(editingRef.current)) exitTextEditRef.current();
     selectedIdsRef.current = ids;
     setSelectedIds(ids);
     setSelectedId(primary);
@@ -349,6 +372,10 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       drawElBody(ctx, l);
       ctx.restore();
     }
+    // 畫布上改字：游標、反白、組字底線（跟字畫在同一個座標系）
+    const editId = editingRef.current, ta = textAreaRef.current;
+    const editEl = editId ? layersRef.current.find((l) => l.id === editId) : undefined;
+    if (editEl && ta) drawTextEditing(ctx, editEl, { start: ta.selectionStart, end: ta.selectionEnd }, compStartRef.current, caretOnRef.current, view.current.zoom);
     // 生成式填色的選取框（虛線，跟 PS 的行進螞蟻同一個意思）
     const mq = marqueeRef.current;
     if (mq) {
@@ -417,7 +444,10 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     }
     ctx.restore();
 
-    if (toolRef.current === "select") for (const id of selectedIds) { const s = layersRef.current.find((l) => l.id === id); if (s?.visible) drawSelection(ctx, s, id === selectedId); }
+    // 改字時只留細虛線框（drawTextEditing 畫的），不顯示縮放／旋轉把手
+    if (toolRef.current === "select") for (const id of selectedIds) { if (id === editId) continue; const s = layersRef.current.find((l) => l.id === id); if (s?.visible) drawSelection(ctx, s, id === selectedId); }
+    // 看不見的 textarea 跟著文字框走：輸入法的選字視窗才會出現在字旁邊
+    if (editEl && ta) placeTextArea(ta, editEl, view.current);
   }, [doc.w, doc.h, selectedId, selectedIds]);
   // 局部擦除：文件座標 → 圖層像素 → destination-out 挖透明
   const eraseAt = (l: EL, dx: number, dy: number) => {
@@ -477,6 +507,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
 
   /* ---------- hit testing ---------- */
   function hitHandle(sx: number, sy: number) {
+    if (editingRef.current) return null;   // 改字時沒有縮放／旋轉把手
     const l = sel(); if (!l || l.locked || !l.visible) return null;
     const cs = corners(l).map((p) => d2s(p.x, p.y));
     for (let i = 0; i < 4; i++) if (dist(sx, sy, cs[i].x, cs[i].y) <= 10) return { type: "scale" as const };
@@ -559,6 +590,21 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         render();
         return;
       }
+      // 改字中：點在這段字上＝放游標／拖曳選字（Shift 延伸）；點到別處＝結束改字，再照一般點選處理
+      if (!wantPan && editingRef.current) {
+        const el = layersRef.current.find((x) => x.id === editingRef.current), ta = textAreaRef.current;
+        if (el && ta) {
+          const lp = toLocal(el, d.x, d.y), m = 8 / view.current.zoom;
+          if (Math.abs(lp.x) <= el.w / 2 + m && Math.abs(lp.y) <= el.h / 2 + m) {
+            e.preventDefault();   // 不然 textarea 會失去焦點
+            const idx = indexAt(textCaretLines(el), lp.x, lp.y);
+            const anchor = e.shiftKey ? (ta.selectionDirection === "backward" ? ta.selectionEnd : ta.selectionStart) : idx;
+            selectTextRange(ta, anchor, idx); ta.focus({ preventScroll: true }); caretOnRef.current = true; readSel(ta);
+            drag.current = { mode: "textSelect", anchor }; render(); return;
+          }
+        }
+        exitTextEditRef.current();
+      }
       if (!wantPan) {
         const h = hitHandle(s.x, s.y);
         if (h) { const l = sel()!; drag.current = h.type === "rotate" ? { mode: "rotate", l, orot: l.rotation, grab: Math.atan2(d.y - l.cy, d.x - l.cx) } : { mode: "scale", l, ow: l.w, oh: l.h, handle: h }; return; }
@@ -586,6 +632,11 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         hover(s); return;
       }
       const s = evPt(e), d = s2d(s.x, s.y);
+      if (g.mode === "textSelect") {
+        const el = layersRef.current.find((x) => x.id === editingRef.current), ta = textAreaRef.current;
+        if (el && ta) { const lp = toLocal(el, d.x, d.y); selectTextRange(ta, g.anchor, indexAt(textCaretLines(el), lp.x, lp.y)); caretOnRef.current = true; render(); }
+        return;
+      }
       if (g.mode === "erase") {
         // 沿上一點→現在點內插，避免快速拖曳留下斷點
         const lx = g.lx ?? d.x, ly = g.ly ?? d.y;
@@ -620,7 +671,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       else if (g.mode === "scale") {
         const lp = toLocal(g.l, d.x, d.y); const min = 8;
         const h = g.handle;
-        if (h && h.type === "resize" && h.axis === "x") { g.l.w = Math.max(min, Math.abs(lp.x) * 2); }          // 只改寬
+        if (h && h.type === "resize" && h.axis === "x" && g.l.isText && !g.l.canvas) resizeTextWidth(g.l, Math.max(min, Math.abs(lp.x) * 2), docRef.current.w);   // 文字：改框寬、字級不變、自動換行
+        else if (h && h.type === "resize" && h.axis === "x") { g.l.w = Math.max(min, Math.abs(lp.x) * 2); }          // 只改寬
         else if (h && h.type === "resize" && h.axis === "y") { g.l.h = Math.max(min, Math.abs(lp.y) * 2); }     // 只改高
         else if (e.shiftKey) { const f = Math.max(Math.abs(lp.x) / (g.ow / 2 || 1), Math.abs(lp.y) / (g.oh / 2 || 1), 0.02); g.l.w = g.ow * f; g.l.h = g.oh * f; }  // 角落＋Shift：等比整體縮放
         else { g.l.w = Math.max(min, Math.abs(lp.x) * 2); g.l.h = Math.max(min, Math.abs(lp.y) * 2); }           // 角落：自由改寬高（可壓扁）
@@ -633,23 +685,27 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       // 鋼筆：雙擊結束（不封閉）。雙擊會先觸發兩次按下，多出來的那個點拿掉
       if (toolRef.current === "pen") { penRef.current?.pts.pop(); finishPenRef.current(false); return; }
       const s = evPt(e), d = s2d(s.x, s.y);
+      // 改字中雙擊：選一個詞
+      if (editingRef.current) {
+        const el = layersRef.current.find((x) => x.id === editingRef.current), ta = textAreaRef.current;
+        if (el && ta) {
+          const lp = toLocal(el, d.x, d.y);
+          if (Math.abs(lp.x) <= el.w / 2 && Math.abs(lp.y) <= el.h / 2) {
+            const w = wordRangeAt(el.text, indexAt(textCaretLines(el), lp.x, lp.y));
+            ta.setSelectionRange(w.start, w.end); readSel(ta); render();
+          }
+        }
+        return;
+      }
+      // 雙擊文字：進入改字，游標放在點的位置（轉成圖片的藝術字不算）
       const hit = hitLayer(d.x, d.y);
-      if (hit?.isText && !hit.locked) {
-        selectOnly(hit.id);
-        const z = view.current.zoom;
-        const p = d2s(hit.cx, hit.cy);
-        const fs = hit.fontSize * (hit.w / (hit.naturalW || hit.w)) * z;
-        setEditingText({
-          id: hit.id, value: hit.text,
-          left: p.x - (hit.w * z) / 2, top: p.y - (hit.h * z) / 2,
-          width: hit.w * z, height: hit.h * z,
-          rotation: hit.rotation,
-          font: `${hit.fontWeight} ${fs}px ${hit.fontFamily}`,
-          color: hit.color, align: hit.align,
-        });
+      if (hit?.isText && !hit.locked && !hit.canvas) {
+        const lp = toLocal(hit, d.x, d.y), idx = indexAt(textCaretLines(hit), lp.x, lp.y);
+        startTextEditRef.current(hit, { start: idx, end: idx });
       }
     };
     const up = () => {
+      if (drag.current?.mode === "textSelect") { drag.current = null; if (textAreaRef.current) readSel(textAreaRef.current); return; }
       if (drag.current?.mode === "pen") { drag.current = null; return; }
       if (drag.current?.mode === "draw") { drag.current = null; finishStrokeRef.current(); return; }
       if (drag.current?.mode === "drawErase") { const removed = drag.current.removed; drag.current = null; if (removed) { markDirty(); refresh(); } render(); return; }
@@ -668,6 +724,10 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       if (drag.current && drag.current.l) { for (const item of drag.current.moving ?? [{ l: drag.current.l }]) item.l.thumb = makeThumb(item.l); if (drag.current.mode !== "pan") markDirty(); } drag.current = null; refresh(); render(); };
     const hover = (s: { x: number; y: number }) => {
       if (space.current) { cv.style.cursor = "grab"; return; }
+      if (editingRef.current) {
+        const el = layersRef.current.find((x) => x.id === editingRef.current), d = s2d(s.x, s.y);
+        if (el) { const lp = toLocal(el, d.x, d.y); if (Math.abs(lp.x) <= el.w / 2 && Math.abs(lp.y) <= el.h / 2) { cv.style.cursor = "text"; return; } }
+      }
       const h = hitHandle(s.x, s.y); if (h) { cv.style.cursor = h.type === "rotate" ? "crosshair" : h.type === "resize" ? (h.axis === "x" ? "ew-resize" : "ns-resize") : "nwse-resize"; return; }
       const d = s2d(s.x, s.y); cv.style.cursor = hitLayer(d.x, d.y) ? "move" : "default";
     };
@@ -1284,6 +1344,47 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     markDirty(); render(); refresh();
   }, [editingText, textSel, markDirty, render, refresh]);
 
+  /* ---------- 畫布上直接改字：開始／結束 ---------- */
+  /** 「選取的字」工具列放在文字框左上方（螢幕座標）。 */
+  const editToolbarPos = (l: EL) => { const c = layerCorners(l).map((p) => d2s(p.x, p.y)); return { left: Math.min(...c.map((p) => p.x)), top: Math.min(...c.map((p) => p.y)) }; };
+  const startTextEdit = (l: EL, range?: { start: number; end: number }) => {
+    if (l.locked || !l.isText || l.canvas) return;
+    selectOnly(l.id);
+    editingRef.current = l.id; editingOriginalRef.current = l.text;
+    // 框先貼齊字（以中心收，字不會跳）；最後沒改字就把框還原
+    editGeomRef.current = snapTextGeom(l);
+    fitTextBox(l, doc.w, true);
+    pendingCaretRef.current = range ?? { start: l.text.length, end: l.text.length };
+    caretOnRef.current = true; compStartRef.current = null;
+    setEditingText({ id: l.id, original: l.text, ...editToolbarPos(l) });
+    render();
+  };
+  /** 結束改字：有改才記一步「上一步」（整段改字算一步）；字全刪光就把這個文字圖層拿掉。 */
+  const exitTextEdit = () => {
+    const id = editingRef.current;
+    if (!id) return;
+    editingRef.current = null; compStartRef.current = null;
+    const l = layersRef.current.find((x) => x.id === id);
+    if (l && !l.text.trim()) { dropLayer(layersRef.current, id); selectedIdsRef.current = selectedIdsRef.current.filter((x) => x !== id); setSelectedIds(selectedIdsRef.current); setSelectedId(null); markDirty(); }
+    else if (l && l.text !== editingOriginalRef.current) { refreshThumb(l); markDirty(); }
+    else if (l && editGeomRef.current) restoreTextGeom(l, editGeomRef.current);
+    editGeomRef.current = null;
+    setEditingText(null); setTextSel(null); refresh(); render();
+  };
+  useEffect(() => { startTextEditRef.current = startTextEdit; exitTextEditRef.current = exitTextEdit; });
+  // 進入改字：把焦點給看不見的 textarea、放好游標；游標每 530ms 閃一下
+  const editingId = editingText?.id ?? null;
+  useEffect(() => {
+    if (!editingId) return;
+    const ta = textAreaRef.current;
+    if (ta && document.activeElement !== ta) ta.focus({ preventScroll: true });
+    const r = pendingCaretRef.current;
+    if (ta && r) { ta.setSelectionRange(r.start, r.end); pendingCaretRef.current = null; }
+    render();
+    const blink = setInterval(() => { caretOnRef.current = !caretOnRef.current; render(); }, 530);
+    return () => clearInterval(blink);
+  }, [editingId, render]);
+
   const PREVIEW_ID = "genfill_preview";
 
   /**
@@ -1442,6 +1543,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       rotation: sl.rotation ?? 0, visible: sl.visible !== false, locked: !!sl.locked,
       opacity: sl.opacity ?? 1, embeddedText: [], thumb: null, groupId: sl.groupId ?? null, clipTo: sl.clipTo ?? null,
       skewX: sl.skewX ?? 0, skewY: sl.skewY ?? 0,
+      ...(sl.wrap ? { wrap: true } : {}),
       ...(sl.paint?.length ? { paint: sl.paint } : {}),
       ...(sl.glow ? { glow: sl.glow } : {}),
       ...(sl.shadow ? { shadow: sl.shadow } : {}),
@@ -1720,7 +1822,10 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   /* ---------- text editing (content / colour / size / font) ---------- */
   const selEl = layersRef.current.find((l) => l.id === selectedId) ?? null;
   const updateText = (patch: Partial<EL>) => {
-    if (!selEl) return; Object.assign(selEl, patch); selEl.thumb = makeThumb(selEl); markDirty(); render(); refresh();
+    if (!selEl) return; Object.assign(selEl, patch);
+    // 右側「文字內容」跟畫布上改字一樣：框跟著字的長度調整（自動寬度）
+    if ("text" in patch || "wrap" in patch) fitTextBox(selEl, doc.w, true);
+    selEl.thumb = makeThumb(selEl); markDirty(); render(); refresh();
   };
   const updateShape = (patch: Partial<ShapeSpec>) => {
     if (!selEl || !selEl.shape) return; Object.assign(selEl.shape, patch); selEl.thumb = makeThumb(selEl); markDirty(); render(); refresh();
@@ -2118,38 +2223,50 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           </div>
         )}
 
-        {/* 畫布內文字編輯：貼合圖層位置／大小／旋轉／字級的輸入框，疊在 canvas 上。
-            打字即時更新圖層，Enter 換行，Esc 或點別處收起。
-            用 textarea 不用 contenteditable：換行行為本來就對，也不會帶進 HTML。 */}
+        {/* 畫布上改字的輸入框：看不見，只負責接收鍵盤和中文輸入法（字、游標、反白都是畫布畫的）。
+            不受控（defaultValue）＋固定 key：打字、組字時 React 重新 render 也不會重建節點或搶走焦點。
+            位置、大小由 render() 的 placeTextArea 跟著文字框移動，輸入法的選字視窗才會出現在字旁邊。 */}
         {editingText && (
           <textarea
+            ref={textAreaRef}
             key={editingText.id}
-            autoFocus
-            defaultValue={editingText.value}
+            defaultValue={editingText.original}
+            aria-label="編輯文字" spellCheck={false} autoComplete="off"
             onChange={(e) => {
-              const target = layersRef.current.find((x) => x.id === editingText.id);
-              if (!target) return;
-              target.text = e.target.value;
-              target.thumb = makeThumb(target);
-              markDirty(); render(); refresh();
+              const el = layersRef.current.find((x) => x.id === editingText.id);
+              if (!el) return;
+              applyTypedText(el, e.target.value, doc.w);
+              caretOnRef.current = true; render(); refresh();
             }}
-            onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") { setEditingText(null); setTextSel(null); } }}
-            // onSelect 在某些情況不會觸發（程式設定選取、部分輸入法），
-            // 所以 keyup／mouseup 也各讀一次，確保拖曳選字與 Shift＋方向鍵都抓得到。
-            onSelect={(e) => readSel(e.target as HTMLTextAreaElement)}
-            onKeyUp={(e) => readSel(e.target as HTMLTextAreaElement)}
-            onMouseUp={(e) => readSel(e.target as HTMLTextAreaElement)}
-            // 不在 blur 收起：點上方工具列會先觸發 blur，範圍就沒了。改成點畫布別處才收。
-            onBlur={(e) => { if (!(e.relatedTarget as HTMLElement | null)?.dataset?.runTool) { setEditingText(null); setTextSel(null); } }}
+            onCompositionStart={(e) => { compStartRef.current = e.currentTarget.selectionStart; render(); }}
+            onCompositionUpdate={() => { caretOnRef.current = true; render(); }}
+            onCompositionEnd={() => { compStartRef.current = null; render(); }}
+            onKeyDown={(e) => {
+              e.stopPropagation();   // 不要讓 Delete、方向鍵、⌘Z 之類的畫布快捷鍵生效
+              if (e.nativeEvent.isComposing || compStartRef.current != null) return;   // 中文還在選字：什麼都不攔
+              if (e.key === "Escape" || (e.key === "Enter" && (e.metaKey || e.ctrlKey))) { e.preventDefault(); exitTextEdit(); return; }
+              if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+                // 上下鍵要照畫布上的行走（textarea 自己的換行跟畫布不一樣）
+                const ta = e.currentTarget, el = layersRef.current.find((x) => x.id === editingText.id);
+                if (!el) return;
+                e.preventDefault();
+                const back = ta.selectionDirection === "backward";
+                const focus = back ? ta.selectionStart : ta.selectionEnd, anchor = back ? ta.selectionEnd : ta.selectionStart;
+                const next = verticalMove(textCaretLines(el), focus, e.key === "ArrowUp" ? -1 : 1);
+                selectTextRange(ta, e.shiftKey ? anchor : next, next);
+                caretOnRef.current = true; readSel(ta); render();
+              }
+            }}
+            // onSelect 在某些情況不會觸發（程式設定選取、部分輸入法），所以 keyup／mouseup 也各讀一次
+            onSelect={(e) => { caretOnRef.current = true; readSel(e.target as HTMLTextAreaElement); render(); }}
+            onKeyUp={(e) => { readSel(e.target as HTMLTextAreaElement); render(); }}
+            // 點上方「選取的字」工具列會先 blur：那些按鈕帶 data-run-tool，不要因此結束改字
+            onBlur={(e) => { if (!(e.relatedTarget as HTMLElement | null)?.dataset?.runTool) exitTextEdit(); }}
             style={{
-              position: "absolute",
-              left: editingText.left, top: editingText.top,
-              width: editingText.width, height: editingText.height,
-              transform: `rotate(${editingText.rotation}rad)`, transformOrigin: "center",
-              font: editingText.font, lineHeight: 1.25,
-              color: editingText.color, textAlign: editingText.align,
-              background: "rgba(255,255,255,.92)", border: "2px solid #7c3aed", borderRadius: 4,
-              padding: 0, margin: 0, resize: "none", outline: "none", overflow: "hidden", zIndex: 40,
+              position: "absolute", left: 0, top: 0, opacity: 0, pointerEvents: "none",
+              padding: 0, margin: 0, border: "none", outline: "none", resize: "none",
+              background: "transparent", color: "transparent", caretColor: "transparent",
+              whiteSpace: "pre", zIndex: 1,
             }} />
         )}
         </div>
@@ -2224,6 +2341,15 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                       rows={Math.min(6, Math.max(2, selEl.text.split("\n").length + 1))}
                       placeholder="換行請按 Enter"
                       style={{ ...S.rinput, height: "auto", minHeight: 62, padding: "8px 10px", lineHeight: 1.5, resize: "vertical" }} />
+                    <div style={{ fontSize: 11, color: "#9ca3af", margin: "4px 0 0" }}>也可以直接在畫布上雙擊文字來改</div>
+                    {!selEl.textLayout && !(selEl.fx?.warp && selEl.fx.warp !== "none") && (
+                      <div style={{ display: "flex", gap: 6, margin: "8px 0 2px" }} title="自動寬度：框跟著字變寬；固定寬度：字在框裡自動換行（拖文字框左右兩邊也會變成固定寬度）">
+                        {([[false, "自動寬度"], [true, "固定寬度・自動換行"]] as const).map(([w, label]) => (
+                          <button key={label} onClick={() => updateText({ wrap: w })}
+                            style={{ ...S.rbtn, flex: 1, height: 30, fontSize: 12, ...(!!selEl.wrap === w ? { border: "1px solid #7c3aed", color: "#6d28d9", background: "#f5f3ff" } : {}) }}>{label}</button>
+                        ))}
+                      </div>
+                    )}
                     <label style={S.rlabel}>字體</label>
                     {/* 這三個家族由 app/layout.tsx 以 next/font 實際載入（見該檔註解）。
                         先前選單裡的 Manrope 根本沒被載入，選了等於沒選；
@@ -2728,7 +2854,7 @@ function psdTextData(l: EL) {
   const lineH = fs * (l.textLayout?.lineHeight ?? 1.25);
   const m = document.createElement("canvas").getContext("2d")!;
   m.font = `${l.fontWeight} ${fs}px ${l.fontFamily}`;
-  const lines = l.textLayout ? Math.max(1, layoutText(l.text, l.w, (t) => m.measureText(t).width).length) : l.text.split("\n").length;
+  const lines = l.textLayout ? Math.max(1, layoutText(l.text, l.w, (t) => m.measureText(t).width).length) : Math.max(1, textRanges(l).length);
   const blockH = lines * lineH;
   const cos = Math.cos(l.rotation), sin = Math.sin(l.rotation);
   const style = (st: { fontSize: number; color: { r: number; g: number; b: number }; fontWeight: number }) => ({
@@ -2858,6 +2984,135 @@ function toHex(c: string): string {
   return m ? "#" + [1, 2, 3].map((i) => Number(m[i]).toString(16).padStart(2, "0")).join("") : "#241f47";
 }
 /** Draw a vector layer. Assumes ctx is already translated to the layer centre + rotated. */
+/** 設定 textarea 的選取範圍：focus 在前面就是往回選（Shift＋方向鍵才會從對的那一端繼續延伸）。 */
+function selectTextRange(ta: HTMLTextAreaElement, anchor: number, focus: number) {
+  ta.setSelectionRange(Math.min(anchor, focus), Math.max(anchor, focus), focus < anchor ? "backward" : "forward");
+}
+/** 看不見的 textarea 蓋在文字框上（螢幕座標、跟著旋轉），輸入法的選字視窗才會在字旁邊。 */
+function placeTextArea(ta: HTMLTextAreaElement, l: EL, v: { zoom: number; panX: number; panY: number }) {
+  const z = v.zoom, fs = l.fontSize * (l.w / (l.naturalW || l.w)) * z;
+  const st = ta.style;
+  st.left = `${l.cx * z + v.panX - (l.w * z) / 2}px`; st.top = `${l.cy * z + v.panY - (l.h * z) / 2}px`;
+  st.width = `${Math.max(4, l.w * z)}px`; st.height = `${Math.max(4, l.h * z)}px`;
+  st.transform = `rotate(${l.rotation}rad)`; st.fontSize = `${Math.max(8, fs)}px`; st.lineHeight = "1.25";
+  st.fontFamily = l.fontFamily; st.textAlign = l.align;
+}
+/** 打字：換掉文字、框跟著字調整。分段樣式超出新長度的部分截掉。 */
+function applyTypedText(l: EL, text: string, docW: number) {
+  if (l.runs?.length) l.runs = shiftRuns(l.runs, l.text, text);
+  l.text = text;
+  fitTextBox(l, docW);
+}
+/** 拖文字框左右兩邊：改框寬、字級不變，改成固定寬度自動換行，高度跟著行數長。 */
+function resizeTextWidth(l: EL, newW: number, docW: number) {
+  const k = l.w / (l.naturalW || l.w);
+  l.w = newW; l.naturalW = newW / k;
+  if (!l.textLayout) l.wrap = true;
+  fitTextBox(l, docW);
+}
+type TextGeom = Pick<EL, "cx" | "cy" | "w" | "h" | "naturalW" | "wrap">;
+function snapTextGeom(l: EL): TextGeom { return { cx: l.cx, cy: l.cy, w: l.w, h: l.h, naturalW: l.naturalW, wrap: l.wrap }; }
+function restoreTextGeom(l: EL, g: TextGeom) { Object.assign(l, g); }
+function dropLayer(layers: EL[], id: string) {
+  const i = layers.findIndex((l) => l.id === id);
+  if (i >= 0) layers.splice(i, 1);
+}
+function refreshThumb(l: EL) { l.thumb = makeThumb(l); }
+
+/* ---------- 文字：量字、斷行、游標（編輯時游標、反白都由畫布自己畫，位置要跟畫字一模一樣） ---------- */
+let measureScratch: CanvasRenderingContext2D | null = null;
+/** 量某一段字（[start, end)）的寬度：字型、字距、分段樣式都照 drawTextEl／drawRunText。 */
+function textMeasurer(l: EL): (start: number, end: number) => number {
+  const ctx = measureScratch ?? (measureScratch = document.createElement("canvas").getContext("2d")!);
+  const scale = l.w / (l.naturalW || l.w), fx = l.fx;
+  const spacing = fx?.letterSpacing != null ? fx.letterSpacing : l.textLayout ? l.textLayout.letterSpacing * scale : 0;
+  try { ctx.letterSpacing = `${spacing}px`; } catch { /* older canvas */ }
+  const runs = l.textLayout ? [] : (l.runs ?? []);
+  const styleAt = (i: number) => { for (let r = runs.length - 1; r >= 0; r -= 1) if (i >= runs[r].start && i < runs[r].end) return runs[r]; return undefined; };
+  const fontFor = (st?: TextRun) => `${fx?.italic ? "italic " : ""}${st?.fontWeight ?? l.fontWeight} ${(st?.fontSize ?? l.fontSize) * scale}px ${l.fontFamily}`;
+  return (start, end) => {
+    if (end <= start) return 0;
+    if (!runs.length) { ctx.font = fontFor(); return ctx.measureText(l.text.slice(start, end)).width; }
+    let w = 0;
+    for (let i = start; i < end;) {
+      const st = styleAt(i); let j = i + 1;
+      while (j < end && styleAt(j) === st) j += 1;
+      ctx.font = fontFor(st); w += ctx.measureText(l.text.slice(i, j)).width; i = j;
+    }
+    return w;
+  };
+}
+/** 文字圖層分成哪幾行：有 textLayout 或固定寬度（wrap）就照框寬自動換行，不然只在換行字元處斷。 */
+function textRanges(l: EL): TextLineRange[] {
+  const wrapW = l.textLayout || l.wrap ? l.w : null;
+  return wrapRanges(l.text, wrapW, wrapW ? textMeasurer(l) : () => 0);
+}
+/** 每一行、每個字縫在圖層座標裡的位置（游標、反白、點擊定位用）。 */
+function textCaretLines(l: EL): CaretLine[] {
+  const fs = l.fontSize * (l.w / (l.naturalW || l.w));
+  return caretLines({
+    text: l.text, ranges: textRanges(l), w: l.w, h: l.h, align: l.align,
+    lineHeight: fs * (l.textLayout?.lineHeight ?? 1.25), vertical: l.textLayout ? "top" : "center", measureRange: textMeasurer(l),
+  });
+}
+/** 改文字框寬度但字級不變（字級跟 w/naturalW 綁在一起，所以兩個一起改）；對齊的那一邊不動。 */
+function setTextWidth(l: EL, newW: number) {
+  const k = l.w / (l.naturalW || l.w);
+  const dx = anchorShift(l.align, l.w, newW);
+  l.cx += dx * Math.cos(l.rotation); l.cy += dx * Math.sin(l.rotation);
+  l.w = newW; l.naturalW = newW / k;
+}
+/**
+ * 打字後讓框貼著字：自動寬度的框跟著最長的那行變寬／變窄（碰到畫布邊緣就改成固定寬度、自動換行），
+ * 高度跟著行數；固定寬度的只會長高，不會把字裁掉。彎曲字不動（它自己會縮進框裡）。
+ */
+function fitTextBox(l: EL, docW: number, keepCenter = false) {
+  if (!l.isText || l.canvas || (l.fx?.warp && l.fx.warp !== "none")) return;
+  const fs = l.fontSize * (l.w / (l.naturalW || l.w));
+  const lh = fs * (l.textLayout?.lineHeight ?? 1.25), pad = fs * 0.15;
+  if (!l.textLayout && !l.wrap) {
+    const m = textMeasurer(l);
+    const r = autoWidth({ need: widestLine(wrapRanges(l.text, null, m), m) + pad * 2, cx: l.cx, w: l.w, docW, align: l.align, rotated: Math.abs(l.rotation) > 1e-3, min: fs * 0.6, margin: docW * 0.03 });
+    setTextWidth(l, r.w);
+    if (r.fixed) l.wrap = true;
+  }
+  const needH = Math.max(1, textRanges(l).length) * lh + pad;
+  // 高度剛好包住字。打字時上緣不動（多一行往下長、少一行往上收，跟 Canva 一樣，不會蓋到上面的東西）；
+  // keepCenter＝以中心收放：剛進入編輯時用，範本的框常常比字高很多，收成剛好時字才不會跳上去。
+  const setH = (h: number) => {
+    if (!keepCenter) { const dy = (h - l.h) / 2; l.cx -= dy * Math.sin(l.rotation); l.cy += dy * Math.cos(l.rotation); }
+    l.h = h;
+  };
+  if (l.textLayout) { if (needH > l.h) setH(needH); }   // 從上往下排的字：只長不縮（框是版面設計好的）
+  else if (Math.abs(needH - l.h) > 0.5) setH(needH);
+}
+/** 編輯中的文字：細虛線框、選取反白、輸入法組字底線、游標（都在圖層座標裡畫）。 */
+function drawTextEditing(ctx: CanvasRenderingContext2D, l: EL, sel: { start: number; end: number }, comp: number | null, caretOn: boolean, zoom: number) {
+  const fs = l.fontSize * (l.w / (l.naturalW || l.w));
+  const lines = textCaretLines(l);
+  ctx.save(); applyLayerTransform(ctx, l);
+  ctx.setLineDash([4 / zoom, 3 / zoom]); ctx.lineWidth = 1 / zoom; ctx.strokeStyle = "rgba(124,58,237,.75)";
+  ctx.strokeRect(-l.w / 2, -l.h / 2, l.w, l.h); ctx.setLineDash([]);
+  ctx.fillStyle = "rgba(124,58,237,.28)";
+  for (const sp of selectionSpans(lines, sel.start, sel.end, fs * 0.3)) ctx.fillRect(sp.x0, sp.y - fs * 0.62, sp.x1 - sp.x0, fs * 1.24);
+  if (comp != null && sel.end > comp) {
+    ctx.fillStyle = "#7c3aed";
+    for (const sp of selectionSpans(lines, comp, sel.end, 0)) ctx.fillRect(sp.x0, sp.y + fs * 0.56, sp.x1 - sp.x0, Math.max(2 / zoom, fs * 0.05));
+  }
+  if (caretOn && sel.start === sel.end) {
+    const li = lines.findIndex((ln) => sel.end <= ln.end), ln = lines[li < 0 ? lines.length - 1 : li];
+    if (ln) { ctx.fillStyle = "#7c3aed"; ctx.fillRect(ln.x[Math.max(0, Math.min(ln.x.length - 1, sel.end - ln.start))] - 1 / zoom, ln.y - fs * 0.62, 2 / zoom, fs * 1.24); }
+  }
+  ctx.restore();
+}
+/** 雙擊選一個詞：中文會切成詞、英文是一個單字。 */
+function wordRangeAt(text: string, index: number): { start: number; end: number } {
+  for (const seg of new Intl.Segmenter(undefined, { granularity: "word" }).segment(text)) {
+    if (index >= seg.index && index <= seg.index + seg.segment.length && seg.segment.trim()) return { start: seg.index, end: seg.index + seg.segment.length };
+  }
+  return { start: index, end: index };
+}
+
 function drawTextEl(ctx: CanvasRenderingContext2D, l: EL) {
   const fx = l.fx;
   const fs = l.fontSize * (l.w / (l.naturalW || l.w));
@@ -2873,7 +3128,9 @@ function drawTextEl(ctx: CanvasRenderingContext2D, l: EL) {
   // 沒有 textLayout 的文字圖層（自己加的、範本帶來的）原本直接 fillText 整串，
   // 所以使用者打了換行畫布上還是連成一行。這裡自己斷行並上下置中排版。
   // 有 textLayout 的走 drawEditableText，它本來就會處理段落。
-  const lines = l.textLayout ? null : l.text.split("\n");
+  // 固定寬度（wrap）的文字在框裡自動換行；斷行跟游標共用 textRanges，畫出來的位置才對得上
+  const ranges = l.textLayout ? null : textRanges(l);
+  const lines = ranges ? ranges.map((r) => l.text.slice(r.start, r.end)) : null;
   const lineHeight = fs * 1.25;
   const firstY = lines ? -((lines.length - 1) * lineHeight) / 2 : 0;
 
@@ -2887,7 +3144,7 @@ function drawTextEl(ctx: CanvasRenderingContext2D, l: EL) {
   if (l.textLayout) {
     drawEditableText(ctx, { text: l.text, width: l.w, height: l.h, fontSize: fs, align: l.align, layout: l.textLayout, stroke: Boolean(fx?.strokeW) });
   } else if (l.runs?.length) {
-    drawRunText(ctx, l, lines ?? [l.text], fs, lineHeight, firstY, fill);
+    drawRunText(ctx, l, ranges ?? [{ start: 0, end: l.text.length }], fs, lineHeight, firstY, fill);
   } else {
     (lines ?? [l.text]).forEach((line, i) => ctx.fillText(line, tx, firstY + i * lineHeight));
   }
@@ -2902,7 +3159,7 @@ function drawTextEl(ctx: CanvasRenderingContext2D, l: EL) {
  * 否則放大的字會上下亂跳。
  */
 function drawRunText(
-  ctx: CanvasRenderingContext2D, l: EL, lines: string[],
+  ctx: CanvasRenderingContext2D, l: EL, ranges: TextLineRange[],
   baseFs: number, lineHeight: number, firstY: number, fill: string | CanvasGradient,
 ) {
   const runs = l.runs ?? [];
@@ -2918,8 +3175,8 @@ function drawRunText(
   const fontFor = (st?: TextRun) =>
     `${fx?.italic ? "italic " : ""}${st?.fontWeight ?? l.fontWeight} ${(st?.fontSize ?? l.fontSize) * scale}px ${l.fontFamily}`;
 
-  let offset = 0;
-  lines.forEach((line, li) => {
+  ranges.forEach((range, li) => {
+    const line = l.text.slice(range.start, range.end), offset = range.start;
     // 依樣式把這一行切成連續的小片
     const pieces: { text: string; st?: TextRun }[] = [];
     for (let i = 0; i < line.length; i += 1) {
@@ -2948,7 +3205,6 @@ function drawRunText(
       x += widths[pi];
     });
     ctx.restore();
-    offset += line.length + 1;   // +1 是被 split 掉的換行字元
   });
 }
 
@@ -2997,7 +3253,7 @@ function serializeEls(els: EL[]): SavedLayer[] {
     ...(l.glow ? { glow: { ...l.glow } } : {}),
     ...(l.shadow ? { shadow: { ...l.shadow } } : {}),
     ...(l.isText
-      ? { isText: true, text: l.text, color: l.color, fontSize: l.fontSize * (l.w / (l.naturalW || l.w)), fontFamily: l.fontFamily, fontWeight: l.fontWeight, align: l.align, ...(l.fx ? { fx: l.fx } : {}), ...(l.textLayout ? { textLayout: { ...l.textLayout, letterSpacing: l.textLayout.letterSpacing * (l.w / (l.naturalW || l.w)) } } : {}),
+      ? { isText: true, ...(l.wrap ? { wrap: true } : {}), text: l.text, color: l.color, fontSize: l.fontSize * (l.w / (l.naturalW || l.w)), fontFamily: l.fontFamily, fontWeight: l.fontWeight, align: l.align, ...(l.fx ? { fx: l.fx } : {}), ...(l.textLayout ? { textLayout: { ...l.textLayout, letterSpacing: l.textLayout.letterSpacing * (l.w / (l.naturalW || l.w)) } } : {}),
           // 分段樣式的字級跟著圖層縮放一起換算，否則存檔重開會跑掉
           ...(l.runs?.length ? { runs: l.runs.map((r) => ({ ...r, ...(r.fontSize ? { fontSize: r.fontSize * (l.w / (l.naturalW || l.w)) } : {}) })) } : {}) }
       : l.shape

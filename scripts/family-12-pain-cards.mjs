@@ -5,7 +5,14 @@
 // 三張情境照卡片，每張左上一條斜的白色直書標籤點出痛點，下面一顆紫色膠囊按鈕。
 // 參考：瘦身品牌「夏天甩肉心好累」貼文（2026-09-29 使用者提供）。
 // 插畫人物、三張情境照是 AI 生成的示意素材，點點底是程式畫的；套用後換成自己的圖與文字。
+//
+// 2026-09-29 使用者在編輯器裡改過（人物換成黑髮、拿掉淡淡的氛圍人物）存成範本，要以那一版為準：
+// 實際的圖層改讀 family-12-pain-cards.layers.json（使用者存的那份；人物圖原本嵌在資料裡，已改放 Blob），
+// 下面的 draftLayers 是最初的版本，留著當參考。
+import { readFileSync } from "node:fs";
 import { L, S, DEG } from "./template-kit.mjs";
+
+const SNAPSHOT = JSON.parse(readFileSync(new URL("./family-12-pain-cards.layers.json", import.meta.url), "utf8"));
 
 const PURPLE = "#7b5fc8";
 const LILAC = "#a794e6";
@@ -53,7 +60,8 @@ export const FAMILY = [
         "上半部用一個有表情的插畫人物把情緒帶出來（累、煩），白色大標說出心聲、淡黃 hashtag 條把話題收成一句；右邊斜的淺紫色塊和放大的淡淡人物讓畫面有層次但不搶字。下半部三張情境照各配一條斜的直書標籤，像貼上去的便條，一眼看出三種痛點，每張下面都有同一顆按鈕引導往下看解法。",
       recommendedFor: "瘦身、保健、生活困擾型的痛點貼文、輪播封面",
     },
-    layers: () => [
+    layers: () => structuredClone(SNAPSHOT.layers),
+    draftLayers: () => [
       L.bg(PURPLE, "#6f53bd"),
       // 右邊斜的淺紫色塊
       poly("斜色塊", 620, 0, 580, 800, LILAC, [{ x: -0.1, y: -0.5 }, { x: 0.5, y: -0.5 }, { x: 0.5, y: 0.5 }, { x: -0.5, y: 0.5 }], { opacity: 0.85 }),

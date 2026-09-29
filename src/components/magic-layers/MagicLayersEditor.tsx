@@ -978,15 +978,32 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     } finally { setAdding(false); }
   }, [adding, refresh, render]);
 
-  /* ---------- AI 換圖：把選到的圖換成生成的新圖（框不動） ---------- */
-  const replaceLayerImage = useCallback(async (id: string, v: ReplaceVariant, cutout: boolean) => {
+  /* ---------- AI 換圖：先在畫布上預覽，按確定才算數（框不動） ---------- */
+  // 預覽時直接換掉圖層的圖，但不記進上一步；原本的圖先存起來，取消就換回去。
+  const replacePreview = useRef<{ id: string; snap: ImageSnap } | null>(null);
+  const previewLayerImage = useCallback(async (id: string, v: ReplaceVariant, cutout: boolean) => {
     const target = layersRef.current.find((l) => l.id === id);
     if (!target) throw new Error("找不到這個圖層");
     const canvas = await loadToCanvas(v.url);
     if (!canvas) throw new Error("讀取新圖失敗");
+    if (replacePreview.current?.id !== id) replacePreview.current = { id, snap: snapImage(target) };
+    else restoreImage(target, replacePreview.current.snap);   // 換另一張之前先回到原本的框，去背的圖才會縮進同一個框
     applyReplacedImage(target, canvas, v.url, cutout);
+    refresh(); render();
+  }, [refresh, render]);
+  const confirmLayerImage = useCallback(() => {
+    if (!replacePreview.current) return;
+    replacePreview.current = null;
     markDirty(); refresh(); render();
   }, [markDirty, refresh, render]);
+  const cancelLayerImage = useCallback(() => {
+    const p = replacePreview.current;
+    if (!p) return;
+    replacePreview.current = null;
+    const target = layersRef.current.find((l) => l.id === p.id);
+    if (target) restoreImage(target, p.snap);
+    refresh(); render();
+  }, [refresh, render]);
 
   /* ---------- insert tools: image / upload / text / logo ---------- */
   const FONT = "'Noto Sans TC',system-ui,sans-serif";
@@ -2398,7 +2415,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                   <ReplaceImagePanel key={selEl.id} layerId={selEl.id} aspect={selEl.w / (selEl.h || 1)}
                     isCutout={() => { const l = layersRef.current.find((x) => x.id === selectedIdsRef.current[0]); return !!l?.canvas && l.type !== "background" && hasTransparency(l.canvas); }}
                     getSource={(cutout) => { const l = layersRef.current.find((x) => x.id === selectedIdsRef.current[0]); return l?.canvas ? sourceDataUrl(l.canvas, cutout) : null; }}
-                    onApply={(v, cutout) => replaceLayerImage(selEl.id, v, cutout)} />
+                    onPreview={(v, cutout) => previewLayerImage(selEl.id, v, cutout)}
+                    onConfirm={confirmLayerImage} onCancel={cancelLayerImage} />
                 )}
                 {selEl.canvas && !selEl.isText && !selEl.shape && selEl.type !== "background" && (
                   <ClipPanel
@@ -3309,18 +3327,34 @@ function applyReplacedImage(target: EL, canvas: HTMLCanvasElement, url: string, 
 }
 
 type ReplaceVariant = { url: string; width: number; height: number };
+type ImageSnap = Pick<EL, "canvas" | "src" | "w" | "h" | "naturalW" | "naturalH" | "thumb">;
+function snapImage(l: EL): ImageSnap {
+  return { canvas: l.canvas, src: l.src, w: l.w, h: l.h, naturalW: l.naturalW, naturalH: l.naturalH, thumb: l.thumb };
+}
+function restoreImage(l: EL, s: ImageSnap) { Object.assign(l, s); }
 
 /**
  * 右側面板「AI 換圖」：選一張圖、描述想要的畫面，出兩張挑一張換上（位置、大小、效果都保留）。
  * 「改這張」拿原圖當參考只改描述的部分；「全新生成」照描述重畫。
  */
-function ReplaceImagePanel({ layerId, aspect, getSource, isCutout, onApply }: {
+function ReplaceImagePanel({ layerId, aspect: frameAspect, getSource, isCutout, onPreview, onConfirm, onCancel }: {
   layerId: string; aspect: number;
   getSource: (cutout: boolean) => string | null;
   isCutout: () => boolean;
-  onApply: (v: ReplaceVariant, cutout: boolean) => Promise<void>;
+  /** 在畫布上先換上看看（不記進上一步）。 */
+  onPreview: (v: ReplaceVariant, cutout: boolean) => Promise<void>;
+  onConfirm: () => void;
+  /** 換回原本的圖。 */
+  onCancel: () => void;
 }) {
+  // 預覽去背的圖時框會變，比例要用一開始的，重新生成才會照原本的框
+  const [aspect] = useState(frameAspect);
   const [prompt, setPrompt] = useState("");
+  const [picked, setPicked] = useState<string | null>(null);
+  // 預覽中換到別的圖層（這個面板被拆掉）就換回原圖，不能把沒確定的圖留在畫布上
+  const cancelRef = useRef(onCancel);
+  useEffect(() => { cancelRef.current = onCancel; }, [onCancel]);
+  useEffect(() => () => cancelRef.current(), []);
   const [mode, setMode] = useState<"edit" | "new">("edit");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -3329,6 +3363,7 @@ function ReplaceImagePanel({ layerId, aspect, getSource, isCutout, onApply }: {
 
   const run = async () => {
     if (busy || !prompt.trim()) return;
+    if (picked) { onCancel(); setPicked(null); }
     setBusy(true); setErr(null); setResult(null);
     try {
       const cutout = isCutout();
@@ -3346,10 +3381,12 @@ function ReplaceImagePanel({ layerId, aspect, getSource, isCutout, onApply }: {
   };
 
   const pick = async (v: ReplaceVariant) => {
-    if (!shown) return;
-    try { await onApply(v, shown.cutout); setResult(null); }
+    if (!shown || busy) return;
+    try { await onPreview(v, shown.cutout); setPicked(v.url); }
     catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   };
+  const confirm = () => { onConfirm(); setPicked(null); setResult(null); };
+  const discard = () => { onCancel(); setPicked(null); setResult(null); };
 
   const modeBtn = (m: "edit" | "new", label: string) => (
     <button onClick={() => setMode(m)} disabled={busy}
@@ -3380,18 +3417,23 @@ function ReplaceImagePanel({ layerId, aspect, getSource, isCutout, onApply }: {
       {err && <div role="alert" style={{ marginTop: 8, fontSize: 11, color: "#b91c1c", background: "#fef2f2", borderRadius: 8, padding: "6px 8px", lineHeight: 1.5 }}>{err}</div>}
       {shown && (
         <>
-          <div style={{ fontSize: 11, color: "#6b7280", margin: "10px 0 6px" }}>點一張換上（可以按上一步退回原圖）</div>
+          <div style={{ fontSize: 11, color: "#6b7280", margin: "10px 0 6px" }}>{picked ? "畫布上是預覽，滿意再按「確定套用」" : "點一張先在畫布上看看"}</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             {shown.variants.map((v) => (
-              <button key={v.url} onClick={() => void pick(v)} title="換成這張"
-                style={{ padding: 0, border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden", cursor: "pointer", aspectRatio: String(aspect), display: "flex", alignItems: "center", justifyContent: "center",
+              <button key={v.url} onClick={() => void pick(v)} title="在畫布上預覽這張" aria-pressed={picked === v.url}
+                style={{ padding: 0, border: picked === v.url ? "2px solid #7c3aed" : "1px solid #e5e7eb", boxShadow: picked === v.url ? "0 0 0 3px #ede9fe" : "none", borderRadius: 8, overflow: "hidden", cursor: "pointer", aspectRatio: String(aspect), display: "flex", alignItems: "center", justifyContent: "center",
                   background: shown.cutout ? "repeating-conic-gradient(#f3f4f6 0% 25%, #fff 0% 50%) 50% / 12px 12px" : "#fff" }}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={v.url} alt="生成結果" style={{ width: "100%", height: "100%", objectFit: shown.cutout ? "contain" : "cover", display: "block" }} />
               </button>
             ))}
           </div>
-          <button onClick={() => setResult(null)} style={{ ...S.rbtn, width: "100%", marginTop: 8 }}>都不要</button>
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <button onClick={discard} style={{ ...S.rbtn, flex: 1 }}>{picked ? "取消，用原圖" : "都不要"}</button>
+            <button onClick={confirm} disabled={!picked}
+              style={{ flex: 1, height: 32, borderRadius: 8, border: "none", fontSize: 12, fontWeight: 700, color: "#fff",
+                cursor: picked ? "pointer" : "default", background: picked ? "#7c3aed" : "#c4b5fd" }}>確定套用</button>
+          </div>
         </>
       )}
       <p style={{ margin: "8px 0 0", fontSize: 11, color: "#9ca3af", lineHeight: 1.5 }}>位置、大小、陰影等效果都會保留；去背的圖換上後也會自動去背。</p>

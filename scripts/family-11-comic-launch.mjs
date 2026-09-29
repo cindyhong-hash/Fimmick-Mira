@@ -5,7 +5,13 @@
 // 最下面一疊資料夾紙片壓住畫面，寫「敬請期待」。
 // 參考：保養品牌新品預告「抗糖招募令」貼文（2026-09-29 使用者提供）。
 // 霜罐是 AI 生成後去背的示意商品、網點格是程式畫的；套用後換成自己的商品與文字。
+//
+// 2026-09-29 使用者在編輯器裡把這張微調過、存成範本，要以那一版為準：
+// 實際的圖層改讀 family-11-comic-launch.layers.json（使用者存的那份），下面的 draftLayers 是最初的版本，留著當參考。
+import { readFileSync } from "node:fs";
 import { L, DEG } from "./template-kit.mjs";
+
+const SNAPSHOT = JSON.parse(readFileSync(new URL("./family-11-comic-launch.layers.json", import.meta.url), "utf8"));
 
 const W = 1200, H = 1600;
 const SERIF = "'Noto Serif TC',serif";
@@ -46,7 +52,8 @@ export const FAMILY = [
         "報紙＋漫畫的語言讓「預告」有話題感：左上紫色對話框和外框硬陰影大字一左一右撐起標題；斜緞帶把視線帶到咖啡色大標，貓掌是可愛的記憶點；右下網點格把商品框成漫畫格，最下面一疊紙片壓住畫面、放「敬請期待」收尾。主色只用紫＋咖啡＋米色。",
       recommendedFor: "新品預告、活動招募、品牌聯名揭曉",
     },
-    layers: () => [
+    layers: () => structuredClone(SNAPSHOT.layers),
+    draftLayers: () => [
       L.shape("背景", 0, 0, W, H, { kind: "rect", fill: "#f3e3bf", gradient: { axis: "vertical", from: "#f3e3bf", to: "#e7cf9d" } }, { type: "background", locked: true }),
       // 後面一張紙（左邊露出一截）＋主報紙（微微斜放、右邊破出畫面）
       L.shape("後面的紙", -90, 110, 340, 1040, { kind: "rect", fill: "#efe3c6", stroke: "#cfc8e8", strokeWidth: 4 }, { rotation: -4 * DEG }),

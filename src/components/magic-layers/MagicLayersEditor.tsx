@@ -13,7 +13,8 @@ import { distanceToPolyline, drawPaint, paintHits, samplePath, smoothStroke, str
    pipeline; extracts each layer along its contour (no rectangle crops).
    Ported from the verified vanilla engine.
    ============================================================ */
-import { drawEditableText, readTextLayout, DEFAULT_TEXT_LAYOUT, type TextLayout } from "@/lib/magic-layers/editable-text.ts";
+import { drawEditableText, layoutText, readTextLayout, DEFAULT_TEXT_LAYOUT, type TextLayout } from "@/lib/magic-layers/editable-text.ts";
+import { hexToRgb, isEditableInPsd, psdFileName, psdFontName, psdTextEffects, styleRunsFor } from "@/lib/magic-layers/psd-export.ts";
 import { useBrandFonts } from "@/lib/fonts/useBrandFonts";
 import type { PaintStroke, SavedLayer, TextFx, TextRun, ShapeKind, ShapeSpec } from "@/lib/magic-layers/saved-layer.ts";
 export type { SavedLayer } from "@/lib/magic-layers/saved-layer.ts";
@@ -978,6 +979,23 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     } finally { setAdding(false); }
   }, [adding, refresh, render]);
 
+  /* ---------- 下載 PSD ---------- */
+  const [psdBusy, setPsdBusy] = useState(false);
+  const downloadPsd = useCallback(async () => {
+    if (psdBusy) return;
+    setPsdBusy(true);
+    try {
+      const { writePsd } = await import("ag-psd");   // 很大，按下去才載入
+      const psd = buildPsdDocument(layersRef.current, doc);
+      const buf = writePsd(psd as unknown as Parameters<typeof writePsd>[0], { noBackground: true, generateThumbnail: true });
+      const url = URL.createObjectURL(new Blob([buf], { type: "image/vnd.adobe.photoshop" }));
+      const a = document.createElement("a"); a.href = url; a.download = psdFileName(name); a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    } catch (err) {
+      alert("下載 PSD 失敗：" + (err instanceof Error ? err.message : String(err)));
+    } finally { setPsdBusy(false); }
+  }, [psdBusy, doc, name]);
+
   /* ---------- AI 換圖：先在畫布上預覽，按確定才算數（框不動） ---------- */
   // 預覽時直接換掉圖層的圖，但不記進上一步；原本的圖先存起來，取消就換回去。
   const replacePreview = useRef<{ id: string; snap: ImageSnap } | null>(null);
@@ -1847,6 +1865,10 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           <>
             <span style={S.divider} />
             {(saving || saved) && <span aria-live="polite" style={{ fontSize: 12, color: saved ? "#16a34a" : "#9ca3af" }}>{saving ? "儲存中…" : "✓ 已自動儲存"}</span>}
+            <button style={S.tbtn} onClick={() => void downloadPsd()} disabled={psdBusy}
+              title="下載成 Photoshop 檔（.psd）：每個圖層分開，文字可以直接改字；Illustrator 也能打開">
+              <Layers size={15} />{psdBusy ? "產生中…" : "下載 PSD"}
+            </button>
             <button style={{ ...S.tbtn, border: "1px solid #7c3aed", background: "#7c3aed", color: "#fff" }} onClick={() => doSave(true)} disabled={saving} title="下載成 PNG，並存進素材庫"><Download size={15} />下載並存入素材庫</button>
           </>
         )}
@@ -2673,6 +2695,88 @@ function confBadge(c: number) {
   return <span style={{ fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 20, background: ai ? "rgba(255,177,78,.16)" : "rgba(255,93,108,.16)", color: ai ? "#ffb14e" : "#ff5d6c" }}>{ai ? "AI 判斷" : "需確認"}</span>;
 }
 /** 畫一個圖層的內容（已經換到圖層座標系）：圖片／文字／形狀，再加上畫在圖片上的筆畫。 */
+/* ---------- 下載 PSD：每個圖層一個 PS 圖層（寫檔的部分見 psd-export.ts 的說明） ---------- */
+/** 只畫一個圖層到整張透明畫布上，再裁掉透明邊（PSD 的圖層只存有東西的那塊）。 */
+function renderLayerAlone(l: EL, all: EL[], doc: { w: number; h: number }, part: "body" | "content") {
+  const c = document.createElement("canvas"); c.width = doc.w; c.height = doc.h;
+  const g = c.getContext("2d", { willReadFrequently: true })!;
+  g.save(); applyClip(g, l, all); applyLayerTransform(g, l);
+  if (part === "body") drawElBody(g, l); else drawElContent(g, l);
+  g.restore();
+  const d = g.getImageData(0, 0, doc.w, doc.h).data;
+  let x0 = doc.w, y0 = doc.h, x1 = -1, y1 = -1;
+  for (let y = 0; y < doc.h; y++) {
+    for (let x = 0; x < doc.w; x++) {
+      if (d[(y * doc.w + x) * 4 + 3] > 0) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    }
+  }
+  if (x1 < 0) return null;
+  const out = document.createElement("canvas"); out.width = x1 - x0 + 1; out.height = y1 - y0 + 1;
+  out.getContext("2d")!.drawImage(c, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
+  return { canvas: out, left: x0, top: y0 };
+}
+
+/** 文字圖層 → PS 的段落文字：框的寬度、字級、顏色、行距、對齊、分段樣式照畫布；旋轉放在 transform。 */
+function psdTextData(l: EL) {
+  const scale = l.w / (l.naturalW || l.w);
+  const fs = l.fontSize * scale;
+  const lineH = fs * (l.textLayout?.lineHeight ?? 1.25);
+  const m = document.createElement("canvas").getContext("2d")!;
+  m.font = `${l.fontWeight} ${fs}px ${l.fontFamily}`;
+  const lines = l.textLayout ? Math.max(1, layoutText(l.text, l.w, (t) => m.measureText(t).width).length) : l.text.split("\n").length;
+  const blockH = lines * lineH;
+  const cos = Math.cos(l.rotation), sin = Math.sin(l.rotation);
+  const style = (st: { fontSize: number; color: { r: number; g: number; b: number }; fontWeight: number }) => ({
+    font: { name: psdFontName(l.fontFamily, st.fontWeight) }, fontSize: st.fontSize, fillColor: st.color,
+    autoLeading: false, leading: lineH, tracking: l.textLayout ? Math.round((l.textLayout.letterSpacing / (l.fontSize || 1)) * 1000) : 0,
+  });
+  const base = { fontSize: fs, color: hexToRgb(l.color), fontWeight: l.fontWeight };
+  const runs = styleRunsFor(l.text, base, l.runs?.map((r) => ({ ...r, fontSize: r.fontSize != null ? r.fontSize * scale : undefined })));
+  return {
+    text: l.text,
+    transform: [cos, sin, -sin, cos, l.cx, l.cy],
+    shapeType: "box" as const,
+    // 高度多留一行：PS 的框放不下最後一行會直接藏起來
+    boxBounds: [-l.w / 2, -blockH / 2, l.w / 2, blockH / 2 + lineH],
+    style: style(base),
+    styleRuns: runs.map((r) => ({ length: r.length, style: style(r.style) })),
+    paragraphStyle: { justification: l.align },
+  };
+}
+
+/** 整張設計稿 → PSD 的內容（交給 ag-psd 的 writePsd）。 */
+function buildPsdDocument(layers: EL[], doc: { w: number; h: number }) {
+  const children: Record<string, unknown>[] = [];
+  const looks: Record<string, unknown>[] = [];
+  for (const l of layers) {
+    const name = (l.isText ? l.text.replace(/\s+/g, " ").slice(0, 24) : l.name) || l.name || "圖層";
+    const editable = l.isText && !l.canvas && isEditableInPsd(l.fx);
+    const body = renderLayerAlone(l, layers, doc, "body");
+    if (editable) {
+      const content = renderLayerAlone(l, layers, doc, "content") ?? body;
+      if (!content) continue;
+      const fs = l.fontSize * (l.w / (l.naturalW || l.w));
+      children.push({
+        name, hidden: !l.visible, opacity: l.opacity, ...content, text: psdTextData(l),
+        effects: psdTextEffects({ shadow: l.shadow, glow: l.glow, fx: l.fx, fontSize: fs }),
+      });
+      if (body) looks.push({ name: `${name}（畫布上的樣子）`, opacity: l.opacity, ...body });
+    } else if (body) {
+      children.push({ name, hidden: !l.visible, opacity: l.opacity, ...body });
+    }
+  }
+  if (looks.length) children.push({ name: "文字原始外觀（圖片）", hidden: true, opened: false, children: looks });
+  // 合成圖：看圖軟體、縮圖用
+  const comp = document.createElement("canvas"); comp.width = doc.w; comp.height = doc.h;
+  const g = comp.getContext("2d")!;
+  g.fillStyle = "#fff"; g.fillRect(0, 0, doc.w, doc.h);
+  for (const l of layers) {
+    if (!l.visible) continue;
+    g.save(); applyClip(g, l, layers); applyLayerTransform(g, l); g.globalAlpha = l.opacity; drawElBody(g, l); g.restore();
+  }
+  return { width: doc.w, height: doc.h, canvas: comp, children };
+}
+
 function drawElBody(ctx: CanvasRenderingContext2D, l: EL) {
   // 陰影、外光暈先畫（在內容底下）；文字自己的「陰影」效果在這兩趟關掉，不然會蓋掉這裡的設定
   const plain = l.fx?.shadow ? { ...l, fx: { ...l.fx, shadow: false } } : l;

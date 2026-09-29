@@ -24,6 +24,7 @@ import { FAMILY as F16 } from "./family-16-envy-story.mjs";
 import { FAMILY as F17 } from "./family-17-sunny-kids.mjs";
 import { FAMILY as F18 } from "./family-18-clinic-ticket.mjs";
 import { FAMILY as F19 } from "./family-19-anniversary-events.mjs";
+import { FAMILY as F20 } from "./family-20-timeline-capsules.mjs";
 
 /**
  * 要灌進範本庫的東西。
@@ -34,7 +35,7 @@ import { FAMILY as F19 } from "./family-19-anniversary-events.mjs";
  */
 const TEMPLATES = [
   ...LEGACY.slice(10),
-  ...[...F1, ...F2, ...F3, ...F4, ...SHOWCASE, ...F5, ...F6, ...F7, ...F8, ...F9, ...F10, ...F11, ...F12, ...F13, ...F14, ...F15, ...F16, ...F17, ...F18, ...F19].map((f) => ({ name: f.art.name, layers: f.layers })),
+  ...[...F1, ...F2, ...F3, ...F4, ...SHOWCASE, ...F5, ...F6, ...F7, ...F8, ...F9, ...F10, ...F11, ...F12, ...F13, ...F14, ...F15, ...F16, ...F17, ...F18, ...F19, ...F20].map((f) => ({ name: f.art.name, layers: f.layers })),
 ];
 
 const CHROME = `${os.homedir()}/Library/Caches/ms-playwright/chromium-1234/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`;

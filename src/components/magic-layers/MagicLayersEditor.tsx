@@ -1862,6 +1862,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
             {adding ? "去背中…" : "去背"}
           </button>
         )}
+        <span style={{ flex: 1 }} />
+        <span style={{ color: "#9ca3af", fontSize: 12 }}>{layersRef.current.length} 圖層 · 文件 {doc.w}×{doc.h}</span>
+        {/* 下載放最右上角：大部分設計工具的匯出都在那裡 */}
         {onSave && (
           <>
             <span style={S.divider} />
@@ -1870,8 +1873,6 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
               onPick={(f) => { if (f === "psd") void downloadPsd(); else void doSave(true, f); }} />
           </>
         )}
-        <span style={{ flex: 1 }} />
-        <span style={{ color: "#9ca3af", fontSize: 12 }}>{layersRef.current.length} 圖層 · 文件 {doc.w}×{doc.h}</span>
       </div>
 
       <div style={S.body}>

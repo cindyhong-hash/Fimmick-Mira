@@ -19,6 +19,7 @@ import { FAMILY as F11 } from "./family-11-comic-launch.mjs";
 import { FAMILY as F12 } from "./family-12-pain-cards.mjs";
 import { FAMILY as F13 } from "./family-13-whiteboard-tips.mjs";
 import { FAMILY as F14 } from "./family-14-keyword-tags.mjs";
+import { FAMILY as F15 } from "./family-15-storage-cards.mjs";
 
 /**
  * 要灌進範本庫的東西。
@@ -29,7 +30,7 @@ import { FAMILY as F14 } from "./family-14-keyword-tags.mjs";
  */
 const TEMPLATES = [
   ...LEGACY.slice(10),
-  ...[...F1, ...F2, ...F3, ...F4, ...SHOWCASE, ...F5, ...F6, ...F7, ...F8, ...F9, ...F10, ...F11, ...F12, ...F13, ...F14].map((f) => ({ name: f.art.name, layers: f.layers })),
+  ...[...F1, ...F2, ...F3, ...F4, ...SHOWCASE, ...F5, ...F6, ...F7, ...F8, ...F9, ...F10, ...F11, ...F12, ...F13, ...F14, ...F15].map((f) => ({ name: f.art.name, layers: f.layers })),
 ];
 
 const CHROME = `${os.homedir()}/Library/Caches/ms-playwright/chromium-1234/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`;

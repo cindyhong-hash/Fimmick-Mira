@@ -39,10 +39,16 @@ test("coverCrop centres the crop and matches the target ratio", () => {
 test("prompts: edit keeps the rest, cutout asks for a plain background, never text", () => {
   const e = buildReplacePrompt("edit", "換成短髮", false);
   assert.match(e, /"換成短髮"/);
-  assert.match(e, /Change ONLY what the request asks/);
+  assert.match(e, /clearly visible/);
   assert.match(e, /anything they are holding/);
   assert.match(e, /No text/);
   const n = buildReplacePrompt("new", "a toothpaste tube", true);
   assert.match(n, /plain seamless white background/);
   assert.doesNotMatch(n, /Edit this image/);
+});
+
+test("edit prompt puts the detailed instruction first and keeps the user's words", () => {
+  const p = buildReplacePrompt("edit", "妝容再淡一點", false, "Make the lipstick a soft nude and halve the blush.");
+  assert.match(p, /^Edit this image\. Make the lipstick a soft nude/);
+  assert.match(p, /"妝容再淡一點"/);
 });

@@ -3326,7 +3326,7 @@ function applyReplacedImage(target: EL, canvas: HTMLCanvasElement, url: string, 
   target.thumb = makeThumb(target);
 }
 
-type ReplaceVariant = { url: string; width: number; height: number };
+type ReplaceVariant = { url: string; width: number; height: number; label?: string };
 type ImageSnap = Pick<EL, "canvas" | "src" | "w" | "h" | "naturalW" | "naturalH" | "thumb">;
 function snapImage(l: EL): ImageSnap {
   return { canvas: l.canvas, src: l.src, w: l.w, h: l.h, naturalW: l.naturalW, naturalH: l.naturalH, thumb: l.thumb };
@@ -3412,7 +3412,7 @@ function ReplaceImagePanel({ layerId, aspect: frameAspect, getSource, isCutout, 
       <button onClick={() => void run()} disabled={busy || !prompt.trim()}
         style={{ width: "100%", marginTop: 8, height: 36, borderRadius: 10, border: "none", color: "#fff", fontSize: 13, fontWeight: 700,
           cursor: busy || !prompt.trim() ? "default" : "pointer", background: busy ? "#a78bfa" : !prompt.trim() ? "#c4b5fd" : "linear-gradient(135deg,#8b5cf6,#7c3aed)" }}>
-        {busy ? "生成中…（約 15–40 秒）" : "✨ 生成兩張"}
+        {busy ? "生成中…（約 20–40 秒）" : "✨ 生成兩張"}
       </button>
       {err && <div role="alert" style={{ marginTop: 8, fontSize: 11, color: "#b91c1c", background: "#fef2f2", borderRadius: 8, padding: "6px 8px", lineHeight: 1.5 }}>{err}</div>}
       {shown && (
@@ -3421,10 +3421,11 @@ function ReplaceImagePanel({ layerId, aspect: frameAspect, getSource, isCutout, 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             {shown.variants.map((v) => (
               <button key={v.url} onClick={() => void pick(v)} title="在畫布上預覽這張" aria-pressed={picked === v.url}
-                style={{ padding: 0, border: picked === v.url ? "2px solid #7c3aed" : "1px solid #e5e7eb", boxShadow: picked === v.url ? "0 0 0 3px #ede9fe" : "none", borderRadius: 8, overflow: "hidden", cursor: "pointer", aspectRatio: String(aspect), display: "flex", alignItems: "center", justifyContent: "center",
+                style={{ position: "relative", padding: 0, border: picked === v.url ? "2px solid #7c3aed" : "1px solid #e5e7eb", boxShadow: picked === v.url ? "0 0 0 3px #ede9fe" : "none", borderRadius: 8, overflow: "hidden", cursor: "pointer", aspectRatio: String(aspect), display: "flex", alignItems: "center", justifyContent: "center",
                   background: shown.cutout ? "repeating-conic-gradient(#f3f4f6 0% 25%, #fff 0% 50%) 50% / 12px 12px" : "#fff" }}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={v.url} alt="生成結果" style={{ width: "100%", height: "100%", objectFit: shown.cutout ? "contain" : "cover", display: "block" }} />
+                {v.label && <span style={{ position: "absolute", left: 4, bottom: 4, padding: "1px 6px", borderRadius: 6, fontSize: 10, fontWeight: 700, color: "#fff", background: "rgba(31,41,55,.72)" }}>{v.label}</span>}
               </button>
             ))}
           </div>

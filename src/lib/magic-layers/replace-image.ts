@@ -53,21 +53,54 @@ export function coverCrop(w: number, h: number, aspect: number): { left: number;
 /**
  * 模型的提示詞。去背的圖要單色背景，之後去背才乾淨；兩種都不能出現文字。
  *
- * 「改這張」直接放使用者的原話（edit 模型是 Gemini，看得懂中文，也不會把中文畫成字）。
- * 一開始先翻成英文，結果翻譯器把「換成短髮」寫成一整段新畫面的描述
- * （a woman with short hair…），模型照著重畫，連手上的牙刷都不見了。
+ * 「改這張」：原話＋寫具體的版本一起給（edit 模型是 Gemini／Seedream，看得懂中文，也不會把中文畫成字）。
+ *  踩過的坑：
+ *  ・直接把「換成短髮」翻成英文畫面描述，模型照著整張重畫，手上的牙刷都不見了 → 一定要是「編輯指令」。
+ *  ・只給原話又一直強調「其他都別動」，「妝容再淡一點」出來跟原圖幾乎一樣 → 先把要求寫具體
+ *    （口紅、腮紅、眼影各淡多少），再說「除此之外」保留。
  * 「全新生成」走 FLUX，一定要英文（中文會被畫成字），所以傳進來的是翻好的。
  */
-export function buildReplacePrompt(mode: ReplaceMode, request: string, cutout: boolean): string {
+export function buildReplacePrompt(mode: ReplaceMode, request: string, cutout: boolean, detail?: string): string {
   const tail = cutout
     ? "Show the subject alone, fully in frame, isolated on a plain seamless white background. No text, no logo, no watermark."
     : "No text, no logo, no watermark.";
   if (mode === "edit") {
-    return `Edit this image. The user's request (may be in Chinese): "${request}". ` +
-      "Change ONLY what the request asks for. Keep everything else exactly as it is: the same person and face, pose, gesture and action, " +
-      `anything they are holding, the framing, camera angle, background, lighting and photographic style. ${tail}`;
+    const what = detail && detail !== request ? `${detail} (The user's original words: "${request}".)` : `The user's request (may be in Chinese): "${request}".`;
+    return `Edit this image. ${what} Make this change clearly visible. ` +
+      "Apart from that change, keep everything else the same: the same person and face, pose, gesture and action, " +
+      `anything they are holding, the framing, camera angle and photographic style. ${tail}`;
   }
   return `${request}. High quality, sharp focus, natural lighting. ${tail}`;
+}
+
+/**
+ * 把一句簡短的修圖要求寫成具體、看得出差別的英文編輯指令（「妝容再淡一點」→ 口紅、腮紅、眼影各怎麼改）。
+ * 沒有 key 或失敗就回傳 null，照原話送。
+ */
+export async function detailEditRequest(request: string): Promise<string | null> {
+  const key = process.env.OPENROUTER_API_KEY;
+  if (!key || key === "your-openrouter-api-key-here") return null;
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "X-Title": "Marketing Tool" },
+      body: JSON.stringify({
+        model: process.env.OPENROUTER_TEXT_MODEL ?? "openai/gpt-5.4-nano",
+        max_tokens: 200,
+        messages: [
+          { role: "system", content: "You turn a short photo-edit request (often Traditional Chinese) into ONE clear English instruction for an image-editing model. " +
+            "Make the requested change concrete and clearly visible: spell out exactly what changes and by how much. Do not add unrelated changes. " +
+            "Never ask to add text. Output only the instruction, one or two sentences." },
+          { role: "user", content: request },
+        ],
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const out = String(data.choices?.[0]?.message?.content ?? "").trim().replace(/^["']|["']$/g, "");
+    return out || null;
+  } catch { return null; }
 }
 
 type Generated = { buffer: Buffer; contentType: string };
@@ -102,9 +135,29 @@ export function generateNew(prompt: string, aspect: number): Promise<Generated> 
   }, 120_000);
 }
 
-/** 改這張：nano-banana edit，原圖當唯一的輸入圖。 */
-export function editExisting(prompt: string, imageDataUri: string, aspect: number): Promise<Generated> {
-  return falPost(process.env.FAL_EDIT_MODEL ?? "fal-ai/nano-banana/edit", {
-    prompt, image_urls: [imageDataUri], num_images: 1, aspect_ratio: nearestEditRatio(aspect),
-  }, 120_000);
+/**
+ * 改這張：兩張都用 nano-banana-pro，一張改得明顯、一張溫和，讓使用者挑程度（兩張才不會長一樣）。
+ * 實測（妝容再淡一點）：nano-banana-pro 改得最明顯、人還是同一個；nano-banana 太保守（幾乎沒變）；
+ * Seedream 4.5 在 UI 實測也幾乎沒變；FLUX.2 edit 會把臉改成另一個人。
+ */
+export const EDIT_MODEL = "fal-ai/nano-banana-pro/edit";
+const EDIT_FALLBACK = "fal-ai/nano-banana/edit";
+/** 第 i 張的強度說明，接在提示詞後面。 */
+export const EDIT_STRENGTHS = [
+  "Apply the change strongly so the difference is obvious at a glance.",
+  "Apply the change moderately so it looks natural and subtle, but still clearly noticeable.",
+] as const;
+
+/** 改這張：第 i 張用 EDIT_STRENGTHS[i] 的強度；pro 失敗就退回 nano-banana。 */
+export async function editExisting(prompt: string, imageDataUri: string, aspect: number, i = 0): Promise<Generated> {
+  const body = (model: string) => ({
+    prompt: `${prompt} ${EDIT_STRENGTHS[i % EDIT_STRENGTHS.length]}`,
+    image_urls: [imageDataUri], num_images: 1, aspect_ratio: nearestEditRatio(aspect),
+  });
+  try {
+    return await falPost(EDIT_MODEL, body(EDIT_MODEL), 150_000);
+  } catch (e) {
+    console.warn(`[replace-image] ${EDIT_MODEL} failed, falling back:`, e instanceof Error ? e.message : e);
+    return falPost(EDIT_FALLBACK, body(EDIT_FALLBACK), 120_000);
+  }
 }

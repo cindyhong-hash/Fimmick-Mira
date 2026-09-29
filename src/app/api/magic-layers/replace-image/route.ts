@@ -13,7 +13,7 @@ import { removeBackground } from "@/lib/fal";
 import { saveBuffer } from "@/lib/storage";
 import { protectPaidRoute } from "@/lib/site-gate";
 import { dailyQuota } from "@/lib/paid-quota";
-import { buildReplacePrompt, clampAspect, coverCrop, editExisting, generateNew, type ReplaceMode } from "@/lib/magic-layers/replace-image.ts";
+import { buildReplacePrompt, clampAspect, coverCrop, detailEditRequest, editExisting, generateNew, type ReplaceMode } from "@/lib/magic-layers/replace-image.ts";
 
 export const maxDuration = 180;
 
@@ -31,8 +31,9 @@ async function finish(buffer: Buffer, aspect: number, cutout: boolean) {
   }
   const m = await sharp(buffer).metadata();
   const crop = coverCrop(m.width ?? 1024, m.height ?? 1024, aspect);
-  const jpg = await sharp(buffer).extract(crop).jpeg({ quality: 90 }).toBuffer();
-  return { url: await saveBuffer(jpg, "jpg", "ml-replace-"), width: crop.width, height: crop.height };
+  // 有些模型會給到 2880px，畫布用不到那麼大：長邊縮到 2048 以內
+  const out = await sharp(buffer).extract(crop).resize(2048, 2048, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer({ resolveWithObject: true });
+  return { url: await saveBuffer(out.data, "jpg", "ml-replace-"), width: out.info.width, height: out.info.height };
 }
 
 export const POST = protectPaidRoute(async (request: Request) => {
@@ -56,12 +57,14 @@ export const POST = protectPaidRoute(async (request: Request) => {
       source = `data:image/jpeg;base64,${flat.toString("base64")}`;
     }
 
-    // 全新生成（FLUX）要英文；改這張（Gemini）直接用原話，見 buildReplacePrompt 的說明。
-    const ask = mode === "edit" ? typed : (await translateBriefToEnglishPrompt(typed)) || typed;
-    const prompt = buildReplacePrompt(mode, ask, cutout);
-    const one = async () => {
-      const gen = source ? await editExisting(prompt, source, aspect) : await generateNew(prompt, aspect);
-      return finish(gen.buffer, aspect, cutout);
+    // 全新生成（FLUX）要英文；改這張給原話＋寫具體的版本，見 buildReplacePrompt 的說明。
+    const prompt = mode === "edit"
+      ? buildReplacePrompt(mode, typed, cutout, (await detailEditRequest(typed)) ?? undefined)
+      : buildReplacePrompt(mode, (await translateBriefToEnglishPrompt(typed)) || typed, cutout);
+    const one = async (_: unknown, i: number) => {
+      const gen = source ? await editExisting(prompt, source, aspect, i) : await generateNew(prompt, aspect);
+      const done = await finish(gen.buffer, aspect, cutout);
+      return source ? { ...done, label: ["改得明顯", "改得自然"][i] } : done;
     };
     const settled = await Promise.allSettled(Array.from({ length: VARIANTS }, one));
     const variants = settled.flatMap((s) => (s.status === "fulfilled" ? [s.value] : []));

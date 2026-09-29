@@ -118,7 +118,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const bgRefInput = useRef<HTMLInputElement>(null);
   const rebuildInput = useRef<HTMLInputElement>(null);
   // 範本庫（共用，全品牌看得到；目前只做 1:1）
-  const [templates, setTemplates] = useState<{ id: string; name: string; previewUrl: string | null; builtin?: boolean }[]>([]);
+  const [templates, setTemplates] = useState<{ id: string; name: string; previewUrl: string | null; builtin?: boolean; docW?: number; docH?: number }[]>([]);
   // 範本放大預覽（第幾個；null＝沒開）。點縮圖先預覽，確定了才套用——套用會換掉整個畫布
   const [tplPreview, setTplPreview] = useState<number | null>(null);
   const [matPreview, setMatPreview] = useState<number | null>(null);   // 素材放大預覽
@@ -1622,11 +1622,12 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     if (templateName === null) return;
     setTplSaving(true);
     try {
-      // 縮圖：攤平後縮到 480px，列表用不著原尺寸。
+      // 縮圖：攤平後長邊縮到 480px（照原比例，直式範本不能壓扁），列表用不著原尺寸。
       const flat = flattenToDataUrl();
       const img = await new Promise<HTMLImageElement>((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = flat; });
-      const tc = document.createElement("canvas"); tc.width = 480; tc.height = 480;
-      tc.getContext("2d")!.drawImage(img, 0, 0, 480, 480);
+      const ts = 480 / Math.max(doc.w, doc.h);
+      const tc = document.createElement("canvas"); tc.width = Math.round(doc.w * ts); tc.height = Math.round(doc.h * ts);
+      tc.getContext("2d")!.drawImage(img, 0, 0, tc.width, tc.height);
       const r = await fetch("/api/magic-layers/templates", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: templateName, docW: doc.w, docH: doc.h, layers: serializeLayers(), thumbnail: tc.toDataURL("image/png") }),
@@ -1904,7 +1905,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           </div>
           <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: leftTab === "templates" || leftTab === "materials" ? "10px 10px 14px" : "8px 6px 14px" }}>
             {leftTab === "templates" && (<>
-              {/* 範本庫：共用（全品牌看得到），目前只做 1:1 */}
+              {/* 範本庫：共用（全品牌看得到）；不是正方形的範本縮圖不裁切，角落標比例（套用後畫布會換成那個尺寸） */}
                 {templates.length === 0 ? (
                   <div style={{ fontSize: 11, color: "#9ca3af", lineHeight: 1.6 }}>
                     範本載入中……如果一直沒出現，重新整理一次。
@@ -1916,9 +1917,14 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                         <button onClick={() => setTplPreview(i)} title={`${t.name}（點擊放大預覽）`}
                           style={{ display: "block", width: "100%", padding: 0, border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden", background: "#fff", cursor: "pointer" }}>
                           {t.previewUrl
-                            ? <img src={t.previewUrl} alt={t.name} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
+                            ? <img src={t.previewUrl} alt={t.name} style={{ width: "100%", aspectRatio: "1", objectFit: t.docW && t.docH && t.docW !== t.docH ? "contain" : "cover", background: "#f3f4f6", display: "block" }} />
                             : <div style={{ width: "100%", aspectRatio: "1", display: "grid", placeItems: "center", fontSize: 10, color: "#9ca3af" }}>無縮圖</div>}
                         </button>
+                        {t.docW && t.docH && t.docW !== t.docH && (
+                          <span style={{ position: "absolute", left: 3, bottom: 3, padding: "0 5px", borderRadius: 5, fontSize: 9, fontWeight: 700, lineHeight: "15px", color: "#fff", background: "rgba(17,24,39,.66)", pointerEvents: "none" }}>
+                            {ratioLabel(t.docW, t.docH)}
+                          </span>
+                        )}
                         {/* 內建範本是唯讀的，刪掉之後只能重新部署才會回來，所以不給刪除鈕。 */}
                         {!t.builtin && (
                           <button onClick={() => deleteTemplate(t.id, t.name)} title="刪除這個範本"
@@ -3435,6 +3441,14 @@ function snapImage(l: EL): ImageSnap {
   return { canvas: l.canvas, src: l.src, w: l.w, h: l.h, naturalW: l.naturalW, naturalH: l.naturalH, thumb: l.thumb };
 }
 function restoreImage(l: EL, s: ImageSnap) { Object.assign(l, s); }
+
+/** 1200×1600 → "3:4"（範本縮圖角落的比例標籤）。 */
+function ratioLabel(w: number, h: number): string {
+  const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
+  const g = gcd(Math.round(w), Math.round(h)) || 1;
+  const a = Math.round(w) / g, b = Math.round(h) / g;
+  return a <= 32 && b <= 32 ? `${a}:${b}` : (w > h ? "橫式" : "直式");
+}
 
 /** PNG data URL → JPG（白底，畫質 0.92）。 */
 function toJpegDataUrl(png: string): Promise<string> {

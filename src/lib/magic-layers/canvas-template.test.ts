@@ -18,9 +18,12 @@ test("擋掉會讓編輯器爆掉的內容", () => {
   assert.throws(() => parseCanvasTemplatePayload("nope"), /格式/);
 });
 
-test("目前只收 1:1", () => {
-  // 先只做正方形；放寬之前套用到別的比例要先決定是換畫布還是縮放
-  assert.throws(() => parseCanvasTemplatePayload({ docW: 1200, docH: 1500, layers: [layer] }), /1:1/);
+test("比例收 1:2 到 2:1（直式貼文可以），太極端或太大不收", () => {
+  assert.equal(parseCanvasTemplatePayload({ docW: 1200, docH: 1600, layers: [layer] }).docH, 1600);
+  assert.equal(parseCanvasTemplatePayload({ docW: 1200, docH: 1500, layers: [layer] }).docW, 1200);
+  assert.equal(parseCanvasTemplatePayload({ docW: 1600, docH: 900, layers: [layer] }).docW, 1600);
+  assert.throws(() => parseCanvasTemplatePayload({ docW: 600, docH: 1500, layers: [layer] }), /比例/);
+  assert.throws(() => parseCanvasTemplatePayload({ docW: 5000, docH: 5000, layers: [layer] }), /太大/);
 });
 
 test("壞掉的資料列回 null，不要讓整包列表失敗", () => {

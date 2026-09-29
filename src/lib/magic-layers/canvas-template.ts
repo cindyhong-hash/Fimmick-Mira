@@ -11,12 +11,17 @@ import type { SavedLayer } from "./saved-layer.ts";
  * 它已經有 `data`(JSON)、`previewUrl`(縮圖)、`name`、`clientId`，欄位剛好夠用，
  * 而且不動 schema 就不用對遠端 Turso 跑遷移（那是專案紅線）。
  *
- * 目前一律共用（`clientId = null`，所有品牌看得到）且只做 1:1。
+ * 目前一律共用（`clientId = null`，所有品牌看得到）。
+ * 比例原本只收 1:1；2026-09-29 放寬成 1:2～2:1（直式 3:4、4:5 的貼文範本），
+ * 編輯器套用時本來就會照範本的 docW/docH 換畫布尺寸。
  */
 export const CANVAS_TEMPLATE_TYPE = "CANVAS_TEMPLATE";
 
-/** 範本一律 1:1；先固定這個尺寸，之後要支援其他比例再放寬。 */
+/** 內建範本的預設尺寸（1:1）。 */
 export const CANVAS_TEMPLATE_SIZE = 1200;
+/** 範本可以接受的長寬比範圍與最大邊長：太極端的比例、太大的畫布都不收。 */
+const MAX_TEMPLATE_RATIO = 2;
+const MAX_TEMPLATE_SIDE = 4000;
 
 export type CanvasTemplate = {
   id: string;
@@ -55,7 +60,8 @@ export function parseCanvasTemplatePayload(value: unknown): CanvasTemplatePayloa
   if (typeof docW !== "number" || typeof docH !== "number" || docW <= 0 || docH <= 0) {
     throw new Error("範本尺寸不正確");
   }
-  if (docW !== docH) throw new Error("目前只支援 1:1 的範本");
+  if (docW > MAX_TEMPLATE_SIDE || docH > MAX_TEMPLATE_SIDE) throw new Error("範本尺寸太大");
+  if (Math.max(docW / docH, docH / docW) > MAX_TEMPLATE_RATIO) throw new Error("範本比例只支援 1:2 到 2:1");
   if (!Array.isArray(layers) || layers.length === 0) throw new Error("空白畫布不能存成範本");
   for (const layer of layers) {
     if (!isPlainObject(layer) || typeof layer.id !== "string" || typeof layer.type !== "string") {

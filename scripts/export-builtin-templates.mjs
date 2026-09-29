@@ -22,6 +22,7 @@ import { FAMILY as F7 } from "./family-07-health.mjs";
 import { FAMILY as F8 } from "./family-08-pain-points.mjs";
 import { FAMILY as F9 } from "./family-09-steps.mjs";
 import { FAMILY as F10 } from "./family-10-checklist.mjs";
+import { FAMILY as F11 } from "./family-11-comic-launch.mjs";
 
 const DB = "prisma/dev-release.db";
 const OUT = "src/lib/magic-layers/builtin-templates.json";
@@ -62,8 +63,10 @@ const DRAFT = process.argv.includes("--draft");
 const thumbs = thumbnails();
 const entries = [
   ...LEGACY.slice(10).map((t) => ({ name: t.name, layers: t.layers(), art: null })),
-  ...[...F1, ...F2, ...F3, ...F4, ...SHOWCASE, ...F5, ...F6, ...F7, ...F8, ...F9, ...F10].map((f) => ({
+  ...[...F1, ...F2, ...F3, ...F4, ...SHOWCASE, ...F5, ...F6, ...F7, ...F8, ...F9, ...F10, ...F11].map((f) => ({
     name: f.art.name, layers: f.layers(),
+    // 直式範本在 art 裡帶自己的尺寸（預設 1200×1200）
+    docW: f.art.docW, docH: f.art.docH,
     art: {
       family: f.art.family, composition: f.art.composition,
       negativeSpace: f.art.negativeSpace, recommendedFor: f.art.recommendedFor,
@@ -83,7 +86,7 @@ const builtins = entries.map((e, i) => ({
   id: `builtin-${String(i + 1).padStart(2, "0")}`,
   name: e.name,
   previewUrl: thumbs.get(e.name) ?? null,
-  docW: DOC, docH: DOC,
+  docW: e.docW ?? DOC, docH: e.docH ?? DOC,
   art: e.art,
   layers: e.layers,
 })).filter((t) => !RETIRED.has(t.name));

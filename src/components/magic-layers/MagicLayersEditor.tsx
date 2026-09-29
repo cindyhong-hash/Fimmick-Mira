@@ -14,6 +14,7 @@ import { distanceToPolyline, drawPaint, paintHits, samplePath, smoothStroke, str
    Ported from the verified vanilla engine.
    ============================================================ */
 import { drawEditableText, layoutText, readTextLayout, DEFAULT_TEXT_LAYOUT, type TextLayout } from "@/lib/magic-layers/editable-text.ts";
+import { idsInBox, selectableIds } from "@/lib/magic-layers/box-select.ts";
 import { anchorShift, autoWidth, shiftRuns, caretLines, indexAt, selectionSpans, verticalMove, widestLine, wrapRanges, type CaretLine, type TextLineRange } from "@/lib/magic-layers/text-caret.ts";
 import { hexToRgb, isEditableInPsd, psdFileName, psdFontName, psdTextEffects, styleRunsFor } from "@/lib/magic-layers/psd-export.ts";
 import { useBrandFonts } from "@/lib/fonts/useBrandFonts";
@@ -218,6 +219,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const pendingCaretRef = useRef<{ start: number; end: number } | null>(null);
   /** 進入編輯前的框（沒改字就還原）。 */
   const editGeomRef = useRef<TextGeom | null>(null);
+  /** 拉框選取中的框（文件座標）；render 畫虛線框用。 */
+  const boxSelRef = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const startTextEditRef = useRef<(l: EL, range?: { start: number; end: number }) => void>(() => {});
   const exitTextEditRef = useRef<() => void>(() => {});
   // 生成式填色：在畫布上框一塊，只有那一塊交給 AI 重畫（補東西或移除東西）。
@@ -376,6 +379,16 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     const editId = editingRef.current, ta = textAreaRef.current;
     const editEl = editId ? layersRef.current.find((l) => l.id === editId) : undefined;
     if (editEl && ta) drawTextEditing(ctx, editEl, { start: ta.selectionStart, end: ta.selectionEnd }, compStartRef.current, caretOnRef.current, view.current.zoom);
+    // 拉框選取的框
+    const bx = boxSelRef.current;
+    if (bx) {
+      ctx.save();
+      ctx.setLineDash([5 / view.current.zoom, 4 / view.current.zoom]);
+      ctx.lineWidth = 1.2 / view.current.zoom; ctx.strokeStyle = "#7c3aed"; ctx.fillStyle = "rgba(124,58,237,.08)";
+      const x = Math.min(bx.x0, bx.x1), y = Math.min(bx.y0, bx.y1), w = Math.abs(bx.x1 - bx.x0), h = Math.abs(bx.y1 - bx.y0);
+      ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h);
+      ctx.restore();
+    }
     // 生成式填色的選取框（虛線，跟 PS 的行進螞蟻同一個意思）
     const mq = marqueeRef.current;
     if (mq) {
@@ -619,6 +632,13 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           drag.current = { mode: "move", l, moving, sx: d.x, sy: d.y }; render(); return;
         }
       }
+      // 空白處按住拖曳＝拉框選取（Shift 是加選）；移動畫面改用空白鍵＋拖曳或滑鼠中鍵
+      if (!wantPan && toolRef.current === "select") {
+        boxSelRef.current = { x0: d.x, y0: d.y, x1: d.x, y1: d.y };
+        drag.current = { mode: "boxSelect", add: e.shiftKey, base: e.shiftKey ? [...selectedIdsRef.current] : [], sx: s.x, sy: s.y };
+        if (!e.shiftKey && selectedIdsRef.current.length) selectOnly(null);
+        render(); return;
+      }
       drag.current = { mode: "pan", sx: s.x, sy: s.y, opx: view.current.panX, opy: view.current.panY };
       if (!wantPan && selectedId) selectOnly(null);
     };
@@ -632,6 +652,10 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         hover(s); return;
       }
       const s = evPt(e), d = s2d(s.x, s.y);
+      if (g.mode === "boxSelect") {
+        if (boxSelRef.current) { boxSelRef.current.x1 = d.x; boxSelRef.current.y1 = d.y; render(); }
+        return;
+      }
       if (g.mode === "textSelect") {
         const el = layersRef.current.find((x) => x.id === editingRef.current), ta = textAreaRef.current;
         if (el && ta) { const lp = toLocal(el, d.x, d.y); selectTextRange(ta, g.anchor, indexAt(textCaretLines(el), lp.x, lp.y)); caretOnRef.current = true; render(); }
@@ -704,7 +728,19 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         startTextEditRef.current(hit, { start: idx, end: idx });
       }
     };
-    const up = () => {
+    const up = (e: PointerEvent) => {
+      if (drag.current?.mode === "boxSelect") {
+        const g = drag.current, b = boxSelRef.current;
+        boxSelRef.current = null; drag.current = null;
+        // 幾乎沒拖（小於 3px）就當成點空白處：只是取消選取
+        const moved = Math.hypot(evPt(e).x - g.sx, evPt(e).y - g.sy) >= 3;
+        if (b && moved) {
+          const hits = idsInBox(layersRef.current.map((l) => ({ id: l.id, corners: layerCorners(l), locked: l.locked, visible: l.visible, type: l.type, groupId: l.groupId })), b);
+          const ids = g.add ? [...new Set([...g.base, ...hits])] : hits;
+          applySelection(ids, ids[ids.length - 1] ?? null);
+        }
+        render(); return;
+      }
       if (drag.current?.mode === "textSelect") { drag.current = null; if (textAreaRef.current) readSel(textAreaRef.current); return; }
       if (drag.current?.mode === "pen") { drag.current = null; return; }
       if (drag.current?.mode === "draw") { drag.current = null; finishStrokeRef.current(); return; }
@@ -777,6 +813,12 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         for (const c of pasted) if (c.clipTo) c.clipTo = idMap.get(c.clipTo) ?? (layersRef.current.some((l) => l.id === c.clipTo) ? c.clipTo : null);
         layersRef.current.push(...pasted);
         applySelection(pasted.map((c) => c.id), pasted[pasted.length - 1].id); markDirty(); refresh(); render();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a" && !typing) {
+        e.preventDefault();
+        const ids = selectableIds(layersRef.current);
+        applySelection(ids, ids[ids.length - 1] ?? null); render();
         return;
       }
       if ((e.key === "Delete" || e.key === "Backspace") && selectedIdsRef.current.length && !typing) {

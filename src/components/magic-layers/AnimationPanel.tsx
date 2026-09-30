@@ -22,7 +22,8 @@ const btn: React.CSSProperties = { height: 34, borderRadius: 8, border: "1px sol
 const primary: React.CSSProperties = { ...btn, border: "none", background: "#7c3aed", color: "#fff" };
 const label: React.CSSProperties = { fontSize: 11, fontWeight: 700, color: "#9ca3af", padding: "12px 2px 6px" };
 
-export type AnimTrack = { id: string; name: string; anims: LayerAnim[] };
+/** key：這一列自己的代號（同一個圖層可能出現在好幾列，id 會重複，React 列表要用 key）。 */
+export type AnimTrack = { key: string; id: string; name: string; anims: LayerAnim[] };
 
 export function AnimationTab(props: {
   getDuration: () => number; autoDuration: boolean; onDuration: (d: number | null) => void;
@@ -122,7 +123,7 @@ function Timeline(props: {
     <div ref={barRef} onPointerMove={onMove} onPointerUp={() => { if (drag.current) { drag.current = null; props.onCommitMove(); } }}
       style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       {tracks.map((tr) => (
-        <div key={tr.id}>
+        <div key={tr.key}>
           <button onClick={() => props.onSelectLayer(tr.id)}
             style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", padding: "2px 0", fontSize: 11, cursor: "pointer",
               color: props.selectedIds.includes(tr.id) ? "#6d28d9" : "#4b5563", fontWeight: props.selectedIds.includes(tr.id) ? 700 : 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tr.name}</button>

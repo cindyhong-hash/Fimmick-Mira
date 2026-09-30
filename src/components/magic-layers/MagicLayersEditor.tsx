@@ -17,7 +17,7 @@ import { drawEditableText, layoutText, readTextLayout, DEFAULT_TEXT_LAYOUT, type
 import { idsInBox, selectableIds } from "@/lib/magic-layers/box-select.ts";
 import { animFrame, animUnits, defaultAnim, readAnims, shineBand, staggeredStarts, videoDuration, REST, type AnimFrame, type AnimKind, type LayerAnim } from "@/lib/magic-layers/layer-animation.ts";
 import { encodeMp4, videoSize } from "@/lib/magic-layers/mp4-export.ts";
-import { AnimationTab, LayerAnimSettings } from "./AnimationPanel";
+import { AnimationTab, LayerAnimSettings, type AnimTrack } from "./AnimationPanel";
 import { anchorShift, autoWidth, shiftRuns, caretLines, indexAt, selectionSpans, verticalMove, widestLine, wrapRanges, type CaretLine, type TextLineRange } from "@/lib/magic-layers/text-caret.ts";
 import { hexToRgb, isEditableInPsd, psdFileName, psdFontName, psdTextEffects, styleRunsFor } from "@/lib/magic-layers/psd-export.ts";
 import { useBrandFonts } from "@/lib/fonts/useBrandFonts";
@@ -3122,12 +3122,12 @@ function addAnimsTo(layers: EL[], kind: AnimKind) {
   }
 }
 /** 時間軸的列：同一個效果＋同一個開始時間的圖層合成一列（一個物件的幾個零件），列名優先用裡面的文字。 */
-function animTrackRows(layers: EL[]): { id: string; name: string; anims: LayerAnim[] }[] {
-  const rows = new Map<string, { id: string; names: string[]; anim: LayerAnim }>();
+function animTrackRows(layers: EL[]): AnimTrack[] {
+  const rows = new Map<string, { key: string; id: string; names: string[]; anim: LayerAnim }>();
   for (const l of layers) {
     for (const a of l.anims ?? []) {
       const key = `${a.kind}@${a.start}`;
-      const r = rows.get(key) ?? { id: l.id, names: [], anim: a };
+      const r = rows.get(key) ?? { key, id: l.id, names: [] as string[], anim: a };
       r.names.push(l.isText && l.text.trim() ? l.text.replace(/\s+/g, "") : "");
       if (l.isText && !rows.has(key)) r.id = l.id;
       rows.set(key, r);
@@ -3135,7 +3135,7 @@ function animTrackRows(layers: EL[]): { id: string; name: string; anims: LayerAn
   }
   return [...rows.values()]
     .sort((a, b) => a.anim.start - b.anim.start)
-    .map((r) => ({ id: r.id, name: r.names.find(Boolean)?.slice(0, 14) || layers.find((l) => l.id === r.id)?.name || "圖層", anims: [r.anim] }));
+    .map((r) => ({ key: r.key, id: r.id, name: r.names.find(Boolean)?.slice(0, 14) || layers.find((l) => l.id === r.id)?.name || "圖層", anims: [r.anim] }));
 }
 /** 拖時間軸：同一個效果、同一個開始時間的其他圖層（同一個物件的零件）一起移。 */
 function moveAnimGroup(layers: EL[], layerId: string, animId: string, start: number) {

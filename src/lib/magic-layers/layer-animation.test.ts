@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { animEnd, animFrame, animPhase, defaultAnim, readAnims, shineBand, staggeredStarts, videoDuration } from "./layer-animation.ts";
+import { animEnd, animFrame, animUnits, animPhase, defaultAnim, readAnims, shineBand, staggeredStarts, videoDuration } from "./layer-animation.ts";
 
 const near = (a: number, b: number, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} ≈ ${b}`);
 
@@ -63,4 +63,22 @@ test("錯開開始時間、影片長度、讀存檔", () => {
   assert.equal(r[0].start, 0);
   assert.equal(r[0].intensity, 1);
   assert.equal(r[0].direction, "down");
+});
+
+test("一次套好幾個：疊在一起的算同一個、照閱讀順序排", () => {
+  const box = (id: string, x: number, y: number, s = 100, groupId?: string) => ({ id, x0: x, y0: y, x1: x + s, y1: y + s, groupId });
+  const u = animUnits([
+    box("b-frame", 200, 0), box("b-text", 220, 20, 60),   // 第二格（框＋字疊在一起）
+    box("a-frame", 0, 0), box("a-circle", -10, -10, 120),  // 第一格
+    box("c", 400, 0),                                       // 第三格
+    box("d", 0, 200),                                       // 下一排
+    box("g1", 600, 600, 50, "grp"), box("g2", 900, 900, 50, "grp"),   // 同群組、沒重疊
+  ]);
+  assert.equal(u.get("a-frame"), u.get("a-circle"));
+  assert.equal(u.get("b-frame"), u.get("b-text"));
+  assert.equal(u.get("g1"), u.get("g2"));
+  assert.ok(u.get("a-frame")! < u.get("b-frame")!);
+  assert.ok(u.get("b-frame")! < u.get("c")!);
+  assert.ok(u.get("c")! < u.get("d")!);
+  assert.equal(new Set(u.values()).size, 5);
 });

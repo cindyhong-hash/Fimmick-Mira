@@ -171,3 +171,34 @@ export function readAnims(value: unknown): LayerAnim[] | undefined {
   }
   return out.length ? out : undefined;
 }
+
+/**
+ * 一次套給好幾個圖層時，哪些要當成「同一個東西」一起動：
+ * 外框互相重疊的（例如一格裡的底框、內框、文字、圈圈）、或同一個群組的，併成一組。
+ * 回傳每個圖層屬於第幾組，組的順序是由上到下、同一排由左到右（像閱讀順序）。
+ */
+export function animUnits(items: { id: string; x0: number; y0: number; x1: number; y1: number; groupId?: string | null }[]): Map<string, number> {
+  const parent = items.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const join = (a: number, b: number) => { parent[find(a)] = find(b); };
+  for (let i = 0; i < items.length; i++) {
+    for (let j = i + 1; j < items.length; j++) {
+      const a = items[i], b = items[j];
+      const overlap = a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+      if (overlap || (a.groupId && a.groupId === b.groupId)) join(i, j);
+    }
+  }
+  const groups = new Map<number, { cx: number; cy: number; h: number; ids: string[] }>();
+  items.forEach((it, i) => {
+    const r = find(i);
+    const g = groups.get(r) ?? { cx: 0, cy: 0, h: 0, ids: [] };
+    g.ids.push(it.id); g.cx += (it.x0 + it.x1) / 2; g.cy += (it.y0 + it.y1) / 2; g.h = Math.max(g.h, it.y1 - it.y0);
+    groups.set(r, g);
+  });
+  const list = [...groups.values()].map((g) => ({ ...g, cx: g.cx / g.ids.length, cy: g.cy / g.ids.length }));
+  // 同一排：中心高度差不到半個物件高就算同一排
+  list.sort((a, b) => (Math.abs(a.cy - b.cy) < Math.min(a.h, b.h) / 2 ? a.cx - b.cx : a.cy - b.cy));
+  const out = new Map<string, number>();
+  list.forEach((g, i) => g.ids.forEach((id) => out.set(id, i)));
+  return out;
+}

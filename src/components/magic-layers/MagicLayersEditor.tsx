@@ -145,7 +145,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const [layersH, startLayersResize] = useStoredHeight(LAYERS_H_KEY, 340, 150);
   const rpanelRef = useRef<HTMLElement>(null);
   /** 左欄拉高某一區時，至少留一點給下面的工具列。 */
-  const [panelTab, setPanelTab] = useState<"design" | "settings">("design");
+  const [panelTab, setPanelTab] = useState<"design" | "anim" | "settings">("design");
   const [renaming, setRenaming] = useState(false);            // 重新命名這個設計
   const [renamingLayerId, setRenamingLayerId] = useState<string | null>(null);
   const [renamingLayerValue, setRenamingLayerValue] = useState("");
@@ -1123,6 +1123,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     const picked = layersRef.current.filter((l) => selectedIdsRef.current.includes(l.id) && !l.locked).sort((a, b) => a.cx - b.cx);
     if (!picked.length) return;
     addAnimsTo(picked, kind);
+    setPanelTab("anim");
     markDirty(); refresh(); playAnim();
   };
   /** 加一塊看不見的光澤範圍（圓角矩形，可以拉大縮小、換成橢圓），預設就有閃光。 */
@@ -2121,7 +2122,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           {LEFT_TABS.map((t) => {
             const on = leftTab === t.id;
             return (
-              <button key={t.id} onClick={() => setLeftTab(on ? null : t.id)} aria-pressed={on} title={on ? `收起${t.label}` : t.label}
+              <button key={t.id} onClick={() => { setLeftTab(on ? null : t.id); if (!on && t.id === "animate") setPanelTab("anim"); /* 打開左側「動畫」時右側也切到「動畫」，細節就在旁邊調 */ }} aria-pressed={on} title={on ? `收起${t.label}` : t.label}
                 style={{ ...S.railBtn, ...(on ? { background: "#f5f3ff", color: "#6d28d9" } : {}) }}>
                 <t.Icon size={20} />
                 <span style={{ fontSize: 11, fontWeight: on ? 700 : 500, lineHeight: 1.2 }}>{t.label}</span>
@@ -2428,6 +2429,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           <>
             <div style={S.rtabs}>
               <button style={{ ...S.rtab, ...(panelTab === "design" ? S.rtabOn : {}) }} onClick={() => setPanelTab("design")}>設計</button>
+              <button style={{ ...S.rtab, ...(panelTab === "anim" ? S.rtabOn : {}) }} onClick={() => setPanelTab("anim")}>
+                動畫{selEl.anims?.length ? <span style={S.rtabCount}>{selEl.anims.length}</span> : null}
+              </button>
               <button style={{ ...S.rtab, ...(panelTab === "settings" ? S.rtabOn : {}) }} onClick={() => setPanelTab("settings")}>設定</button>
             </div>
             {panelTab === "design" ? (
@@ -2739,6 +2743,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                 {selEl.type !== "background" && (
                   <GlowControls glow={selEl.glow ?? null} onChange={(glow) => updateText({ glow })} />
                 )}
+              </div>
+            ) : panelTab === "anim" ? (
+              <div style={{ padding: "2px 16px 16px", overflowY: "auto" }}>
                 <LayerAnimSettings anims={selEl.anims} shineOnly={selEl.shineOnly}
                   onChange={(animId, patch) => { patchAnim(selEl, animId, patch); markDirty(); render(); refresh(); }}
                   onRemove={(animId) => { removeAnim(selEl, animId); markDirty(); render(); refresh(); }}
@@ -3085,10 +3092,17 @@ function drawShines(ctx: CanvasRenderingContext2D, l: EL, shines: AnimFrame["shi
     gr.addColorStop(1, "rgba(255,255,255,0)");
     g.fillStyle = gr; g.fillRect(-l.w / 2, -l.h / 2, l.w, l.h);
   }
-  // 遮罩：光澤範圍用它的形狀；其他圖層用自己畫出來的內容
+  // 遮罩：光澤範圍用它的形狀；其他圖層用自己畫出來的內容。
+  // 先畫在另一張畫布、再一次用 destination-in 疊上——直接在這裡一筆一筆畫的話，
+  // 每一筆都會把前一筆的範圍清掉（兩行以上的字就整個不亮了）。
+  const mask = document.createElement("canvas"); mask.width = ow; mask.height = oh;
+  const mg = mask.getContext("2d")!;
+  mg.scale(sc, sc); mg.translate(l.w / 2, l.h / 2);
+  if (l.shineOnly && l.shape && isFillableShape(l.shape)) { clipToShape(mg, l.w, l.h, l.shape); mg.fillStyle = "#fff"; mg.fillRect(-l.w / 2, -l.h / 2, l.w, l.h); }
+  else drawElContent(mg, l);
+  g.setTransform(1, 0, 0, 1, 0, 0);
   g.globalCompositeOperation = "destination-in";
-  if (l.shineOnly && l.shape && isFillableShape(l.shape)) { clipToShape(g, l.w, l.h, l.shape); g.fillStyle = "#fff"; g.fillRect(-l.w / 2, -l.h / 2, l.w, l.h); }
-  else drawElContent(g, l);
+  g.drawImage(mask, 0, 0);
   ctx.globalAlpha = 1;
   ctx.drawImage(off, -l.w / 2, -l.h / 2, l.w, l.h);
 }
@@ -4398,6 +4412,7 @@ const S: Record<string, React.CSSProperties> = {
   rtabs: { display: "flex", gap: 18, padding: "0 16px", borderBottom: "1px solid #e5e7eb", flex: "0 0 auto" },
   rtab: { height: 44, border: "none", background: "transparent", color: "#9ca3af", fontSize: 14, fontWeight: 700, cursor: "pointer", borderBottom: "2px solid transparent" },
   rtabOn: { color: "#7c3aed", borderBottom: "2px solid #7c3aed" },
+  rtabCount: { marginLeft: 4, padding: "0 6px", borderRadius: 999, background: "#ede9fe", color: "#6d28d9", fontSize: 11, fontWeight: 700 },
   rhead: { fontSize: 14, fontWeight: 800, color: "#1f2937", marginTop: 0, marginRight: 0, marginBottom: 12, marginLeft: 0 },
   rlabel: { display: "block", fontSize: 12, color: "#6b7280", marginTop: 12, marginRight: 0, marginBottom: 4, marginLeft: 0, fontWeight: 600 },
   rinput: { width: "100%", height: 34, background: "#fff", border: "1px solid #e5e7eb", color: "#1f2937", borderRadius: 8, padding: "0 10px", fontSize: 13, boxSizing: "border-box", fontFamily: "inherit" },

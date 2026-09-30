@@ -190,11 +190,12 @@ export function LayerAnimSettings(props: {
           )}
           {a.kind === "shine" && (<>
             <Field label="方向">
-              <div style={{ display: "flex", gap: 4 }}>
-                {([["down", "↓ 往下"], ["diagonal", "↘ 斜的"], ["right", "→ 往右"]] as [ShineDirection, string][]).map(([d, t]) => (
-                  <button key={d} onClick={() => props.onChange(a.id, { direction: d })}
-                    style={{ ...btn, flex: 1, height: 28, fontSize: 11, ...((a.direction ?? "down") === d ? { border: "1px solid #7c3aed", color: "#6d28d9", background: "#f5f3ff" } : {}) }}>{t}</button>
-                ))}
+              {/* 3×3 羅盤：箭頭＝光前進的方向（↑ 是從下往上掃），中間空著 */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 32px)", gap: 4 }}>
+                {SHINE_COMPASS.map(([d, t, name], i) => d ? (
+                  <button key={d} type="button" title={name} aria-label={`閃光${name}`} onClick={() => props.onChange(a.id, { direction: d })}
+                    style={{ ...btn, width: 32, height: 28, padding: 0, fontSize: 14, ...((a.direction ?? "down") === d ? { border: "1px solid #7c3aed", color: "#6d28d9", background: "#f5f3ff" } : {}) }}>{t}</button>
+                ) : <span key={`c${i}`} />)}
               </div>
             </Field>
             <Field label={`光的寬度 ${Math.round((a.width ?? 0.35) * 100)}%`}>
@@ -206,6 +207,12 @@ export function LayerAnimSettings(props: {
     </div>
   );
 }
+
+const SHINE_COMPASS: ([ShineDirection, string, string] | [null, "", ""])[] = [
+  ["upLeft", "↖", "從右下往左上"], ["up", "↑", "從下往上"], ["upRight", "↗", "從左下往右上"],
+  ["left", "←", "從右往左"], [null, "", ""], ["right", "→", "從左往右"],
+  ["downLeft", "↙", "從右上往左下"], ["down", "↓", "從上往下"], ["downRight", "↘", "從左上往右下"],
+];
 
 function Field({ label: text, children }: { label: string; children: React.ReactNode }) {
   return (

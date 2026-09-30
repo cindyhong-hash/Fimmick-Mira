@@ -49,6 +49,14 @@ test("光帶：從完全在外面走到完全在外面", () => {
   near(start.x0, 0);
   const right = shineBand(100, 200, { progress: 0.5, direction: "right", width: 0.3 });
   near((right.x0 + right.x1) / 2, 0);
+  // 往上、往左：起點在下緣／右緣外面
+  const up = shineBand(100, 200, { progress: 0, direction: "up", width: 0.3 });
+  assert.ok(up.y1 >= 100 - 1e-9 && up.y0 > up.y1);
+  const left = shineBand(100, 200, { progress: 0, direction: "left", width: 0.3 });
+  assert.ok(left.x1 >= 50 - 1e-9 && left.x0 > left.x1);
+  // 斜的：↗ 從左下往右上
+  const ur = shineBand(100, 100, { progress: 0, direction: "upRight", width: 0.3 });
+  assert.ok(ur.x0 < 0 && ur.y0 > 0 && ur.x1 > ur.x0 && ur.y1 < ur.y0);
 });
 
 test("錯開開始時間、影片長度、讀存檔", () => {
@@ -58,11 +66,13 @@ test("錯開開始時間、影片長度、讀存檔", () => {
   assert.equal(videoDuration([], 10), 10);
   assert.equal(videoDuration([], 99), 30);
   assert.equal(readAnims("nope"), undefined);
-  const r = readAnims([{ kind: "shine", start: -5, intensity: 3, direction: "up" }, { kind: "bogus" }])!;
-  assert.equal(r.length, 1);
+  const r = readAnims([{ kind: "shine", start: -5, intensity: 3, direction: "sideways" }, { kind: "bogus" }, { kind: "shine", direction: "diagonal" }, { kind: "shine", direction: "upLeft" }])!;
+  assert.equal(r.length, 3);
   assert.equal(r[0].start, 0);
   assert.equal(r[0].intensity, 1);
   assert.equal(r[0].direction, "down");
+  assert.equal(r[1].direction, "downRight");   // 舊存檔的「斜的」
+  assert.equal(r[2].direction, "upLeft");
 });
 
 test("一次套好幾個：疊在一起的算同一個、照閱讀順序排", () => {

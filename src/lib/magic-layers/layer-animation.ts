@@ -8,7 +8,13 @@
    ============================================================ */
 
 export type AnimKind = "shine" | "bounce" | "pulse" | "twinkle" | "float" | "fadeIn";
-export type ShineDirection = "down" | "diagonal" | "right";
+export type ShineDirection = "down" | "up" | "right" | "left" | "downRight" | "downLeft" | "upRight" | "upLeft";
+
+/** 光前進的方向（圖層座標，y 往下為正）。 */
+export const SHINE_VECTORS: Record<ShineDirection, [number, number]> = {
+  down: [0, 1], up: [0, -1], right: [1, 0], left: [-1, 0],
+  downRight: [1, 1], downLeft: [-1, 1], upRight: [1, -1], upLeft: [-1, -1],
+};
 
 export type LayerAnim = {
   id: string;
@@ -122,10 +128,10 @@ export function animFrame(anims: LayerAnim[] | undefined, t: number): AnimFrame 
 
 /**
  * 光帶在圖層座標裡的位置：回傳漸層的起點、終點（光帶中心從 from 走到 to 的那條線上）。
- * direction down = 從上往下（光帶是橫的）；right = 從左往右；diagonal = 左上往右下。
+ * direction 是光前進的方向（見 SHINE_VECTORS），例如 down = 從上往下（光帶是橫的）、upRight = 從左下往右上。
  */
 export function shineBand(w: number, h: number, s: { progress: number; direction: ShineDirection; width: number }) {
-  const ax = s.direction === "down" ? 0 : 1, ay = s.direction === "right" ? 0 : 1;
+  const [ax, ay] = SHINE_VECTORS[s.direction] ?? SHINE_VECTORS.down;
   const len = Math.hypot(ax, ay) || 1;
   const ux = ax / len, uy = ay / len;
   // 圖層在這個方向上的總長度＋光帶寬度，讓光從完全在外面走到完全在外面
@@ -164,7 +170,8 @@ export function readAnims(value: unknown): LayerAnim[] | undefined {
       start: num(r.start, 0, 30, d.start), duration: num(r.duration, 0.1, 10, d.duration),
       repeat: Math.round(num(r.repeat, 0, 50, d.repeat)), gap: num(r.gap, 0, 10, d.gap), intensity: num(r.intensity, 0, 1, d.intensity),
       ...(d.kind === "shine" ? {
-        direction: (["down", "diagonal", "right"] as const).includes(r.direction as ShineDirection) ? (r.direction as ShineDirection) : d.direction,
+        // 舊存檔只有三個方向，「diagonal」就是現在的 ↘
+        direction: r.direction === "diagonal" ? "downRight" : typeof r.direction === "string" && Object.hasOwn(SHINE_VECTORS, r.direction) ? (r.direction as ShineDirection) : d.direction,
         width: num(r.width, 0.1, 0.8, d.width ?? 0.35),
       } : {}),
     });

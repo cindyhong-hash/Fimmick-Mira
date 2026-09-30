@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Image as ImageIcon } from "lucide-react";
-type Activity = { id: string; theme: string; status: string; createdAt: string;
+type Activity = { id: string; theme: string; status: string; createdAt: string; layoutId?: string;
   imageRatio?: string; customW?: number; customH?: number;
   generatedLayouts?: { imageUrl: string; isSelected?: boolean }[] };
 const STATUS: Record<string, { label: string; cls: string }> = {
@@ -16,7 +16,8 @@ export function WorkCard({ act, clientId }: { act: Activity; clientId: string })
   const count = act.generatedLayouts?.length ?? 0;
   const size = act.customW && act.customH ? `${act.customW} × ${act.customH}` : act.imageRatio ?? "";
   return (
-    <Link href={`/clients/${clientId}/activities/${act.id}`} className="block overflow-hidden rounded-2xl border border-gray-200 bg-white hover:shadow-sm">
+    // 自由畫布的設計稿直接開進畫布（跟活動列表一樣）；其他走活動頁
+    <Link href={act.layoutId === "magic-layers" ? `/clients/${clientId}/magic-layers/compose?activity=${act.id}` : `/clients/${clientId}/activities/${act.id}`} className="block overflow-hidden rounded-2xl border border-gray-200 bg-white hover:shadow-sm">
       <div className="relative aspect-square bg-gray-100">
         {thumb ? <img src={thumb} alt="" className="h-full w-full object-cover" loading="lazy" />
                : <div className="flex h-full items-center justify-center"><ImageIcon className="h-6 w-6 text-gray-300" /></div>}

@@ -98,6 +98,13 @@ export default function ActivityPage({ params }: { params: Promise<{ clientId: s
       fetch(`/api/activities/${activityId}`)
         .then((r) => r.json())
         .then((data: Activity) => {
+          // 自由畫布的設計稿不是這一頁能處理的：這裡的「編輯／重新生成」「微調畫布」都是給 AI 生成的圖文用，
+          // 而且下面沒有版型就會自動送去生成（設計稿沒匯出過就沒有版型，會被當成圖文重新生成、花額度）。
+          // 從首頁「最近作品」、舊連結點進來都直接轉到自由畫布。
+          if (data.layoutId === "magic-layers") {
+            router.replace(`/clients/${clientId}/magic-layers/compose?activity=${activityId}`);
+            return;
+          }
           setActivity(data);
 
           // 還原先前選定的版型：優先取已持久化的 isSelected，只有一款則自動選它。
@@ -126,7 +133,7 @@ export default function ActivityPage({ params }: { params: Promise<{ clientId: s
     return () => {
       if (pollingRef.current) clearTimeout(pollingRef.current);
     };
-  }, [activityId]);
+  }, [activityId, clientId, router]);
 
   const handleSelect = async (layoutId: string) => {
     setSelectedId(layoutId);

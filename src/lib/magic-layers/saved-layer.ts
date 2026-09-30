@@ -1,6 +1,7 @@
 import type { LayerData, SemanticId } from "./types.ts";
 import type { TextLayout } from "./editable-text.ts";
 import type { LayerGlow, LayerShadow } from "./layer-glow.ts";
+import type { LayerAnim } from "./layer-animation.ts";
 /**
  * 漸層填色。from／to 是 #rrggbb 或 #rrggbbaa（可帶透明度）。
  * vertical 上→下、horizontal 左→右、diagonal 左上→右下、radial 由中間往外。
@@ -63,6 +64,10 @@ export type SavedLayer = {
   shadow?: LayerShadow;
   /** 文字寬度：沒有＝自動寬度（框跟著字變寬）；true＝固定寬度（字在框裡自動換行）。 */
   wrap?: boolean;
+  /** 圖層動畫（輸出影片用；見 layer-animation.ts）。 */
+  anims?: LayerAnim[];
+  /** true＝這個圖層只當「光澤範圍」：本身不顯示，只有閃光掃過時在它的形狀裡亮一下。 */
+  shineOnly?: boolean;
 };
 export function savedToLayerData(sl: SavedLayer): LayerData {
   const semanticId: SemanticId = sl.type === "independent_text" ? "text" : sl.type === "drawing" ? "decoration" : (sl.type as SemanticId);
@@ -78,6 +83,8 @@ export function savedToLayerData(sl: SavedLayer): LayerData {
       ...(sl.clipTo ? { clipTo: sl.clipTo } : {}),
       ...(sl.skewX ? { skewX: sl.skewX } : {}), ...(sl.skewY ? { skewY: sl.skewY } : {}),
       ...(sl.wrap ? { wrap: true } : {}),
+      ...(sl.anims?.length ? { anims: sl.anims } : {}),
+      ...(sl.shineOnly ? { shineOnly: true } : {}),
       ...(sl.isText ? { style: { text: sl.text, fontSizePx: sl.fontSize, fontWeight: sl.fontWeight, color: sl.color, align: sl.align, fontFamily: sl.fontFamily, fx: sl.fx ?? null, ...(sl.textLayout ? { layout: sl.textLayout } : {}), ...(sl.runs ? { runs: sl.runs } : {}) }, textObject: { text: sl.text } } : {}),
       ...(sl.isArt ? { isArt: true, artText: sl.text ?? "", ...(sl.artRefImage ? { artRefImage: sl.artRefImage } : {}) } : {}),
       ...(sl.shape ? { shape: sl.shape } : {}),

@@ -39,7 +39,8 @@ export function ComposeView({ clientId: clientIdProp }: { clientId?: string }) {
   const [title, setTitle] = useState("");
   /** 多頁草稿的第 2 頁以後（第 1 頁照舊用 layers／img）。 */
   const [extraPages, setExtraPages] = useState<SavedPage[] | undefined>(undefined);
-  const [firstPageName, setFirstPageName] = useState<string | undefined>(undefined);   // 精靈帶進來的標題，存檔時當預設設計名稱
+  const [firstPageName, setFirstPageName] = useState<string | undefined>(undefined);
+  const [animDuration, setAnimDuration] = useState<number | undefined>(undefined);   // 圖層動畫的影片長度（存檔帶回來的）   // 精靈帶進來的標題，存檔時當預設設計名稱
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [layers, setLayers] = useState<LayerData[] | null>(null);
   const [bgLibrary, setBgLibrary] = useState<{ url: string; label?: string }[]>([]);
@@ -144,6 +145,7 @@ export function ComposeView({ clientId: clientIdProp }: { clientId?: string }) {
         if (cancelled) return;
         setImg(im);
         setLayers((d.layers as SavedLayer[]).map(savedToLayerData));
+        if (typeof d.animDuration === "number") setAnimDuration(d.animDuration);
         if (Array.isArray(d.pages) && d.pages.length) {
           setExtraPages((d.pages as SavedPage[]).slice(1));
           setFirstPageName((d.pages as SavedPage[])[0]?.name);
@@ -194,7 +196,7 @@ export function ComposeView({ clientId: clientIdProp }: { clientId?: string }) {
   const availableBackgrounds = [...kitLibrary, ...bgLibrary.filter((item) => !kitLibrary.some(({ url }) => url === item.url))];
 
   // 儲存 / 下載：壓平圖 + 圖層 JSON → 存進素材庫（第一次新增、之後更新同一筆）。
-  const handleSave = useCallback(async (payload: { docW: number; docH: number; layers: SavedLayer[]; imageDataUrl: string; finalize: boolean; pages?: SavedPage[]; pageImages?: string[] }) => {
+  const handleSave = useCallback(async (payload: { docW: number; docH: number; layers: SavedLayer[]; imageDataUrl: string; finalize: boolean; pages?: SavedPage[]; pageImages?: string[]; animDuration?: number }) => {
     const r = await fetch("/api/magic-layers/save", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ clientId, activityId, name: (docName ?? title).trim() || "未命名排版", ...payload }),
@@ -210,7 +212,7 @@ export function ComposeView({ clientId: clientIdProp }: { clientId?: string }) {
       <div style={S.editorPanel}>
         <MagicLayersEditor image={img} layers={layers} backgrounds={availableBackgrounds} logos={logos}
           name={docName ?? title} clientId={clientId} onRename={setDocName}
-          onBack={() => router.back()} onSave={handleSave} extraPages={extraPages} firstPageName={firstPageName} />
+          onBack={() => router.back()} onSave={handleSave} extraPages={extraPages} firstPageName={firstPageName} animDuration={animDuration} />
       </div>
     );
   }

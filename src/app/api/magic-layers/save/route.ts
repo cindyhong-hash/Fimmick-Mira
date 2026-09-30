@@ -24,7 +24,7 @@ const LAYOUT_ID = "magic-layers";
 
 export async function POST(request: Request) {
   try {
-    const { clientId, activityId, name, docW, docH, layers, imageDataUrl, finalize, pages, pageImages } = await request.json();
+    const { clientId, activityId, name, docW, docH, layers, imageDataUrl, finalize, pages, pageImages, animDuration } = await request.json();
     if (!Array.isArray(layers) || !docW || !docH) return NextResponse.json({ error: "missing docW/docH/layers" }, { status: 400 });
 
     let imageUrl = "";
@@ -34,9 +34,11 @@ export async function POST(request: Request) {
     // 只有一頁（而且沒取頁名）時照舊存 version 1，不讓單頁草稿多帶一份重複的資料
     const multi = Array.isArray(pages) && (pages.length > 1 || (pages.length === 1 && typeof pages[0]?.name === "string" && !!pages[0].name.trim()))
       && pages.every((p: { docW?: unknown; docH?: unknown; layers?: unknown }) => Number(p?.docW) > 0 && Number(p?.docH) > 0 && Array.isArray(p?.layers));
+    // 影片長度（有做圖層動畫才有）：整份設計共用一個
+    const anim = typeof animDuration === "number" && animDuration > 0 && animDuration <= 30 ? { animDuration } : {};
     const textLayerJson = JSON.stringify(multi
-      ? { kind: MARKER, version: 2, docW, docH, layers, pages }
-      : { kind: MARKER, version: 1, docW, docH, layers });
+      ? { kind: MARKER, version: 2, docW, docH, layers, pages, ...anim }
+      : { kind: MARKER, version: 1, docW, docH, layers, ...anim });
     const theme = (typeof name === "string" && name.trim()) ? name.trim().slice(0, 80) : "未命名排版";
     const status = finalize ? "DONE" : "DRAFT";
 
@@ -114,11 +116,12 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "missing activity/id" }, { status: 400 });
     }
 
-    let doc: { kind?: string; docW?: number; docH?: number; layers?: unknown[]; pages?: { docW: number; docH: number; layers: unknown[] }[] } = {};
+    let doc: { kind?: string; docW?: number; docH?: number; layers?: unknown[]; pages?: { docW: number; docH: number; layers: unknown[] }[]; animDuration?: number } = {};
     try { doc = JSON.parse(textLayerJson || "{}"); } catch { /* ignore */ }
     if (doc.kind !== MARKER) return NextResponse.json({ error: "not a magic layout" }, { status: 400 });
     return NextResponse.json({ activityId: outActivityId, name, imageUrl, docW: doc.docW, docH: doc.docH, layers: doc.layers ?? [],
-      pages: Array.isArray(doc.pages) && doc.pages.length ? doc.pages : undefined });
+      pages: Array.isArray(doc.pages) && doc.pages.length ? doc.pages : undefined,
+      ...(typeof doc.animDuration === "number" ? { animDuration: doc.animDuration } : {}) });
   } catch (err) {
     console.error("[magic-layers/load] failed:", err);
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });

@@ -15,7 +15,7 @@ import { distanceToPolyline, drawPaint, paintHits, samplePath, smoothStroke, str
    ============================================================ */
 import { drawEditableText, layoutText, readTextLayout, DEFAULT_TEXT_LAYOUT, type TextLayout } from "@/lib/magic-layers/editable-text.ts";
 import { idsInBox, selectableIds } from "@/lib/magic-layers/box-select.ts";
-import { animFrame, animUnits, defaultAnim, readAnims, shineBand, staggeredStarts, videoDuration, REST, type AnimFrame, type AnimKind, type LayerAnim } from "@/lib/magic-layers/layer-animation.ts";
+import { animFrame, animUnits, defaultAnim, isOneShot, readAnims, shineBand, staggeredStarts, typeChar, videoDuration, REST, type AnimFrame, type AnimKind, type LayerAnim, type TypingState } from "@/lib/magic-layers/layer-animation.ts";
 import { encodeMp4, videoSize } from "@/lib/magic-layers/mp4-export.ts";
 import { AnimationTab, LayerAnimSettings, type AnimTrack } from "./AnimationPanel";
 import { anchorShift, autoWidth, shiftRuns, caretLines, indexAt, selectionSpans, verticalMove, widestLine, wrapRanges, type CaretLine, type TextLineRange } from "@/lib/magic-layers/text-caret.ts";
@@ -3068,9 +3068,64 @@ function drawLayerAnimated(ctx: CanvasRenderingContext2D, l: EL, layers: EL[], t
   if (f.dx || f.dy) ctx.translate(f.dx * l.h, f.dy * l.h);
   if (f.scale !== 1) ctx.scale(f.scale, f.scale);
   ctx.globalAlpha = l.opacity * f.opacity;
-  drawElBody(ctx, l);
-  if (f.shines.length) drawShines(ctx, l, f.shines);
+  if (f.typing) drawTypingText(ctx, l, f.typing);
+  else drawElBody(ctx, l);
+  // 逐字還在進場時先不閃（光會亮在還沒出現的字上）
+  if (f.shines.length && !f.typing) drawShines(ctx, l, f.shines);
   ctx.restore();
+}
+/**
+ * 逐字出現：先把整個圖層照常畫到一張畫布（描邊、陰影、光暈都在），
+ * 再把每個字那一格依它自己的進度（透明、縮放、從上面滑下來）貼回來。
+ * 字的位置跟畫布上打字的游標用同一套（textCaretLines）。
+ * 變形文字（弧形、波浪）或不是文字的圖層沒辦法切字，就整個一起淡入。
+ */
+function drawTypingText(ctx: CanvasRenderingContext2D, l: EL, s: TypingState) {
+  const warped = l.fx?.warp && l.fx.warp !== "none";
+  if (!l.isText || warped || !l.text.trim()) {
+    ctx.globalAlpha *= s.p;
+    drawElBody(ctx, l);
+    return;
+  }
+  const fs = l.fontSize * (l.w / (l.naturalW || l.w));
+  const lh = fs * (l.textLayout?.lineHeight ?? 1.25);
+  // 每個看得見的字一格（空白不算，也不佔出場順序）
+  const cells: { x0: number; x1: number; y: number }[] = [];
+  for (const line of textCaretLines(l)) {
+    for (let k = line.start; k < line.end; k++) {
+      const code = l.text.charCodeAt(k);
+      const wide = code >= 0xd800 && code <= 0xdbff ? 2 : 1;   // emoji 這種兩個碼的字
+      if (!/\s/.test(l.text[k])) cells.push({ x0: line.x[k - line.start], x1: line.x[Math.min(line.x.length - 1, k - line.start + wide)], y: line.y });
+      k += wide - 1;
+    }
+  }
+  if (!cells.length) return;
+  // 描邊、陰影、光暈會超出字的格子：整張畫布四周多留一點，最外圈的格子也往外放寬
+  const pad = fs * 0.4;
+  const m = ctx.getTransform();
+  const sc = Math.min(4, Math.max(0.25, Math.hypot(m.a, m.b) || 1));
+  const W = l.w + pad * 2, H = l.h + pad * 2;
+  const off = document.createElement("canvas"); off.width = Math.max(1, Math.ceil(W * sc)); off.height = Math.max(1, Math.ceil(H * sc));
+  const g = off.getContext("2d")!;
+  g.scale(sc, sc); g.translate(W / 2, H / 2);
+  drawElBody(g, l);
+  const xs = cells.map((c) => [c.x0, c.x1]).flat(), ys = cells.map((c) => c.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const base = ctx.globalAlpha;
+  cells.forEach((c, i) => {
+    const st = typeChar(s, i, cells.length);
+    if (st.opacity <= 0.001 || st.scale <= 0.001) return;
+    const x0 = c.x0 <= minX + 0.5 ? -W / 2 : c.x0, x1 = c.x1 >= maxX - 0.5 ? W / 2 : c.x1;
+    const y0 = c.y <= minY + 0.5 ? -H / 2 : c.y - lh / 2, y1 = c.y >= maxY - 0.5 ? H / 2 : c.y + lh / 2;
+    if (x1 - x0 <= 0 || y1 - y0 <= 0) return;
+    const cx = (c.x0 + c.x1) / 2;
+    ctx.save();
+    ctx.globalAlpha = base * st.opacity;
+    ctx.translate(cx, c.y + st.dy * lh);
+    if (st.scale !== 1) ctx.scale(st.scale, st.scale);
+    ctx.drawImage(off, (x0 + W / 2) * sc, (y0 + H / 2) * sc, (x1 - x0) * sc, (y1 - y0) * sc, x0 - cx, y0 - c.y, x1 - x0, y1 - y0);
+    ctx.restore();
+  });
 }
 /**
  * 閃光：光帶只亮在這個圖層自己的形狀上（去背的商品就只有商品本身亮、文字就只有字亮）。
@@ -3124,14 +3179,16 @@ function addAnimsTo(layers: EL[], kind: AnimKind) {
     return { id: l.id, x0: Math.min(...c.map((p) => p.x)), y0: Math.min(...c.map((p) => p.y)), x1: Math.max(...c.map((p) => p.x)), y1: Math.max(...c.map((p) => p.y)), groupId: l.groupId };
   }));
   const n = new Set(units.values()).size;
-  const staggered = n > 1 && (kind === "shine" || kind === "bounce" || kind === "twinkle");
+  const oneShot = isOneShot(kind);
+  const staggered = n > 1 && (kind === "shine" || kind === "bounce" || kind === "twinkle" || kind === "popIn" || kind === "typeIn");
   const base = defaultAnim(kind, "x");
-  const step = base.duration + 0.15;
+  // 彈出像參考影片裡的圖示，一個接一個間隔半秒；逐字是一段字跑完再換下一段
+  const step = kind === "popIn" ? 0.5 : base.duration + 0.15;
   const starts = staggeredStarts(n, 0.3, step);
   const cycle = n * step + 1;
   for (const l of layers) {
     const a = defaultAnim(kind, `anim_${crypto.randomUUID().slice(0, 6)}`, kind === "fadeIn" ? 0 : staggered ? starts[units.get(l.id) ?? 0] : 0.3);
-    if (staggered) a.gap = Math.max(0, cycle - a.duration);
+    if (staggered && !oneShot) a.gap = Math.max(0, cycle - a.duration);
     l.anims = [...(l.anims ?? []).filter((x) => x.kind !== kind), a];
   }
 }

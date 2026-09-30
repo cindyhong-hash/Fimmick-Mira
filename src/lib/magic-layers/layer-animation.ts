@@ -7,7 +7,13 @@
    時間單位都是秒；位移是圖層自己的座標（跟著圖層旋轉）、以圖層高度的比例表示。
    ============================================================ */
 
-export type AnimKind = "shine" | "bounce" | "pulse" | "twinkle" | "float" | "fadeIn";
+export type AnimKind = "shine" | "bounce" | "pulse" | "twinkle" | "float" | "fadeIn" | "popIn" | "typeIn";
+/** 逐字出現時，每個字怎麼進場：打字（直接冒出來）／淡入／彈出／飛入（從上面滑下來）。 */
+export type TypeStyle = "type" | "fade" | "pop" | "slide";
+export const TYPE_STYLES: TypeStyle[] = ["type", "fade", "pop", "slide"];
+/** 只跑一次的「進場」效果：開始前看不見，跑完保持顯示。 */
+const ONE_SHOT: ReadonlySet<AnimKind> = new Set(["fadeIn", "popIn", "typeIn"]);
+export const isOneShot = (kind: AnimKind) => ONE_SHOT.has(kind);
 export type ShineDirection = "down" | "up" | "right" | "left" | "downRight" | "downLeft" | "upRight" | "upLeft";
 
 /** 光前進的方向（圖層座標，y 往下為正）。 */
@@ -33,10 +39,14 @@ export type LayerAnim = {
   direction?: ShineDirection;
   /** 閃光：光帶的寬度（圖層大小的比例 0.1–0.8）。 */
   width?: number;
+  /** 淡入：一邊淡入一邊往這個方向滑進來；沒有＝原地淡入。滑多遠用 intensity。 */
+  enterDir?: ShineDirection;
+  /** 逐字出現：每個字怎麼進場。 */
+  typeStyle?: TypeStyle;
 };
 
 export const ANIM_LABELS: Record<AnimKind, string> = {
-  shine: "閃光掃過", bounce: "依序彈跳", pulse: "呼吸放大", twinkle: "閃爍", float: "輕輕漂浮", fadeIn: "淡入",
+  shine: "閃光掃過", bounce: "依序彈跳", pulse: "呼吸放大", twinkle: "閃爍", float: "輕輕漂浮", fadeIn: "淡入", popIn: "彈出", typeIn: "逐字出現",
 };
 
 /** 每種動畫的預設值（套上去時用；使用者再自己調）。 */
@@ -48,24 +58,27 @@ export function defaultAnim(kind: AnimKind, id: string, start = 0): LayerAnim {
     case "pulse": return { ...base, duration: 1.6, intensity: 0.4 };
     case "twinkle": return { ...base, duration: 1.2, intensity: 0.7 };
     case "float": return { ...base, duration: 3, intensity: 0.4 };
-    case "fadeIn": return { ...base, duration: 0.8, repeat: 1, intensity: 1 };
+    case "fadeIn": return { ...base, duration: 0.8, repeat: 1, intensity: 0.5 };
+    case "popIn": return { ...base, duration: 0.5, repeat: 1, intensity: 0.6 };
+    // duration 是整段字跑完的時間
+    case "typeIn": return { ...base, duration: 1.2, repeat: 1, intensity: 0.6, typeStyle: "slide" };
   }
 }
 
 /** 這個動畫最晚在第幾秒結束（一直循環的回傳 Infinity）。 */
 export function animEnd(a: LayerAnim): number {
-  if (a.kind === "fadeIn") return a.start + a.duration;
+  if (isOneShot(a.kind)) return a.start + a.duration;
   if (!a.repeat) return Infinity;
   return a.start + a.repeat * a.duration + (a.repeat - 1) * Math.max(0, a.gap);
 }
 
 /**
  * 在第 t 秒，這一輪跑到哪裡（0–1）；還沒開始、兩輪之間的空檔、全部跑完都回傳 null。
- * 淡入例外：開始前回傳 0（完全透明）、結束後回傳 1（保持顯示）。
+ * 進場效果（淡入、彈出、逐字出現）例外：開始前回傳 0（看不見）、結束後回傳 1（保持顯示）。
  */
 export function animPhase(a: LayerAnim, t: number): number | null {
   const d = Math.max(0.05, a.duration);
-  if (a.kind === "fadeIn") return t <= a.start ? 0 : Math.min(1, (t - a.start) / d);
+  if (isOneShot(a.kind)) return t <= a.start ? 0 : Math.min(1, (t - a.start) / d);
   if (t < a.start) return null;
   const cycle = d + Math.max(0, a.gap);
   const k = Math.floor((t - a.start) / cycle);
@@ -76,6 +89,8 @@ export function animPhase(a: LayerAnim, t: number): number | null {
 
 const easeInOut = (x: number) => (x < 0.5 ? 2 * x * x : 1 - (-2 * x + 2) ** 2 / 2);
 const easeOut = (x: number) => 1 - (1 - x) ** 3;
+/** 超過一點再回來（彈出用）；over 越大超過越多。 */
+const backOut = (x: number, over: number) => 1 + (over + 1) * (x - 1) ** 3 + over * (x - 1) ** 2;
 
 export type AnimFrame = {
   /** 位移（圖層座標，以圖層高度的比例）。 */
@@ -86,7 +101,11 @@ export type AnimFrame = {
   opacity: number;
   /** 閃光：這一格光帶跑到哪（0–1）＋方向、寬度、亮度；沒有光就沒有這欄。 */
   shines: { progress: number; direction: ShineDirection; width: number; intensity: number }[];
+  /** 逐字出現跑到哪（0–1）；沒有或已經跑完就沒有這欄（整段照常畫）。 */
+  typing?: TypingState;
 };
+
+export type TypingState = { p: number; style: TypeStyle; intensity: number };
 
 export const REST: AnimFrame = { dx: 0, dy: 0, scale: 1, opacity: 1, shines: [] };
 
@@ -120,10 +139,42 @@ export function animFrame(anims: LayerAnim[] | undefined, t: number): AnimFrame 
         break;
       case "fadeIn":
         f.opacity *= easeOut(p);
+        if (a.enterDir) {
+          // 箭頭是移動方向，所以一開始在反方向那一邊，最後回到原位（距離以圖層高度的比例）
+          const [vx, vy] = SHINE_VECTORS[a.enterDir];
+          const len = Math.hypot(vx, vy) || 1, far = (0.1 + 0.6 * k) * (1 - easeOut(p));
+          f.dx -= (vx / len) * far; f.dy -= (vy / len) * far;
+        }
+        break;
+      case "popIn":
+        // 從無放大、稍微超過再縮回原本大小
+        f.scale *= p >= 1 ? 1 : Math.max(0, backOut(p, 1 + 2.5 * k));
+        f.opacity *= Math.min(1, p * 4);
+        break;
+      case "typeIn":
+        if (p < 1) f.typing = { p, style: a.typeStyle ?? "slide", intensity: k };
         break;
     }
   }
   return f;
+}
+
+/**
+ * 逐字出現：第 i 個字（共 n 個，空白不算）在這一格的樣子。
+ * 每個字有自己的一小段進場時間，一個接一個錯開；「打字」沒有進場時間，到了就出現。
+ * dy 以行高的比例表示（負的＝在上面）。
+ */
+export function typeChar(s: TypingState, i: number, n: number): { opacity: number; scale: number; dy: number } {
+  if (s.style === "type") return { opacity: s.p * n > i + 1e-9 ? 1 : 0, scale: 1, dy: 0 };
+  const w = n <= 1 ? 1 : Math.min(0.5, 2.5 / n);
+  const begin = n <= 1 ? 0 : (i * (1 - w)) / (n - 1);
+  const q = Math.max(0, Math.min(1, (s.p - begin) / w));
+  const k = s.intensity;
+  switch (s.style) {
+    case "fade": return { opacity: easeOut(q), scale: 1, dy: 0 };
+    case "pop": return { opacity: Math.min(1, q * 4), scale: q >= 1 ? 1 : Math.max(0, backOut(q, 1 + 2.5 * k)), dy: 0 };
+    case "slide": return { opacity: easeOut(q), scale: 1, dy: -(1 - easeOut(q)) * (0.3 + 0.9 * k) };
+  }
 }
 
 /**
@@ -157,7 +208,7 @@ export function videoDuration(allAnims: LayerAnim[], chosen?: number | null): nu
 /** 讀存檔：格式不對的動畫丟掉，數值夾在合理範圍。 */
 export function readAnims(value: unknown): LayerAnim[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  const kinds: AnimKind[] = ["shine", "bounce", "pulse", "twinkle", "float", "fadeIn"];
+  const kinds: AnimKind[] = ["shine", "bounce", "pulse", "twinkle", "float", "fadeIn", "popIn", "typeIn"];
   const num = (v: unknown, lo: number, hi: number, dflt: number) => (typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : dflt);
   const out: LayerAnim[] = [];
   for (const raw of value) {
@@ -168,12 +219,14 @@ export function readAnims(value: unknown): LayerAnim[] | undefined {
     out.push({
       ...d,
       start: num(r.start, 0, 30, d.start), duration: num(r.duration, 0.1, 10, d.duration),
-      repeat: Math.round(num(r.repeat, 0, 50, d.repeat)), gap: num(r.gap, 0, 10, d.gap), intensity: num(r.intensity, 0, 1, d.intensity),
+      repeat: isOneShot(d.kind) ? 1 : Math.round(num(r.repeat, 0, 50, d.repeat)), gap: num(r.gap, 0, 10, d.gap), intensity: num(r.intensity, 0, 1, d.intensity),
       ...(d.kind === "shine" ? {
         // 舊存檔只有三個方向，「diagonal」就是現在的 ↘
         direction: r.direction === "diagonal" ? "downRight" : typeof r.direction === "string" && Object.hasOwn(SHINE_VECTORS, r.direction) ? (r.direction as ShineDirection) : d.direction,
         width: num(r.width, 0.1, 0.8, d.width ?? 0.35),
       } : {}),
+      ...(d.kind === "fadeIn" && typeof r.enterDir === "string" && Object.hasOwn(SHINE_VECTORS, r.enterDir) ? { enterDir: r.enterDir as ShineDirection } : {}),
+      ...(d.kind === "typeIn" ? { typeStyle: TYPE_STYLES.includes(r.typeStyle as TypeStyle) ? (r.typeStyle as TypeStyle) : d.typeStyle } : {}),
     });
   }
   return out.length ? out : undefined;

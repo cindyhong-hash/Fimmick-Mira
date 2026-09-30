@@ -7,7 +7,7 @@
    ============================================================ */
 import { useEffect, useRef, useState } from "react";
 import { Pause, Play, Sparkles, Trash2, Film, Plus } from "lucide-react";
-import { ANIM_LABELS, animEnd, type AnimKind, type LayerAnim, type ShineDirection } from "@/lib/magic-layers/layer-animation.ts";
+import { ANIM_LABELS, animEnd, isOneShot, TYPE_STYLES, type AnimKind, type LayerAnim, type ShineDirection, type TypeStyle } from "@/lib/magic-layers/layer-animation.ts";
 
 const KINDS: { kind: AnimKind; hint: string }[] = [
   { kind: "shine", hint: "一道光從物件上掃過去；選好幾個會一個接一個閃" },
@@ -16,7 +16,11 @@ const KINDS: { kind: AnimKind; hint: string }[] = [
   { kind: "twinkle", hint: "忽明忽暗，適合星星、小裝飾" },
   { kind: "float", hint: "上下輕輕飄，適合商品" },
   { kind: "fadeIn", hint: "開場時慢慢出現" },
+  { kind: "popIn", hint: "從無到有「啵」一下冒出來；選好幾個會一個接一個出現，適合圖示、標籤" },
+  { kind: "typeIn", hint: "文字一個字一個字出現（打字、淡入、彈出、飛入）；選好幾段字會一段接一段" },
 ];
+
+const TYPE_STYLE_LABELS: Record<TypeStyle, string> = { type: "打字", fade: "淡入", pop: "彈出", slide: "飛入" };
 
 const btn: React.CSSProperties = { height: 34, borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", fontSize: 12, fontWeight: 600, color: "#374151", cursor: "pointer" };
 const primary: React.CSSProperties = { ...btn, border: "none", background: "#7c3aed", color: "#fff" };
@@ -101,7 +105,7 @@ export function AnimationTab(props: {
   );
 }
 
-const ANIM_COLORS: Record<AnimKind, string> = { shine: "#f59e0b", bounce: "#ec4899", pulse: "#8b5cf6", twinkle: "#06b6d4", float: "#10b981", fadeIn: "#6b7280" };
+const ANIM_COLORS: Record<AnimKind, string> = { shine: "#f59e0b", bounce: "#ec4899", pulse: "#8b5cf6", twinkle: "#06b6d4", float: "#10b981", fadeIn: "#6b7280", popIn: "#f97316", typeIn: "#3b82f6" };
 
 /** 每個有動畫的圖層一列，色條是動畫的時間（循環的後面接淡淡的重複）。拖色條改開始時間。 */
 function Timeline(props: {
@@ -177,26 +181,40 @@ export function LayerAnimSettings(props: {
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
             <Field label="開始（秒）"><input type="number" min={0} max={30} step={0.1} value={a.start} onChange={(e) => props.onChange(a.id, { start: Math.max(0, Number(e.target.value) || 0) })} style={num} /></Field>
-            <Field label="一輪（秒）"><input type="number" min={0.1} max={10} step={0.1} value={a.duration} onChange={(e) => props.onChange(a.id, { duration: Math.max(0.1, Number(e.target.value) || 0.1) })} style={num} /></Field>
-            {a.kind !== "fadeIn" && (<>
+            <Field label={a.kind === "typeIn" ? "整段跑完（秒）" : isOneShot(a.kind) ? "多久（秒）" : "一輪（秒）"}><input type="number" min={0.1} max={10} step={0.1} value={a.duration} onChange={(e) => props.onChange(a.id, { duration: Math.max(0.1, Number(e.target.value) || 0.1) })} style={num} /></Field>
+            {!isOneShot(a.kind) && (<>
               <Field label="每輪間隔（秒）"><input type="number" min={0} max={10} step={0.1} value={a.gap} onChange={(e) => props.onChange(a.id, { gap: Math.max(0, Number(e.target.value) || 0) })} style={num} /></Field>
               <Field label="重複（0＝一直）"><input type="number" min={0} max={50} step={1} value={a.repeat} onChange={(e) => props.onChange(a.id, { repeat: Math.max(0, Math.round(Number(e.target.value) || 0)) })} style={num} /></Field>
             </>)}
           </div>
-          {a.kind !== "fadeIn" && (
-            <Field label={`強度 ${Math.round(a.intensity * 100)}%`}>
+          {a.kind === "typeIn" && (
+            <Field label="每個字怎麼進場">
+              <div style={{ display: "flex", gap: 4 }}>
+                {TYPE_STYLES.map((st) => (
+                  <button key={st} type="button" onClick={() => props.onChange(a.id, { typeStyle: st })}
+                    style={{ ...btn, flex: 1, height: 28, fontSize: 11, ...((a.typeStyle ?? "slide") === st ? { border: "1px solid #7c3aed", color: "#6d28d9", background: "#f5f3ff" } : {}) }}>{TYPE_STYLE_LABELS[st]}</button>
+                ))}
+              </div>
+            </Field>
+          )}
+          {a.kind !== "fadeIn" && !(a.kind === "typeIn" && (a.typeStyle === "type" || a.typeStyle === "fade")) && (
+            <Field label={`${a.kind === "typeIn" && (a.typeStyle ?? "slide") === "slide" ? "飛入距離" : a.kind === "popIn" || a.kind === "typeIn" ? "彈的力道" : "強度"} ${Math.round(a.intensity * 100)}%`}>
               <input type="range" min={5} max={100} value={Math.round(a.intensity * 100)} onChange={(e) => props.onChange(a.id, { intensity: Number(e.target.value) / 100 })} style={{ width: "100%", accentColor: "#7c3aed" }} />
             </Field>
           )}
+          {a.kind === "fadeIn" && (<>
+            <Field label="從哪裡進來">
+              <DirCompass value={a.enterDir ?? null} ariaPrefix="淡入" center="原地" onPick={(d) => props.onChange(a.id, { enterDir: d ?? undefined })} />
+            </Field>
+            {a.enterDir && (
+              <Field label={`滑動距離 ${Math.round(a.intensity * 100)}%`}>
+                <input type="range" min={5} max={100} value={Math.round(a.intensity * 100)} onChange={(e) => props.onChange(a.id, { intensity: Number(e.target.value) / 100 })} style={{ width: "100%", accentColor: "#7c3aed" }} />
+              </Field>
+            )}
+          </>)}
           {a.kind === "shine" && (<>
             <Field label="方向">
-              {/* 3×3 羅盤：箭頭＝光前進的方向（↑ 是從下往上掃），中間空著 */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 32px)", gap: 4 }}>
-                {SHINE_COMPASS.map(([d, t, name], i) => d ? (
-                  <button key={d} type="button" title={name} aria-label={`閃光${name}`} onClick={() => props.onChange(a.id, { direction: d })}
-                    style={{ ...btn, width: 32, height: 28, padding: 0, fontSize: 14, ...((a.direction ?? "down") === d ? { border: "1px solid #7c3aed", color: "#6d28d9", background: "#f5f3ff" } : {}) }}>{t}</button>
-                ) : <span key={`c${i}`} />)}
-              </div>
+              <DirCompass value={a.direction ?? "down"} ariaPrefix="閃光" onPick={(d) => d && props.onChange(a.id, { direction: d })} />
             </Field>
             <Field label={`光的寬度 ${Math.round((a.width ?? 0.35) * 100)}%`}>
               <input type="range" min={10} max={80} value={Math.round((a.width ?? 0.35) * 100)} onChange={(e) => props.onChange(a.id, { width: Number(e.target.value) / 100 })} style={{ width: "100%", accentColor: "#7c3aed" }} />
@@ -213,6 +231,25 @@ const SHINE_COMPASS: ([ShineDirection, string, string] | [null, "", ""])[] = [
   ["left", "←", "從右往左"], [null, "", ""], ["right", "→", "從左往右"],
   ["downLeft", "↙", "從右上往左下"], ["down", "↓", "從上往下"], ["downRight", "↘", "從左上往右下"],
 ];
+
+/**
+ * 3×3 方向羅盤：箭頭＝移動的方向（↑ 是往上走、也就是從下面來）。
+ * 有 center 時正中間是一顆「不移動」的按鈕（回傳 null），沒有就空著。
+ */
+function DirCompass(props: { value: ShineDirection | null; onPick: (d: ShineDirection | null) => void; center?: string; ariaPrefix: string }) {
+  const on = { border: "1px solid #7c3aed", color: "#6d28d9", background: "#f5f3ff" };
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 32px)", gap: 4 }}>
+      {SHINE_COMPASS.map(([d, t, name], i) => d ? (
+        <button key={d} type="button" title={name} aria-label={`${props.ariaPrefix}${name}`} onClick={() => props.onPick(d)}
+          style={{ ...btn, width: 32, height: 28, padding: 0, fontSize: 14, ...(props.value === d ? on : {}) }}>{t}</button>
+      ) : props.center ? (
+        <button key={`c${i}`} type="button" title={props.center} aria-label={`${props.ariaPrefix}${props.center}`} onClick={() => props.onPick(null)}
+          style={{ ...btn, width: 32, height: 28, padding: 0, fontSize: 10, ...(props.value === null ? on : {}) }}>{props.center}</button>
+      ) : <span key={`c${i}`} />)}
+    </div>
+  );
+}
 
 function Field({ label: text, children }: { label: string; children: React.ReactNode }) {
   return (

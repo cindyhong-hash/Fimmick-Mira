@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { animEnd, animFrame, animUnits, animPhase, defaultAnim, readAnims, shineBand, staggeredStarts, videoDuration } from "./layer-animation.ts";
+import { animEnd, animFrame, animUnits, animPhase, defaultAnim, readAnims, shineBand, staggeredStarts, typeChar, videoDuration } from "./layer-animation.ts";
 
 const near = (a: number, b: number, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} ≈ ${b}`);
 
@@ -91,4 +91,54 @@ test("一次套好幾個：疊在一起的算同一個、照閱讀順序排", ()
   assert.ok(u.get("b-frame")! < u.get("c")!);
   assert.ok(u.get("c")! < u.get("d")!);
   assert.equal(new Set(u.values()).size, 5);
+});
+
+test("彈出：開始前看不見、中間會超過原本大小、結束後保持原樣", () => {
+  const pop = defaultAnim("popIn", "p", 1);
+  const before = animFrame([pop], 0.5);
+  assert.equal(before.opacity, 0);
+  const peak = Math.max(...[0.5, 0.6, 0.7, 0.8].map((q) => animFrame([pop], 1 + q * pop.duration).scale));
+  assert.ok(peak > 1.02);
+  const after = animFrame([pop], 5);
+  near(after.scale, 1); near(after.opacity, 1);
+  assert.equal(animEnd(pop), 1 + pop.duration);
+});
+
+test("逐字出現：一個字一個字依序出現、跑完就整段顯示", () => {
+  const ty = { ...defaultAnim("typeIn", "t", 0), typeStyle: "fade" as const };
+  assert.equal(animFrame([ty], 0).typing?.p, 0);
+  assert.equal(animFrame([ty], 99).typing, undefined);   // 跑完不用逐字畫
+  const mid = animFrame([ty], ty.duration / 2).typing!;
+  const first = typeChar(mid, 0, 10), last = typeChar(mid, 9, 10);
+  near(first.opacity, 1);
+  near(last.opacity, 0);
+  // 打字：p=0 一個字都沒有，p 快到 1 最後一個字才出現
+  const type = (p: number, i: number) => typeChar({ p, style: "type", intensity: 1 }, i, 4).opacity;
+  assert.deepEqual([0, 1, 2, 3].map((i) => type(0, i)), [0, 0, 0, 0]);
+  assert.deepEqual([0, 1, 2, 3].map((i) => type(0.6, i)), [1, 1, 1, 0]);
+  // 飛入：還沒到的字在上面、到了回到原位
+  const slide = (p: number) => typeChar({ p, style: "slide", intensity: 1 }, 0, 1);
+  assert.ok(slide(0.1).dy < 0); near(slide(1).dy, 0);
+});
+
+test("讀存檔：新效果與逐字的進場方式", () => {
+  const r = readAnims([{ kind: "typeIn", typeStyle: "pop", repeat: 5 }, { kind: "typeIn", typeStyle: "wiggle" }, { kind: "popIn" }])!;
+  assert.equal(r.length, 3);
+  assert.equal(r[0].typeStyle, "pop");
+  assert.equal(r[0].repeat, 1);   // 只跑一次
+  assert.equal(r[1].typeStyle, "slide");
+  assert.equal(r[2].kind, "popIn");
+});
+
+test("淡入可以選方向：從反方向滑進來、到了回原位；沒選方向就原地淡入", () => {
+  const still = defaultAnim("fadeIn", "f", 0);
+  near(animFrame([still], 0.1).dx, 0); near(animFrame([still], 0.1).dy, 0);
+  const up = { ...still, enterDir: "up" as const };   // 往上滑進來＝一開始在下面
+  assert.ok(animFrame([up], 0.05).dy > 0);
+  near(animFrame([up], 5).dy, 0);
+  const right = { ...still, enterDir: "right" as const };
+  assert.ok(animFrame([right], 0.05).dx < 0);
+  const r = readAnims([{ kind: "fadeIn", enterDir: "downLeft" }, { kind: "fadeIn", enterDir: "nope" }])!;
+  assert.equal(r[0].enterDir, "downLeft");
+  assert.equal(r[1].enterDir, undefined);
 });

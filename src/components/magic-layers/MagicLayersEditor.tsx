@@ -15,6 +15,9 @@ import { distanceToPolyline, drawPaint, paintHits, samplePath, smoothStroke, str
    ============================================================ */
 import { drawEditableText, layoutText, readTextLayout, DEFAULT_TEXT_LAYOUT, type TextLayout } from "@/lib/magic-layers/editable-text.ts";
 import { idsInBox, selectableIds } from "@/lib/magic-layers/box-select.ts";
+import { animFrame, animUnits, defaultAnim, readAnims, shineBand, staggeredStarts, videoDuration, REST, type AnimFrame, type AnimKind, type LayerAnim } from "@/lib/magic-layers/layer-animation.ts";
+import { encodeMp4, videoSize } from "@/lib/magic-layers/mp4-export.ts";
+import { AnimationTab, LayerAnimSettings } from "./AnimationPanel";
 import { anchorShift, autoWidth, shiftRuns, caretLines, indexAt, selectionSpans, verticalMove, widestLine, wrapRanges, type CaretLine, type TextLineRange } from "@/lib/magic-layers/text-caret.ts";
 import { hexToRgb, isEditableInPsd, psdFileName, psdFontName, psdTextEffects, styleRunsFor } from "@/lib/magic-layers/psd-export.ts";
 import { useBrandFonts } from "@/lib/fonts/useBrandFonts";
@@ -23,7 +26,7 @@ export type { SavedLayer } from "@/lib/magic-layers/saved-layer.ts";
 /** 多頁設計的一頁（像 Canva 的頁面）：尺寸＋圖層。 */
 export type SavedPage = { docW: number; docH: number; layers: SavedLayer[]; /** 頁面名稱（例如「封面」）；空的就顯示「第 N 頁」。 */ name?: string };
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalDistributeCenter, AlignStartHorizontal, AlignStartVertical, AlignVerticalDistributeCenter, ChevronUp, ChevronDown, ChevronLeft, Scissors, Sparkles, Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowLeft, Plus, Download, Image as ImageIcon, Upload, Type, BadgeCheck, Square, Star, Minus, Pencil, Undo2, Redo2, Eraser, Maximize2, GripVertical, WandSparkles, Save, Layers, LayoutTemplate, Wrench, PenTool } from "lucide-react";
+import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalDistributeCenter, AlignStartHorizontal, AlignStartVertical, AlignVerticalDistributeCenter, ChevronUp, ChevronDown, ChevronLeft, Scissors, Sparkles, Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowLeft, Plus, Download, Image as ImageIcon, Upload, Type, BadgeCheck, Square, Star, Minus, Pencil, Undo2, Redo2, Eraser, Maximize2, GripVertical, WandSparkles, Save, Layers, LayoutTemplate, Wrench, PenTool, Clapperboard } from "lucide-react";
 import type { LayerData, FragmentationReport } from "@/lib/magic-layers/types.ts";
 import { extractLayer } from "@/lib/magic-layers/extract-browser.ts";
 import { alphaHit } from "@/lib/magic-layers/alpha-hit-test.ts";
@@ -67,6 +70,10 @@ type EL = {
    * 拖文字框左右兩邊、或自動變寬碰到畫布邊緣時會變成固定寬度。有 textLayout 的文字本來就會換行，不看這個。
    */
   wrap?: boolean;
+  /** 圖層動畫（輸出 MP4 用）。 */
+  anims?: LayerAnim[];
+  /** 光澤範圍：本身不顯示，只有閃光掃過時在它的形狀裡亮一下。 */
+  shineOnly?: boolean;
 };
 
 /**
@@ -76,24 +83,27 @@ type EL = {
  */
 const SHOW_MAGIC_FILL = false;
 
-type LeftTab = "templates" | "materials" | "ai" | "tools" | "upload";
+type LeftTab = "templates" | "materials" | "ai" | "tools" | "upload" | "animate";
 const LEFT_TABS: { id: LeftTab; label: string; Icon: typeof Wrench }[] = [
   { id: "templates", label: "範本", Icon: LayoutTemplate },
   { id: "materials", label: "素材", Icon: ImageIcon },
   { id: "ai", label: "AI 設計", Icon: WandSparkles },
   { id: "tools", label: "工具", Icon: Wrench },
   { id: "upload", label: "上傳", Icon: Upload },
+  { id: "animate", label: "動畫", Icon: Clapperboard },
 ];
 
 const TYPE_LABEL: Record<string, string> = { background: "背景", product: "產品", person: "人物", object: "物件", decoration: "裝飾", drawing: "繪製", independent_text: "文字" };
 
 /** One serialized layer in a saved 排版 (stored in LibraryImage.paramsJson). */
 
-export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, logos, name, clientId, onRename, onBack, onSave, extraPages, firstPageName }: { image: HTMLImageElement; layers: LayerData[]; fragmentation?: FragmentationReport; backgrounds?: { url: string; label?: string }[]; logos?: string[]; name?: string; clientId?: string | null; onRename?: (name: string) => void; onBack?: () => void; onSave?: (payload: { docW: number; docH: number; layers: SavedLayer[]; imageDataUrl: string; finalize: boolean; pages?: SavedPage[]; pageImages?: string[] }) => Promise<void>;
+export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, logos, name, clientId, onRename, onBack, onSave, extraPages, firstPageName, animDuration }: { image: HTMLImageElement; layers: LayerData[]; fragmentation?: FragmentationReport; backgrounds?: { url: string; label?: string }[]; logos?: string[]; name?: string; clientId?: string | null; onRename?: (name: string) => void; onBack?: () => void; onSave?: (payload: { docW: number; docH: number; layers: SavedLayer[]; imageDataUrl: string; finalize: boolean; pages?: SavedPage[]; pageImages?: string[]; animDuration?: number }) => Promise<void>;
   /** 多頁草稿的第 2 頁以後；第 1 頁照舊從 image／layers 進來。 */
   extraPages?: SavedPage[];
   /** 第 1 頁的名稱（第 1 頁的圖層走 layers，名稱另外帶進來）。 */
-  firstPageName?: string }) {
+  firstPageName?: string;
+  /** 圖層動畫的影片長度（秒；存檔帶回來的，沒有就照動畫自動決定）。 */
+  animDuration?: number }) {
   // 品牌字體：使用者上傳的字體要能在畫布選用。ready 用來在字體載完後重畫一次，
   // 否則已經套用品牌字體的圖層會先以系統字型畫出來。
   const { fonts: brandFonts, ready: brandFontsReady } = useBrandFonts(clientId);
@@ -221,6 +231,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const editGeomRef = useRef<TextGeom | null>(null);
   /** 拉框選取中的框（文件座標）；render 畫虛線框用。 */
   const boxSelRef = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  /** 動畫預覽的時間（秒）；null＝不在預覽，照平常畫。 */
+  const animTimeRef = useRef<number | null>(null);
   const startTextEditRef = useRef<(l: EL, range?: { start: number; end: number }) => void>(() => {});
   const exitTextEditRef = useRef<() => void>(() => {});
   // 生成式填色：在畫布上框一塊，只有那一塊交給 AI 重畫（補東西或移除東西）。
@@ -298,6 +310,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           paint: (l.meta?.paint as PaintStroke[] | undefined) ?? undefined,
           glow: (l.meta?.glow as LayerGlow | undefined) ?? null,
           shadow: (l.meta?.shadow as LayerShadow | undefined) ?? null,
+          anims: readAnims(l.meta?.anims),
+          shineOnly: !!l.meta?.shineOnly,
           embeddedText: l.embeddedText.map((t) => ({ text: t.text })), thumb: null,
         };
         if (isText && !st && !canvas) el.color = sampleColor(sctx, l.x, l.y, l.width, l.height);
@@ -367,13 +381,12 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     ctx.strokeStyle = "rgba(0,0,0,.15)"; ctx.lineWidth = 1 / view.current.zoom; ctx.strokeRect(0, 0, doc.w, doc.h);
     // Figma Frame-style Clip content：圖層仍可拖出畫布，但超出文件邊界的像素不顯示。
     ctx.beginPath(); ctx.rect(0, 0, doc.w, doc.h); ctx.clip();
+    const at = animTimeRef.current;
     for (const l of layersRef.current) {
       if (!l.visible) continue;
-      ctx.save();
-      applyClip(ctx, l, layersRef.current);
-      applyLayerTransform(ctx, l); ctx.globalAlpha = l.opacity;
-      drawElBody(ctx, l);
-      ctx.restore();
+      drawLayerAnimated(ctx, l, layersRef.current, at);
+      // 光澤範圍平常看不見：編輯時畫一個淡淡的虛線框，讓人知道它在哪
+      if (l.shineOnly && at === null) drawShineZoneHint(ctx, l, view.current.zoom);
     }
     // 畫布上改字：游標、反白、組字底線（跟字畫在同一個座標系）
     const editId = editingRef.current, ta = textAreaRef.current;
@@ -458,7 +471,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     ctx.restore();
 
     // 改字時只留細虛線框（drawTextEditing 畫的），不顯示縮放／旋轉把手
-    if (toolRef.current === "select") for (const id of selectedIds) { if (id === editId) continue; const s = layersRef.current.find((l) => l.id === id); if (s?.visible) drawSelection(ctx, s, id === selectedId); }
+    if (toolRef.current === "select" && animTimeRef.current === null) for (const id of selectedIds) { if (id === editId) continue; const s = layersRef.current.find((l) => l.id === id); if (s?.visible) drawSelection(ctx, s, id === selectedId); }
     // 看不見的 textarea 跟著文字框走：輸入法的選字視窗才會出現在字旁邊
     if (editEl && ta) placeTextArea(ta, editEl, view.current);
   }, [doc.w, doc.h, selectedId, selectedIds]);
@@ -1081,6 +1094,78 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     } finally { setAdding(false); }
   }, [adding, refresh, render]);
 
+  /* ---------- 圖層動畫：預覽播放、套用效果、輸出 MP4 ---------- */
+  const [videoLen, setVideoLen] = useState<number | null>(animDuration ?? null);
+  const [playing, setPlaying] = useState(false);
+  const [mp4Busy, setMp4Busy] = useState<number | null>(null);
+  // 圖層存在 ref 裡（不是 state），render 期間不能讀：影片長度、時間軸都用函式，在事件或子元件裡才去讀
+  const currentDuration = useCallback(() => videoDuration(layersRef.current.flatMap((l) => l.anims ?? []), videoLen), [videoLen]);
+  // 時間軸：同一個效果、同一個開始時間的圖層（通常是同一個物件的幾個零件）合成一列，名字用裡面的文字
+  const currentTracks = useCallback(() => animTrackRows(layersRef.current), []);
+  const getAnimTime = useCallback(() => animTimeRef.current, []);
+  // 播放：每一格算時間、重畫（循環播放）；只在「動畫」分頁開著時播
+  const previewing = playing && leftTab === "animate";
+  useEffect(() => {
+    if (!previewing) return;
+    let raf = 0; const t0 = performance.now() - (animTimeRef.current ?? 0) * 1000;
+    const tick = () => { animTimeRef.current = ((performance.now() - t0) / 1000) % currentDuration(); render(); raf = requestAnimationFrame(tick); };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [previewing, render, currentDuration]);
+  const playAnim = useCallback(() => { if (animTimeRef.current === null) animTimeRef.current = 0; setPlaying(true); setLeftTab("animate"); }, []);
+  const stopAnim = useCallback(() => { setPlaying(false); animTimeRef.current = null; render(); }, [render]);
+  const seekAnim = useCallback((t: number) => { setPlaying(false); animTimeRef.current = t; render(); }, [render]);
+  // 離開「動畫」分頁就回到平常的編輯畫面（回來時如果還在播就繼續播）
+  useEffect(() => { if (leftTab !== "animate") { animTimeRef.current = null; render(); } }, [leftTab, render]);
+
+  /** 把效果套到選到的圖層；選好幾個時，閃光／彈跳／閃爍依由左到右自動錯開，循環時也保持同樣順序。 */
+  const applyAnimToSelection = (kind: AnimKind) => {
+    const picked = layersRef.current.filter((l) => selectedIdsRef.current.includes(l.id) && !l.locked).sort((a, b) => a.cx - b.cx);
+    if (!picked.length) return;
+    addAnimsTo(picked, kind);
+    markDirty(); refresh(); playAnim();
+  };
+  /** 加一塊看不見的光澤範圍（圓角矩形，可以拉大縮小、換成橢圓），預設就有閃光。 */
+  const addShineZone = () => {
+    const w = doc.w * 0.4, h = doc.h * 0.25;
+    const el: EL = {
+      id: `shine_${crypto.randomUUID().slice(0, 8)}`, name: "光澤範圍", type: "object", semanticId: "object", instanceId: null, confidence: 1, editable: true, source: "generated",
+      isText: false, text: "", color: "#000", fontSize: 24, fontFamily: "'Noto Sans TC',system-ui,sans-serif", fontWeight: 700, align: "center",
+      shape: { kind: "rect", fill: "#ffffff", stroke: "none", strokeWidth: 0, radius: 24 }, canvas: null, naturalW: w, naturalH: h, src: null,
+      cx: doc.w / 2, cy: doc.h / 2, w, h, rotation: 0, visible: true, locked: false, opacity: 1, embeddedText: [], thumb: null,
+      shineOnly: true, anims: [defaultAnim("shine", `anim_${crypto.randomUUID().slice(0, 6)}`, 0.2)],
+    };
+    el.thumb = makeThumb(el);
+    layersRef.current.push(el); selectOnly(el.id); markDirty(); refresh(); render();
+  };
+  /** 輸出 MP4：一格一格畫（跟預覽同一套），瀏覽器內建編碼器壓成 H.264。 */
+  const exportMp4 = async () => {
+    if (mp4Busy !== null) return;
+    if (!layersRef.current.some((l) => l.anims?.length)) { alert("還沒有圖層有動畫：先在「動畫」分頁選圖層、套用效果"); setLeftTab("animate"); return; }
+    setPlaying(false); animTimeRef.current = null;
+    setMp4Busy(0);
+    try {
+      const size = videoSize(doc.w, doc.h);
+      const layers = layersRef.current;
+      const blob = await encodeMp4({
+        width: size.width, height: size.height, fps: 30, duration: currentDuration(),
+        renderFrame: (ctx, t) => {
+          ctx.scale(size.width / doc.w, size.height / doc.h);
+          ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, doc.w, doc.h);
+          for (const l of layers) if (l.visible) drawLayerAnimated(ctx, l, layers, t);
+        },
+        onProgress: (done, total) => setMp4Busy(done / total),
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url;
+      a.download = `${(name || layersRef.current.find((l) => l.isText)?.text || "設計稿").replace(/[\\/:*?"<>|\n\r\t]+/g, " ").trim().slice(0, 40) || "設計稿"}.mp4`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    } catch (err) {
+      alert("輸出 MP4 失敗：" + (err instanceof Error ? err.message : String(err)));
+    } finally { setMp4Busy(null); render(); }
+  };
+
   /* ---------- 下載 PSD ---------- */
   const [psdBusy, setPsdBusy] = useState(false);
   const downloadPsd = useCallback(async () => {
@@ -1588,6 +1673,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       ...(sl.wrap ? { wrap: true } : {}),
       ...(sl.paint?.length ? { paint: sl.paint } : {}),
       ...(sl.glow ? { glow: sl.glow } : {}),
+      ...(sl.anims?.length ? { anims: readAnims(sl.anims) } : {}),
+      ...(sl.shineOnly ? { shineOnly: true } : {}),
       ...(sl.shadow ? { shadow: sl.shadow } : {}),
     };
     el.thumb = makeThumb(el);
@@ -1807,7 +1894,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       const imageDataUrl = multi ? flattenEls(firstEls, firstW, firstH) : flattenToDataUrl();
       const pagePayload = multi ? pages.map((p, i) => ({ docW: p.w, docH: p.h, layers: serializeEls(pageEls[i]), ...(p.name ? { name: p.name } : {}) })) : undefined;
       const pageImages = download && multi ? pages.map((p, i) => flattenEls(pageEls[i], p.w, p.h)) : undefined;
-      await onSave({ docW: firstW, docH: firstH, layers: multi ? pagePayload![0].layers : serializeLayers(), imageDataUrl, finalize: download, pages: pagePayload, pageImages });
+      await onSave({ docW: firstW, docH: firstH, layers: multi ? pagePayload![0].layers : serializeLayers(), imageDataUrl, finalize: download, pages: pagePayload, pageImages, ...(videoLen ? { animDuration: videoLen } : {}) });
       savedIdx.current = histIdx.current;
       markPagesSaved(pages, pageIdxRef.current, histIdx.current);
       setPagesChanged(false);
@@ -1829,7 +1916,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       }
     } catch (err) { alert("儲存失敗：" + (err instanceof Error ? err.message : String(err))); }
     finally { setSaving(false); }
-  }, [onSave, saving, doc.w, doc.h, flattenToDataUrl, serializeLayers, stashCurrentPage]);
+  }, [onSave, saving, doc.w, doc.h, flattenToDataUrl, serializeLayers, stashCurrentPage, videoLen]);
 
   // 設計工具慣例：Command+S / Ctrl+S 儲存草稿，不佔用工具列按鈕空間。
   useEffect(() => {
@@ -2018,7 +2105,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
             <span style={S.divider} />
             {(saving || saved) && <span aria-live="polite" style={{ fontSize: 12, color: saved ? "#16a34a" : "#9ca3af" }}>{saving ? "儲存中…" : "✓ 已自動儲存"}</span>}
             <DownloadMenu busy={saving || psdBusy}
-              onPick={(f) => { if (f === "psd") void downloadPsd(); else void doSave(true, f); }} />
+              onPick={(f) => { if (f === "psd") void downloadPsd(); else if (f === "mp4") void exportMp4(); else void doSave(true, f); }} />
           </>
         )}
       </div>
@@ -2187,6 +2274,16 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                 </div>
               )}
             </>)}
+            {leftTab === "animate" && (
+              <AnimationTab
+                getDuration={currentDuration} autoDuration={!videoLen} onDuration={(d) => { setVideoLen(d); markDirty(); }}
+                playing={playing} getTime={getAnimTime} onPlay={playAnim} onPause={stopAnim} onSeek={seekAnim}
+                selectionCount={selectedIds.length} onApply={applyAnimToSelection} onAddZone={addShineZone}
+                getTracks={currentTracks} selectedIds={selectedIds} onSelectLayer={(id) => { selectOnly(id); render(); }}
+                onMoveStart={(layerId, animId, start) => { moveAnimGroup(layersRef.current, layerId, animId, start); seekAnim(start); refresh(); }}
+                onCommitMove={() => markDirty()}
+                onExport={() => void exportMp4()} exporting={mp4Busy !== null} progress={mp4Busy ?? 0} />
+            )}
             {leftTab === "upload" && (<>
               <button style={S.tool} onClick={() => uploadImgRef.current?.click()}><Upload size={16} />上傳圖片</button>
               <button style={S.tool} onClick={() => addProdRef.current?.click()} disabled={adding} title="上傳一張產品圖，自動去背後加入為新圖層">
@@ -2642,6 +2739,10 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                 {selEl.type !== "background" && (
                   <GlowControls glow={selEl.glow ?? null} onChange={(glow) => updateText({ glow })} />
                 )}
+                <LayerAnimSettings anims={selEl.anims} shineOnly={selEl.shineOnly}
+                  onChange={(animId, patch) => { patchAnim(selEl, animId, patch); markDirty(); render(); refresh(); }}
+                  onRemove={(animId) => { removeAnim(selEl, animId); markDirty(); render(); refresh(); }}
+                  onAdd={(kind) => { addAnimsTo([selEl], kind); markDirty(); render(); refresh(); }} />
               </div>
             ) : (
               <div style={{ padding: 16 }}>
@@ -2950,7 +3051,109 @@ function buildPsdDocument(layers: EL[], doc: { w: number; h: number }) {
   return { width: doc.w, height: doc.h, canvas: comp, children };
 }
 
+/* ---------- 圖層動畫：畫出第 t 秒的樣子（預覽與輸出 MP4 共用） ---------- */
+/** 畫一個圖層；t＝null 就是平常的樣子，有數字就套上那一秒的動畫（位移、縮放、透明度、光帶）。 */
+function drawLayerAnimated(ctx: CanvasRenderingContext2D, l: EL, layers: EL[], t: number | null) {
+  const f: AnimFrame = t === null ? REST : animFrame(l.anims, t);
+  ctx.save();
+  applyClip(ctx, l, layers);
+  applyLayerTransform(ctx, l);
+  if (f.dx || f.dy) ctx.translate(f.dx * l.h, f.dy * l.h);
+  if (f.scale !== 1) ctx.scale(f.scale, f.scale);
+  ctx.globalAlpha = l.opacity * f.opacity;
+  drawElBody(ctx, l);
+  if (f.shines.length) drawShines(ctx, l, f.shines);
+  ctx.restore();
+}
+/**
+ * 閃光：光帶只亮在這個圖層自己的形狀上（去背的商品就只有商品本身亮、文字就只有字亮）。
+ * 做法是在一張跟圖層一樣大的小畫布上先畫光帶，再用圖層的內容當遮罩裁掉，最後疊回去。
+ */
+function drawShines(ctx: CanvasRenderingContext2D, l: EL, shines: AnimFrame["shines"]) {
+  const m = ctx.getTransform();
+  const sc = Math.min(4, Math.max(0.25, Math.hypot(m.a, m.b) || 1));
+  const ow = Math.max(1, Math.ceil(l.w * sc)), oh = Math.max(1, Math.ceil(l.h * sc));
+  const off = document.createElement("canvas"); off.width = ow; off.height = oh;
+  const g = off.getContext("2d")!;
+  g.scale(sc, sc); g.translate(l.w / 2, l.h / 2);
+  g.globalCompositeOperation = "lighter";
+  for (const s of shines) {
+    const b = shineBand(l.w, l.h, s);
+    const gr = g.createLinearGradient(b.x0, b.y0, b.x1, b.y1);
+    gr.addColorStop(0, "rgba(255,255,255,0)");
+    gr.addColorStop(0.5, `rgba(255,255,255,${s.intensity})`);
+    gr.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = gr; g.fillRect(-l.w / 2, -l.h / 2, l.w, l.h);
+  }
+  // 遮罩：光澤範圍用它的形狀；其他圖層用自己畫出來的內容
+  g.globalCompositeOperation = "destination-in";
+  if (l.shineOnly && l.shape && isFillableShape(l.shape)) { clipToShape(g, l.w, l.h, l.shape); g.fillStyle = "#fff"; g.fillRect(-l.w / 2, -l.h / 2, l.w, l.h); }
+  else drawElContent(g, l);
+  ctx.globalAlpha = 1;
+  ctx.drawImage(off, -l.w / 2, -l.h / 2, l.w, l.h);
+}
+/** 光澤範圍在編輯時的樣子：淡淡的虛線框＋一點點底色（輸出時不會出現）。 */
+function drawShineZoneHint(ctx: CanvasRenderingContext2D, l: EL, zoom: number) {
+  ctx.save(); applyLayerTransform(ctx, l);
+  ctx.setLineDash([6 / zoom, 4 / zoom]); ctx.lineWidth = 1.5 / zoom; ctx.strokeStyle = "rgba(245,158,11,.9)";
+  ctx.fillStyle = "rgba(245,158,11,.08)";
+  ctx.fillRect(-l.w / 2, -l.h / 2, l.w, l.h); ctx.strokeRect(-l.w / 2, -l.h / 2, l.w, l.h);
+  ctx.restore();
+}
+/**
+ * 套效果：選好幾個時，閃光／彈跳／閃爍照「物件」自動錯開（疊在一起的圖層、同一群組算同一個物件，一起動），
+ * 順序是由上到下、同一排由左到右；每個的循環長度一樣，循環時順序才不會亂掉。
+ */
+function addAnimsTo(layers: EL[], kind: AnimKind) {
+  const units = animUnits(layers.map((l) => {
+    const c = layerCorners(l);
+    return { id: l.id, x0: Math.min(...c.map((p) => p.x)), y0: Math.min(...c.map((p) => p.y)), x1: Math.max(...c.map((p) => p.x)), y1: Math.max(...c.map((p) => p.y)), groupId: l.groupId };
+  }));
+  const n = new Set(units.values()).size;
+  const staggered = n > 1 && (kind === "shine" || kind === "bounce" || kind === "twinkle");
+  const base = defaultAnim(kind, "x");
+  const step = base.duration + 0.15;
+  const starts = staggeredStarts(n, 0.3, step);
+  const cycle = n * step + 1;
+  for (const l of layers) {
+    const a = defaultAnim(kind, `anim_${crypto.randomUUID().slice(0, 6)}`, kind === "fadeIn" ? 0 : staggered ? starts[units.get(l.id) ?? 0] : 0.3);
+    if (staggered) a.gap = Math.max(0, cycle - a.duration);
+    l.anims = [...(l.anims ?? []).filter((x) => x.kind !== kind), a];
+  }
+}
+/** 時間軸的列：同一個效果＋同一個開始時間的圖層合成一列（一個物件的幾個零件），列名優先用裡面的文字。 */
+function animTrackRows(layers: EL[]): { id: string; name: string; anims: LayerAnim[] }[] {
+  const rows = new Map<string, { id: string; names: string[]; anim: LayerAnim }>();
+  for (const l of layers) {
+    for (const a of l.anims ?? []) {
+      const key = `${a.kind}@${a.start}`;
+      const r = rows.get(key) ?? { id: l.id, names: [], anim: a };
+      r.names.push(l.isText && l.text.trim() ? l.text.replace(/\s+/g, "") : "");
+      if (l.isText && !rows.has(key)) r.id = l.id;
+      rows.set(key, r);
+    }
+  }
+  return [...rows.values()]
+    .sort((a, b) => a.anim.start - b.anim.start)
+    .map((r) => ({ id: r.id, name: r.names.find(Boolean)?.slice(0, 14) || layers.find((l) => l.id === r.id)?.name || "圖層", anims: [r.anim] }));
+}
+/** 拖時間軸：同一個效果、同一個開始時間的其他圖層（同一個物件的零件）一起移。 */
+function moveAnimGroup(layers: EL[], layerId: string, animId: string, start: number) {
+  const src = layers.find((l) => l.id === layerId)?.anims?.find((a) => a.id === animId);
+  if (!src) return;
+  const kind = src.kind, old = src.start;
+  for (const l of layers) l.anims = l.anims?.map((a) => (a.kind === kind && a.start === old ? { ...a, start } : a));
+}
+function patchAnim(l: EL, animId: string, patch: Partial<LayerAnim>) {
+  l.anims = (l.anims ?? []).map((a) => (a.id === animId ? { ...a, ...patch } : a));
+}
+function removeAnim(l: EL, animId: string) {
+  l.anims = (l.anims ?? []).filter((a) => a.id !== animId);
+  if (!l.anims.length) l.anims = undefined;
+}
+
 function drawElBody(ctx: CanvasRenderingContext2D, l: EL) {
+  if (l.shineOnly) return;   // 光澤範圍本身看不見（只有動畫時的光）
   // 陰影、外光暈先畫（在內容底下）；文字自己的「陰影」效果在這兩趟關掉，不然會蓋掉這裡的設定
   const plain = l.fx?.shadow ? { ...l, fx: { ...l.fx, shadow: false } } : l;
   if (l.shadow) drawShadow(ctx, l.shadow, () => drawElContent(ctx, plain));
@@ -3295,6 +3498,8 @@ function serializeEls(els: EL[]): SavedLayer[] {
     ...(l.paint?.length ? { paint: l.paint } : {}),
     ...(l.glow ? { glow: { ...l.glow } } : {}),
     ...(l.shadow ? { shadow: { ...l.shadow } } : {}),
+    ...(l.anims?.length ? { anims: l.anims.map((a) => ({ ...a })) } : {}),
+    ...(l.shineOnly ? { shineOnly: true } : {}),
     ...(l.isText
       ? { isText: true, ...(l.wrap ? { wrap: true } : {}), text: l.text, color: l.color, fontSize: l.fontSize * (l.w / (l.naturalW || l.w)), fontFamily: l.fontFamily, fontWeight: l.fontWeight, align: l.align, ...(l.fx ? { fx: l.fx } : {}), ...(l.textLayout ? { textLayout: { ...l.textLayout, letterSpacing: l.textLayout.letterSpacing * (l.w / (l.naturalW || l.w)) } } : {}),
           // 分段樣式的字級跟著圖層縮放一起換算，否則存檔重開會跑掉
@@ -3420,7 +3625,7 @@ function PageStrip({ pages, current, currentThumb, onSelect, onAdd, onDuplicate,
 }
 
 function cloneEL(el: EL): EL {
-  return { ...el, textLayout: el.textLayout ? { ...el.textLayout } : undefined, shape: el.shape ? { ...el.shape } : null, fx: el.fx ? { ...el.fx } : el.fx, embeddedText: el.embeddedText.map((t) => ({ ...t })), paint: el.paint?.slice(), glow: el.glow ? { ...el.glow } : el.glow, shadow: el.shadow ? { ...el.shadow } : el.shadow };
+  return { ...el, textLayout: el.textLayout ? { ...el.textLayout } : undefined, shape: el.shape ? { ...el.shape } : null, fx: el.fx ? { ...el.fx } : el.fx, embeddedText: el.embeddedText.map((t) => ({ ...t })), paint: el.paint?.slice(), glow: el.glow ? { ...el.glow } : el.glow, shadow: el.shadow ? { ...el.shadow } : el.shadow, anims: el.anims?.map((a) => ({ ...a })) };
 }
 function iconPreview(name: string): string {
   const c = document.createElement("canvas"); c.width = 40; c.height = 40;
@@ -3763,11 +3968,12 @@ function toJpegDataUrl(png: string): Promise<string> {
   });
 }
 
-type DownloadFormat = "jpg" | "png" | "psd";
+type DownloadFormat = "jpg" | "png" | "psd" | "mp4";
 const DOWNLOAD_OPTIONS: { f: DownloadFormat; label: string; hint: string }[] = [
   { f: "jpg", label: "JPG 圖片", hint: "檔案小，適合直接發文" },
   { f: "png", label: "PNG 圖片", hint: "畫質無損" },
   { f: "psd", label: "PSD（Photoshop）", hint: "每個圖層分開，文字可以改；Illustrator 也能開" },
+  { f: "mp4", label: "MP4 影片（動畫）", hint: "把「動畫」分頁設定的效果輸出成影片" },
 ];
 
 /** 工具列的「下載」：一顆按鈕，點開選格式。 */

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { animEnd, animFrame, animUnits, animPhase, defaultAnim, readAnims, shineBand, staggeredStarts, typeChar, videoDuration } from "./layer-animation.ts";
+import { animEnd, animFrame, animUnits, animPhase, carouselLayout, carouselPose, carouselSlot, carouselSteps, defaultAnim, readAnims, shineBand, staggeredStarts, typeChar, videoDuration } from "./layer-animation.ts";
 
 const near = (a: number, b: number, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} ≈ ${b}`);
 
@@ -141,4 +141,54 @@ test("淡入可以選方向：從反方向滑進來、到了回原位；沒選�
   const r = readAnims([{ kind: "fadeIn", enterDir: "downLeft" }, { kind: "fadeIn", enterDir: "nope" }])!;
   assert.equal(r[0].enterDir, "downLeft");
   assert.equal(r[1].enterDir, undefined);
+});
+
+test("讀存檔：時間軸的列名（去頭尾空白、太長截斷、空的不留）", () => {
+  const r = readAnims([{ kind: "pulse", label: "  44折膠囊  " }, { kind: "pulse", label: "   " }, { kind: "pulse", label: "字".repeat(50) }])!;
+  assert.equal(r[0].label, "44折膠囊");
+  assert.equal(r[1].label, undefined);
+  assert.equal(r[2].label?.length, 30);
+});
+
+test("輪播：先停、再滑一格、再停；滑完最後一張就停住", () => {
+  const c = { ...defaultAnim("carousel", "c", 0), gap: 1, duration: 0.5 };   // 停 1 秒、滑 0.5 秒
+  near(carouselSteps(c, 0.5, 3), 0);       // 第一段停留
+  const mid = carouselSteps(c, 1.25, 3);   // 第一次滑到一半
+  assert.ok(mid > 0.3 && mid < 0.7);
+  near(carouselSteps(c, 2, 3), 1);         // 滑完停在第 2 張
+  near(carouselSteps(c, 99, 3), 3);        // 最多滑到最後一張
+  assert.equal(animEnd({ ...c, steps: 3 }), 3 * 1.5 + 0.8);
+});
+
+test("輪播的排法：間距、一開始在中間的是哪張、最多能滑幾格", () => {
+  const units = [{ cx: 100 }, { cx: 400 }, { cx: 700 }, { cx: 1000 }];
+  const L = carouselLayout(units.map((u) => u.cx), 400, "left");
+  assert.equal(L.spacing, 300);
+  assert.equal(L.focus, 1);
+  assert.equal(L.maxSteps, 2);
+  assert.equal(carouselLayout(units.map((u) => u.cx), 400, "right").maxSteps, 1);
+  // 滑了一格：每張往左 300，原本第 3 張來到中間、放大；原本中間那張縮回
+  const p2 = carouselPose(700, 1, L.spacing, "left", 400, 0.2);
+  near(p2.tx, -300); near(p2.scale, 1.2);
+  near(carouselPose(400, 1, L.spacing, "left", 400, 0.2).scale, 1);
+});
+
+test("讀存檔：輪播的設定", () => {
+  const r = readAnims([{ kind: "carousel", group: "g1", anchorX: 540, steps: 4, blur: true, slideDir: "right" }, { kind: "carousel", slideDir: "up" }])!;
+  assert.equal(r[0].group, "g1"); assert.equal(r[0].anchorX, 540); assert.equal(r[0].steps, 4); assert.equal(r[0].blur, true); assert.equal(r[0].slideDir, "right");
+  assert.equal(r[1].slideDir, "left");
+});
+
+test("輪播接回第一張：滑出左邊的卡繞到最右邊補上，不留空白", () => {
+  // 4 張、間距 300、焦點 x=600、一開始第 0 張在中間
+  const at = (i: number, s: number, wrap: boolean) => carouselSlot(i, 4, 0, s, 300, "left", 600, 0.2, wrap);
+  // 還沒滑：第 1 張在右邊一格
+  near(at(1, 0, true).x, 900);
+  // 滑到最後一張（3 格）：第 3 張在中間放大，右邊一格是第 0 張（繞回來了）
+  near(at(3, 3, true).x, 600); near(at(3, 3, true).scale, 1.2);
+  near(at(0, 3, true).x, 900);
+  // 不接回：第 0 張跑到很左邊，右邊就空了
+  near(at(0, 3, false).x, -300);
+  // 繞回去的瞬間在畫面外（左邊兩格外才換到右邊）
+  assert.ok(at(1, 3, true).x <= 0);
 });

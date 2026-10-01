@@ -15,17 +15,22 @@ import { distanceToPolyline, drawPaint, paintHits, samplePath, smoothStroke, str
    ============================================================ */
 import { drawEditableText, layoutText, readTextLayout, DEFAULT_TEXT_LAYOUT, type TextLayout } from "@/lib/magic-layers/editable-text.ts";
 import { idsInBox, selectableIds } from "@/lib/magic-layers/box-select.ts";
-import { animFrame, animUnits, defaultAnim, isOneShot, readAnims, shineBand, staggeredStarts, typeChar, videoDuration, REST, type AnimFrame, type AnimKind, type LayerAnim, type TypingState } from "@/lib/magic-layers/layer-animation.ts";
+import { animFrame, animUnits, carouselLayout, carouselSlot, carouselSteps, defaultAnim, isOneShot, readAnims, shineBand, staggeredStarts, typeChar, videoDuration, REST, type AnimFrame, type AnimKind, type LayerAnim, type TypingState } from "@/lib/magic-layers/layer-animation.ts";
 import { encodeMp4, videoSize } from "@/lib/magic-layers/mp4-export.ts";
-import { AnimationTab, LayerAnimSettings, type AnimTrack } from "./AnimationPanel";
+import { AnimationTab, LayerAnimSettings, SequencePreview, type AnimTrack } from "./AnimationPanel";
+import { ImageLibraryPicker } from "./ImageLibraryPicker";
+import { CarouselSetup, isVerticalText, toVertical, type CarouselCardContent, type CarouselPart } from "./CarouselSetup";
+import { defaultTransition, hasDir, readTransition, sequenceAt, sequenceLayout, transitionPoses, TRANSITION_LABELS, type PageTransition, type Pose, type SeqLayout, type TransitionKind } from "@/lib/magic-layers/page-transition.ts";
 import { anchorShift, autoWidth, shiftRuns, caretLines, indexAt, selectionSpans, verticalMove, widestLine, wrapRanges, type CaretLine, type TextLineRange } from "@/lib/magic-layers/text-caret.ts";
 import { hexToRgb, isEditableInPsd, psdFileName, psdFontName, psdTextEffects, styleRunsFor } from "@/lib/magic-layers/psd-export.ts";
 import { useBrandFonts } from "@/lib/fonts/useBrandFonts";
 import type { PaintStroke, SavedLayer, TextFx, TextRun, ShapeKind, ShapeSpec } from "@/lib/magic-layers/saved-layer.ts";
 export type { SavedLayer } from "@/lib/magic-layers/saved-layer.ts";
 /** 多頁設計的一頁（像 Canva 的頁面）：尺寸＋圖層。 */
-export type SavedPage = { docW: number; docH: number; layers: SavedLayer[]; /** 頁面名稱（例如「封面」）；空的就顯示「第 N 頁」。 */ name?: string };
-import { useCallback, useEffect, useRef, useState } from "react";
+export type SavedPage = { docW: number; docH: number; layers: SavedLayer[]; /** 頁面名稱（例如「封面」）；空的就顯示「第 N 頁」。 */ name?: string;
+  /** 做成影片時這一頁播多久（秒）；沒有＝照動畫自動決定。第 1 頁存在外層的 animDuration。 */ animDuration?: number;
+  /** 從上一頁換到這一頁的過場（第 1 頁沒有）。 */ transitionIn?: PageTransition };
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalDistributeCenter, AlignStartHorizontal, AlignStartVertical, AlignVerticalDistributeCenter, ChevronUp, ChevronDown, ChevronLeft, Scissors, Sparkles, Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowLeft, Plus, Download, Image as ImageIcon, Upload, Type, BadgeCheck, Square, Star, Minus, Pencil, Undo2, Redo2, Eraser, Maximize2, GripVertical, WandSparkles, Save, Layers, LayoutTemplate, Wrench, PenTool, Clapperboard } from "lucide-react";
 import type { LayerData, FragmentationReport } from "@/lib/magic-layers/types.ts";
 import { extractLayer } from "@/lib/magic-layers/extract-browser.ts";
@@ -379,9 +384,20 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     ctx.scale(view.current.zoom, view.current.zoom);
     ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, doc.w, doc.h);
     ctx.strokeStyle = "rgba(0,0,0,.15)"; ctx.lineWidth = 1 / view.current.zoom; ctx.strokeRect(0, 0, doc.w, doc.h);
+    const at = animTimeRef.current;
+    // 輪播排在畫布外面等著滑進來的卡片：編輯器裡淡淡畫出來，不然看不到也沒辦法改（輸出的影片不會有）
+    {
+      const waiting = layersRef.current.filter((l) => l.visible && l.anims?.some((a) => a.kind === "carousel"));
+      if (waiting.length) {
+        for (const l of waiting) drawLayerAnimated(ctx, l, layersRef.current, at);
+        const far = 1e5;
+        ctx.save(); ctx.beginPath(); ctx.rect(-far, -far, far * 2, far * 2); ctx.rect(0, 0, doc.w, doc.h);
+        ctx.fillStyle = "rgba(248,249,252,.62)"; ctx.fill("evenodd"); ctx.restore();
+        ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, doc.w, doc.h);
+      }
+    }
     // Figma Frame-style Clip content：圖層仍可拖出畫布，但超出文件邊界的像素不顯示。
     ctx.beginPath(); ctx.rect(0, 0, doc.w, doc.h); ctx.clip();
-    const at = animTimeRef.current;
     for (const l of layersRef.current) {
       if (!l.visible) continue;
       drawLayerAnimated(ctx, l, layersRef.current, at);
@@ -544,10 +560,12 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     return null;
   }
   function hitLayer(dx: number, dy: number) {
-    if (dx < 0 || dy < 0 || dx > doc.w || dy > doc.h) return null;
+    // 畫布外面點不到東西；只有輪播排在外面等著滑進來的卡片例外（編輯器裡看得到，要能點來改字、換圖）
+    const outside = dx < 0 || dy < 0 || dx > doc.w || dy > doc.h;
     const ls = layersRef.current;
     for (let i = ls.length - 1; i >= 0; i--) {
       const l = ls[i]; if (!l.visible || l.locked) continue;
+      if (outside && !l.anims?.some((a) => a.kind === "carousel")) continue;
       const lp = toLocal(l, dx, dy);
       if (Math.abs(lp.x) > l.w / 2 || Math.abs(lp.y) > l.h / 2) continue;   // outside bbox
       if (l.type === "drawing" && l.shape?.points && !hitsDrawing(l, dx, dy, 6 / view.current.zoom)) continue;
@@ -1098,8 +1116,12 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const [videoLen, setVideoLen] = useState<number | null>(animDuration ?? null);
   const [playing, setPlaying] = useState(false);
   const [mp4Busy, setMp4Busy] = useState<number | null>(null);
+  // 切頁時要把這一頁的長度收回頁面裡（stashCurrentPage 是穩定的 callback，讀 ref 才拿得到最新值）
+  const videoLenRef = useRef<number | null>(animDuration ?? null);
+  useEffect(() => { videoLenRef.current = videoLen; }, [videoLen]);
   // 圖層存在 ref 裡（不是 state），render 期間不能讀：影片長度、時間軸都用函式，在事件或子元件裡才去讀
-  const currentDuration = useCallback(() => videoDuration(layersRef.current.flatMap((l) => l.anims ?? []), videoLen), [videoLen]);
+  // 跟整份影片用同一個規則（沒動畫的頁停 3 秒），面板上看到的長度就是影片裡的長度
+  const currentDuration = useCallback(() => pageDuration(layersRef.current, videoLen), [videoLen]);
   // 時間軸：同一個效果、同一個開始時間的圖層（通常是同一個物件的幾個零件）合成一列，名字用裡面的文字
   const currentTracks = useCallback(() => animTrackRows(layersRef.current), []);
   const getAnimTime = useCallback(() => animTimeRef.current, []);
@@ -1122,9 +1144,98 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const applyAnimToSelection = (kind: AnimKind) => {
     const picked = layersRef.current.filter((l) => selectedIdsRef.current.includes(l.id) && !l.locked).sort((a, b) => a.cx - b.cx);
     if (!picked.length) return;
-    addAnimsTo(picked, kind);
+    // 輪播只選了一張卡：問要幾張，自動複製排成一排（不用自己排、自己全選）
+    if (kind === "carousel" && new Set(animUnits(picked.map((l) => ({ id: l.id, ...layerBox(l), groupId: l.groupId }))).values()).size === 1) {
+      setCarouselAsk({
+        ids: picked.map((l) => l.id),
+        texts: picked.filter((l) => l.isText).map((l) => ({ id: l.id, label: l.text || l.name, thumb: null })),
+        images: picked.filter(isPaintable).map((l) => ({ id: l.id, label: l.name, thumb: l.thumb })),
+      });
+      return;
+    }
+    addAnimsTo(picked, kind, doc.w / 2, layersRef.current);
     setPanelTab("anim");
     markDirty(); refresh(); playAnim();
+  };
+  /** 上傳一張圖到儲存空間，回傳網址（換圖、輪播設定共用）。 */
+  const uploadImageFile = async (f: File): Promise<string> => {
+    const fd = new FormData(); fd.append("file", f);
+    const r = await fetch("/api/upload", { method: "POST", body: fd });
+    const d = await r.json();
+    if (!r.ok || !d.url) throw new Error(d.error ?? "上傳失敗");
+    return d.url as string;
+  };
+  /** 換一張圖：新圖等比例放進原本那張圖的框裡（置中、不拉扁），位置、效果、動畫都保留。 */
+  // 右側「換一張圖」打開的是哪個圖層（換選別的圖層就自動收起來）
+  const [swapFor, setSwapFor] = useState<string | null>(null);
+  const swapLayerImage = async (id: string, url: string) => {
+    const l = layersRef.current.find((x) => x.id === id);
+    if (!l?.canvas) return;
+    const cv = await loadToCanvas(url);
+    if (!cv) { alert("讀取圖片失敗"); return; }
+    const ar = cv.width / (cv.height || 1), nw = Math.min(l.w, l.h * ar);
+    l.canvas = cv; l.naturalW = cv.width; l.naturalH = cv.height; l.src = url; l.w = nw; l.h = nw / ar; l.thumb = makeThumb(l);
+    markDirty(); refresh(); render();
+  };
+  /** 輪播：選了一張卡時，問要做幾張。 */
+  const [carouselAsk, setCarouselAsk] = useState<{ ids: string[]; texts: CarouselPart[]; images: CarouselPart[] } | null>(null);
+  /**
+   * 把選到的那一張卡複製成一排：第一張移到畫布正中間，其他張依序排在右邊（超出畫布的等著滑進來），
+   * 間距＝卡片寬度再多一點空隙；全部套上同一組輪播，最後把畫面縮小到看得到整排。
+   */
+  const buildCarousel = async (ids: string[], contents: CarouselCardContent[]) => {
+    const layers = layersRef.current;
+    const card = layers.filter((l) => ids.includes(l.id));
+    if (!card.length) return;
+    const count = contents.length;
+    const boxes = card.map(layerBox);
+    const x0 = Math.min(...boxes.map((b) => b.x0)), x1 = Math.max(...boxes.map((b) => b.x1));
+    const y0 = Math.min(...boxes.map((b) => b.y0)), y1 = Math.max(...boxes.map((b) => b.y1));
+    const spacing = Math.round((x1 - x0) * 1.12);
+    const shift = doc.w / 2 - (x0 + x1) / 2;
+    // 每一張：先在原位換好字和圖（文字框自動寬度要在畫布裡算），再移到自己的位置
+    const sets: EL[][] = [card];
+    for (let i = 1; i < count; i++) sets.push(duplicateEls(card));
+    const imgCache = new Map<string, HTMLCanvasElement | null>();
+    for (const [i, set] of sets.entries()) {
+      const want = contents[i];
+      for (const [k, l] of set.entries()) {
+        const origId = card[k].id;
+        // 原本是一字一行的直排字：打的時候是一行，這裡轉回一字一行
+        const typed = want.texts[origId];
+        const text = typeof typed === "string" && isVerticalText(card[k].text) ? toVertical(typed) : typed;
+        if (l.isText && typeof text === "string" && text !== l.text) { l.text = text; fitTextBox(l, doc.w, true); l.thumb = makeThumb(l); }
+        const url = want.images[origId];
+        if (url && l.canvas) {
+          if (!imgCache.has(url)) imgCache.set(url, await loadToCanvas(url));
+          const cv = imgCache.get(url);
+          if (cv) {
+            // 新圖放進原本那張圖的框裡（等比例、置中），不會被拉扁
+            const ar = cv.width / (cv.height || 1), nw = Math.min(l.w, l.h * ar);
+            l.canvas = cv; l.naturalW = cv.width; l.naturalH = cv.height; l.src = url; l.w = nw; l.h = nw / ar; l.thumb = makeThumb(l);
+          }
+        }
+      }
+    }
+    for (const [i, set] of sets.entries()) for (const l of set) l.cx += shift + spacing * i;
+    const all = sets.flat();
+    let at = Math.max(...card.map((l) => layers.indexOf(l))) + 1;
+    for (const set of sets.slice(1)) { layers.splice(at, 0, ...set); at += set.length; }
+    addAnimsTo(all, "carousel", doc.w / 2, layers);
+    applySelection(all.map((l) => l.id));
+    setPanelTab("anim"); markDirty(); refresh();
+    // 縮小畫面：畫布＋整排卡片都看得到，才找得到後面幾張來改字、換圖
+    const wrap = wrapRef.current;
+    if (wrap) {
+      const bx0 = Math.min(0, x0 + shift), bx1 = Math.max(doc.w, x1 + shift + spacing * (count - 1));
+      const by0 = Math.min(0, y0), by1 = Math.max(doc.h, y1);
+      const pad = 48, z = Math.min((wrap.clientWidth - pad) / (bx1 - bx0), (wrap.clientHeight - pad) / (by1 - by0));
+      view.current.zoom = Math.min(32, Math.max(0.02, z));
+      view.current.panX = (wrap.clientWidth - (bx1 - bx0) * view.current.zoom) / 2 - bx0 * view.current.zoom;
+      view.current.panY = (wrap.clientHeight - (by1 - by0) * view.current.zoom) / 2 - by0 * view.current.zoom;
+      setZoomPct(Math.round(view.current.zoom * 100));
+    }
+    render();
   };
   /** 加一塊看不見的光澤範圍（圓角矩形，可以拉大縮小、換成橢圓），預設就有閃光。 */
   const addShineZone = () => {
@@ -1157,11 +1268,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         },
         onProgress: (done, total) => setMp4Busy(done / total),
       });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url;
-      a.download = `${(name || layersRef.current.find((l) => l.isText)?.text || "設計稿").replace(/[\\/:*?"<>|\n\r\t]+/g, " ").trim().slice(0, 40) || "設計稿"}.mp4`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+      downloadMp4(blob, name || layersRef.current.find((l) => l.isText)?.text);
     } catch (err) {
       alert("輸出 MP4 失敗：" + (err instanceof Error ? err.message : String(err)));
     } finally { setMp4Busy(null); render(); }
@@ -1690,15 +1797,16 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const pageIdxRef = useRef(0);
   const [pageIdx, setPageIdx] = useState(0);
   /** 縮圖列要顯示的東西（不在 render 裡讀 ref）。 */
-  const [pagesView, setPagesView] = useState<{ id: string; name: string; thumb: string | null; w: number; h: number }[]>([]);
+  const [pagesView, setPagesView] = useState<{ id: string; name: string; thumb: string | null; w: number; h: number; transitionIn: PageTransition | null }[]>([]);
   const [curThumb, setCurThumb] = useState<string | null>(null);
-  const syncPagesView = useCallback(() => setPagesView(pagesRef.current.map((p) => ({ id: p.id, name: p.name, thumb: p.thumb, w: p.w, h: p.h }))), []);
+  const syncPagesView = useCallback(() => setPagesView(pagesRef.current.map((p) => ({ id: p.id, name: p.name, thumb: p.thumb, w: p.w, h: p.h, transitionIn: p.transitionIn }))), []);
 
   // 第一次掛載：第 1 頁就是目前的畫布；其他頁在背景轉回圖層、算好縮圖
   useEffect(() => {
-    const first: EditorPage = { id: "page-1", name: firstPageName ?? "", w: image.naturalWidth, h: image.naturalHeight, els: null, loading: null, history: [], histIdx: 0, savedIdx: 0, thumb: null };
+    const first: EditorPage = { id: "page-1", name: firstPageName ?? "", w: image.naturalWidth, h: image.naturalHeight, els: null, loading: null, history: [], histIdx: 0, savedIdx: 0, thumb: null, videoLen: animDuration ?? null, transitionIn: null };
     const rest: EditorPage[] = (extraPages ?? []).map((pg, i) => {
-      const page: EditorPage = { id: `page-${i + 2}`, name: pg.name ?? "", w: pg.docW, h: pg.docH, els: null, loading: null, history: [], histIdx: 0, savedIdx: 0, thumb: null };
+      const page: EditorPage = { id: `page-${i + 2}`, name: pg.name ?? "", w: pg.docW, h: pg.docH, els: null, loading: null, history: [], histIdx: 0, savedIdx: 0, thumb: null,
+        videoLen: typeof pg.animDuration === "number" && pg.animDuration > 0 ? Math.min(30, pg.animDuration) : null, transitionIn: readTransition(pg.transitionIn) };
       page.loading = Promise.all(pg.layers.map(elFromSavedLayer)).then((els) => {
         const idMap = new Map(pg.layers.map((sl, k) => [sl.id, els[k].id]));
         for (const e of els) if (e.clipTo) e.clipTo = idMap.get(e.clipTo) ?? null;
@@ -1725,6 +1833,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     const p = pagesRef.current[pageIdxRef.current]; if (!p) return;
     p.els = layersRef.current; p.w = docRef.current.w; p.h = docRef.current.h;
     p.history = history.current; p.histIdx = histIdx.current; p.savedIdx = savedIdx.current;
+    p.videoLen = videoLenRef.current;
     p.thumb = flattenEls(p.els, p.w, p.h, PAGE_THUMB);
     if (p.histIdx !== p.savedIdx) setPagesChanged(true);
   }, []);
@@ -1737,6 +1846,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     if (p.history.length) { history.current = p.history; histIdx.current = p.histIdx; savedIdx.current = p.savedIdx; }
     else { history.current = [els.map(cloneEL)]; histIdx.current = 0; savedIdx.current = 0; }
     pageIdxRef.current = i; setPageIdx(i);
+    setVideoLen(p.videoLen); videoLenRef.current = p.videoLen;
     applySelection([]); setDoc({ w: p.w, h: p.h }); setCurThumb(p.thumb);
     syncPagesView(); bump(); refresh(); render();
     requestAnimationFrame(() => fitRef.current());
@@ -1750,7 +1860,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     stashCurrentPage();
     const src = pagesRef.current[pageIdxRef.current];
     const els = duplicate && src.els ? duplicateEls(src.els) : [];
-    const page: EditorPage = { id: `page-${crypto.randomUUID().slice(0, 8)}`, name: duplicate && src.name ? `${src.name} 複本` : "", w: src.w, h: src.h, els, loading: null, history: [], histIdx: 0, savedIdx: 0, thumb: flattenEls(els, src.w, src.h, PAGE_THUMB) };
+    const page: EditorPage = { id: `page-${crypto.randomUUID().slice(0, 8)}`, name: duplicate && src.name ? `${src.name} 複本` : "", w: src.w, h: src.h, els, loading: null, history: [], histIdx: 0, savedIdx: 0, thumb: flattenEls(els, src.w, src.h, PAGE_THUMB),
+      videoLen: duplicate ? src.videoLen : null, transitionIn: null };
     pagesRef.current.splice(pageIdxRef.current + 1, 0, page);
     setPagesChanged(true);
     void activatePage(pageIdxRef.current + 1);
@@ -1758,11 +1869,48 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   /** 在目前這頁後面加一頁，放進現成的圖層（照參考圖重做的結果），尺寸可以跟目前這頁不同。 */
   const addPageWith = useCallback((name: string, els: EL[], w: number, h: number) => {
     stashCurrentPage();
-    const page: EditorPage = { id: `page-${crypto.randomUUID().slice(0, 8)}`, name, w, h, els, loading: null, history: [], histIdx: 0, savedIdx: 0, thumb: flattenEls(els, w, h, PAGE_THUMB) };
+    const page: EditorPage = { id: `page-${crypto.randomUUID().slice(0, 8)}`, name, w, h, els, loading: null, history: [], histIdx: 0, savedIdx: 0, thumb: flattenEls(els, w, h, PAGE_THUMB), videoLen: null, transitionIn: null };
     pagesRef.current.splice(pageIdxRef.current + 1, 0, page);
     setPagesChanged(true);
     void activatePage(pageIdxRef.current + 1);
   }, [stashCurrentPage, activatePage]);
+
+  /** 整份影片要用的每一頁（還在背景轉換的頁先等它轉完）。 */
+  const sequenceItems = useCallback(async (): Promise<SeqItem[]> => {
+    stashCurrentPage();
+    const pages = pagesRef.current;
+    const els = await Promise.all(pages.map((p) => p.els ?? p.loading ?? Promise.resolve<EL[]>([])));
+    return pages.map((p, i) => ({ els: els[i], w: p.w, h: p.h, duration: pageDuration(els[i], p.videoLen), transitionIn: i > 0 ? p.transitionIn : null }));
+  }, [stashCurrentPage]);
+  /** 預覽整份影片（蓋在畫面上的播放器）。 */
+  const [seqPreview, setSeqPreview] = useState<{ width: number; height: number; total: number; draw: (ctx: CanvasRenderingContext2D, t: number) => void } | null>(null);
+  const openSequencePreview = useCallback(async () => {
+    stopAnim();
+    const items = await sequenceItems();
+    const vs = videoSize(items[0].w, items[0].h, 900);
+    const seq = makeSequenceRenderer(items, vs.width, vs.height);
+    setSeqPreview({ width: vs.width, height: vs.height, total: seq.layout.total, draw: seq.draw });
+  }, [sequenceItems, stopAnim]);
+  /** 設定從上一頁換到第 i 頁的過場（null＝直接切換）。 */
+  const setPageTransition = useCallback((i: number, tr: PageTransition | null) => {
+    const p = pagesRef.current[i]; if (!p) return;
+    p.transitionIn = tr; setPagesChanged(true); syncPagesView();
+  }, [syncPagesView]);
+
+  /** 輸出整份影片：每一頁依序接起來，頁跟頁之間播過場（影片尺寸用第 1 頁的）。 */
+  const exportWholeMp4 = useCallback(async () => {
+    if (mp4Busy !== null) return;
+    stopAnim(); setMp4Busy(0);
+    try {
+      const items = await sequenceItems();
+      const vs = videoSize(items[0].w, items[0].h);
+      const seq = makeSequenceRenderer(items, vs.width, vs.height);
+      const blob = await encodeMp4({ width: vs.width, height: vs.height, fps: 30, duration: seq.layout.total, renderFrame: seq.draw, onProgress: (done, total) => setMp4Busy(done / total) });
+      downloadMp4(blob, name || items[0].els.find((l) => l.isText)?.text);
+    } catch (err) {
+      alert("輸出 MP4 失敗：" + (err instanceof Error ? err.message : String(err)));
+    } finally { setMp4Busy(null); render(); }
+  }, [mp4Busy, stopAnim, sequenceItems, name, render]);
 
   /**
    * AI 生成背景：打字描述（可附參考圖）→ 生成一張符合目前畫布比例的底圖 → 換成背景。
@@ -1893,9 +2041,12 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       const firstEls = multi ? pageEls[0] : layersRef.current;
       const firstW = multi ? pages[0].w : doc.w, firstH = multi ? pages[0].h : doc.h;
       const imageDataUrl = multi ? flattenEls(firstEls, firstW, firstH) : flattenToDataUrl();
-      const pagePayload = multi ? pages.map((p, i) => ({ docW: p.w, docH: p.h, layers: serializeEls(pageEls[i]), ...(p.name ? { name: p.name } : {}) })) : undefined;
+      const pagePayload = multi ? pages.map((p, i) => ({ docW: p.w, docH: p.h, layers: serializeEls(pageEls[i]), ...(p.name ? { name: p.name } : {}),
+        ...(p.videoLen ? { animDuration: p.videoLen } : {}), ...(i > 0 && p.transitionIn ? { transitionIn: p.transitionIn } : {}) })) : undefined;
+      // 外層的 animDuration 是第 1 頁的長度（單頁、舊版讀取都照舊）
+      const firstLen = multi ? pages[0].videoLen : videoLen;
       const pageImages = download && multi ? pages.map((p, i) => flattenEls(pageEls[i], p.w, p.h)) : undefined;
-      await onSave({ docW: firstW, docH: firstH, layers: multi ? pagePayload![0].layers : serializeLayers(), imageDataUrl, finalize: download, pages: pagePayload, pageImages, ...(videoLen ? { animDuration: videoLen } : {}) });
+      await onSave({ docW: firstW, docH: firstH, layers: multi ? pagePayload![0].layers : serializeLayers(), imageDataUrl, finalize: download, pages: pagePayload, pageImages, ...(firstLen ? { animDuration: firstLen } : {}) });
       savedIdx.current = histIdx.current;
       markPagesSaved(pages, pageIdxRef.current, histIdx.current);
       setPagesChanged(false);
@@ -2283,7 +2434,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                 getTracks={currentTracks} selectedIds={selectedIds} onSelectLayer={(id) => { selectOnly(id); render(); }}
                 onMoveStart={(layerId, animId, start) => { moveAnimGroup(layersRef.current, layerId, animId, start); seekAnim(start); refresh(); }}
                 onCommitMove={() => markDirty()}
-                onExport={() => void exportMp4()} exporting={mp4Busy !== null} progress={mp4Busy ?? 0} />
+                onRenameTrack={(layerId, animId, name) => { renameAnimGroup(layersRef.current, layerId, animId, name); markDirty(); refresh(); }}
+                pageCount={pagesView.length || 1} onPreviewAll={() => void openSequencePreview()}
+                onExport={(all) => void (all ? exportWholeMp4() : exportMp4())} exporting={mp4Busy !== null} progress={mp4Busy ?? 0} />
             )}
             {leftTab === "upload" && (<>
               <button style={S.tool} onClick={() => uploadImgRef.current?.click()}><Upload size={16} />上傳圖片</button>
@@ -2411,7 +2564,18 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         )}
         </div>
         <PageStrip pages={pagesView} current={pageIdx} currentThumb={curThumb}
-          onSelect={goToPage} onAdd={() => addPage(false)} onDuplicate={() => addPage(true)} onDelete={deletePage} onMove={movePage} onRename={renamePage} />
+          onSelect={goToPage} onAdd={() => addPage(false)} onDuplicate={() => addPage(true)} onDelete={deletePage} onMove={movePage} onRename={renamePage}
+          onTransition={setPageTransition} />
+        {carouselAsk && (
+            <CarouselSetup
+              texts={carouselAsk.texts}
+              images={carouselAsk.images}
+              library={backgrounds ?? []}
+              uploadFile={uploadImageFile}
+              onCancel={() => setCarouselAsk(null)}
+              onConfirm={(cards) => { const ids = carouselAsk.ids; setCarouselAsk(null); void buildCarousel(ids, cards); }} />
+        )}
+        {seqPreview && <SequencePreview width={seqPreview.width} height={seqPreview.height} total={seqPreview.total} drawFrame={seqPreview.draw} onClose={() => { setSeqPreview(null); render(); }} />}
         </div>
 
         {/* 右側面板常駐。原本是選到圖層才掛載，一選取畫布就從 501px 被擠到 237px，
@@ -2708,6 +2872,21 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                   </>
                 )}
                 {selEl.canvas && !selEl.isText && !selEl.shape && !selEl.isArt && selectedIds.length === 1 && (
+                  <div style={{ marginBottom: 14 }}>
+                    <button onClick={() => setSwapFor((v) => (v === selEl.id ? null : selEl.id))}
+                      style={{ width: "100%", height: 34, borderRadius: 8, border: "1px solid #c4b5fd", background: swapFor === selEl.id ? "#f5f3ff" : "#fff", color: "#6d28d9", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                      <ImageIcon size={15} />換一張圖（素材庫／上傳）
+                    </button>
+                    {swapFor === selEl.id && (
+                      <div style={{ marginTop: 8 }}>
+                        <ImageLibraryPicker library={backgrounds ?? []} uploadFile={uploadImageFile}
+                          onPick={(url) => { setSwapFor(null); void swapLayerImage(selEl.id, url); }} />
+                        <div style={{ fontSize: 11, color: "#9ca3af", lineHeight: 1.6, marginTop: 4 }}>新圖會等比例放進原本的框，位置、效果、動畫都不變。</div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {selEl.canvas && !selEl.isText && !selEl.shape && !selEl.isArt && selectedIds.length === 1 && (
                   <ReplaceImagePanel key={selEl.id} layerId={selEl.id} aspect={selEl.w / (selEl.h || 1)}
                     isCutout={() => { const l = layersRef.current.find((x) => x.id === selectedIdsRef.current[0]); return !!l?.canvas && l.type !== "background" && hasTransparency(l.canvas); }}
                     getSource={(cutout) => { const l = layersRef.current.find((x) => x.id === selectedIdsRef.current[0]); return l?.canvas ? sourceDataUrl(l.canvas, cutout) : null; }}
@@ -2747,9 +2926,16 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
             ) : panelTab === "anim" ? (
               <div style={{ padding: "2px 16px 16px", overflowY: "auto" }}>
                 <LayerAnimSettings anims={selEl.anims} shineOnly={selEl.shineOnly}
-                  onChange={(animId, patch) => { patchAnim(selEl, animId, patch); markDirty(); render(); refresh(); }}
-                  onRemove={(animId) => { removeAnim(selEl, animId); markDirty(); render(); refresh(); }}
-                  onAdd={(kind) => { addAnimsTo([selEl], kind); markDirty(); render(); refresh(); }} />
+                  carouselCard={carouselCardOf(panel, selEl)} library={backgrounds ?? []} uploadFile={uploadImageFile}
+                  onCardText={(id, value) => {
+                    const l = layersRef.current.find((x) => x.id === id); if (!l?.isText) return;
+                    l.text = isVerticalText(l.text) ? toVertical(value) : value;
+                    fitTextBox(l, doc.w, true); l.thumb = makeThumb(l); markDirty(); render(); refresh();
+                  }}
+                  onCardImage={(id, url) => void swapLayerImage(id, url)}
+                  onChange={(animId, patch) => { patchAnimShared(layersRef.current, selEl, animId, patch); markDirty(); render(); refresh(); }}
+                  onRemove={(animId) => { removeAnimShared(layersRef.current, selEl, animId); markDirty(); render(); refresh(); }}
+                  onAdd={(kind) => { addAnimsTo([selEl], kind, doc.w / 2, layersRef.current); markDirty(); render(); refresh(); }} />
               </div>
             ) : (
               <div style={{ padding: 16 }}>
@@ -2784,7 +2970,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                      onDragLeave={() => setDragOverLayerId((id) => id === l.id ? null : id)}
                      onDrop={(e) => { e.preventDefault(); const source = dragLayerId || e.dataTransfer.getData("text/plain"); if (source) reorderLayer(source, l.id); setDragLayerId(null); setDragOverLayerId(null); }}
                      onDragEnd={() => { setDragLayerId(null); setDragOverLayerId(null); }}
-                     style={{ ...S.row, ...(selectedIds.includes(l.id) ? S.rowSel : {}), ...(l.id === dragOverLayerId && l.id !== dragLayerId ? { borderTop: "3px solid #7c3aed" } : {}), opacity: l.visible ? 1 : 0.5 }}>
+                     style={{ ...S.row, ...(selectedIds.includes(l.id) ? S.rowSel : {}), ...(l.id === dragOverLayerId && l.id !== dragLayerId ? { boxShadow: "inset 0 3px 0 #7c3aed" } : {}), opacity: l.visible ? 1 : 0.5 }}>
                   <GripVertical size={15} style={{ flex: "0 0 auto", color: "#9ca3af", cursor: "grab" }} aria-label="拖曳排序" />
                   <div style={S.thumb}>{l.thumb ? <img src={l.thumb} alt="" style={{ maxWidth: "100%", maxHeight: "100%" }} /> : (l.isText ? "T" : "◇")}</div>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -3063,6 +3249,13 @@ function buildPsdDocument(layers: EL[], doc: { w: number; h: number }) {
 function drawLayerAnimated(ctx: CanvasRenderingContext2D, l: EL, layers: EL[], t: number | null) {
   const f: AnimFrame = t === null ? REST : animFrame(l.anims, t);
   ctx.save();
+  // 輪播：整張卡（好幾個圖層）一起在畫布座標裡平移、以卡片中心放大，所以要在圖層自己的變形之前做
+  const cw = t === null ? null : carouselWorld(l, layers, t);
+  if (cw) {
+    ctx.translate(cw.tx, 0);
+    if (cw.scale !== 1) { ctx.translate(cw.px, cw.py); ctx.scale(cw.scale, cw.scale); ctx.translate(-cw.px, -cw.py); }
+    if (cw.blur > 0.02) { const m = ctx.getTransform(); ctx.filter = `blur(${(cw.blur * 5 * Math.hypot(m.a, m.b)).toFixed(1)}px)`; }
+  }
   applyClip(ctx, l, layers);
   applyLayerTransform(ctx, l);
   if (f.dx || f.dy) ctx.translate(f.dx * l.h, f.dy * l.h);
@@ -3173,7 +3366,97 @@ function drawShineZoneHint(ctx: CanvasRenderingContext2D, l: EL, zoom: number) {
  * 套效果：選好幾個時，閃光／彈跳／閃爍照「物件」自動錯開（疊在一起的圖層、同一群組算同一個物件，一起動），
  * 順序是由上到下、同一排由左到右；每個的循環長度一樣，循環時順序才不會亂掉。
  */
-function addAnimsTo(layers: EL[], kind: AnimKind) {
+/** 圖層在畫布上的外框。 */
+function layerBox(l: EL) {
+  const c = layerCorners(l);
+  return { x0: Math.min(...c.map((p) => p.x)), y0: Math.min(...c.map((p) => p.y)), x1: Math.max(...c.map((p) => p.x)), y1: Math.max(...c.map((p) => p.y)) };
+}
+/**
+ * 一組輪播現在怎麼排：同組的圖層依重疊／群組併成一張張卡，每張卡的中心、間距、焦點、最多幾格。
+ * 每一格畫的時候現算，所以使用者之後把卡片挪一挪、加一張也會跟著對。
+ */
+function carouselGroupLayout(layers: EL[], group: string | undefined, anchorX: number, dir: "left" | "right") {
+  const members = layers.filter((x) => x.visible && x.anims?.some((a) => a.kind === "carousel" && a.group === group));
+  const units = animUnits(members.map((m) => ({ id: m.id, ...layerBox(m), groupId: m.groupId })));
+  const boxes = new Map<number, { x0: number; y0: number; x1: number; y1: number }>();
+  for (const m of members) {
+    const u = units.get(m.id) ?? 0, b = layerBox(m), o = boxes.get(u);
+    boxes.set(u, o ? { x0: Math.min(o.x0, b.x0), y0: Math.min(o.y0, b.y0), x1: Math.max(o.x1, b.x1), y1: Math.max(o.y1, b.y1) } : b);
+  }
+  const center = (u: number) => { const b = boxes.get(u)!; return { cx: (b.x0 + b.x1) / 2, cy: (b.y0 + b.y1) / 2 }; };
+  const layout = carouselLayout([...boxes.keys()].map((u) => center(u).cx), anchorX, dir);
+  return { units, center, layout };
+}
+/** 輪播：這個圖層在第 t 秒要跟著它那張卡平移多少、以卡片中心放大多少、滑動模糊多少。 */
+function carouselWorld(l: EL, layers: EL[], t: number): { tx: number; px: number; py: number; scale: number; blur: number } | null {
+  const a = l.anims?.find((x) => x.kind === "carousel");
+  if (!a) return null;
+  const dir = a.slideDir ?? "left", anchorX = a.anchorX ?? 0;
+  const { units, center, layout } = carouselGroupLayout(layers, a.group, anchorX, dir);
+  const s = carouselSteps(a, t, layout.maxSteps);
+  const u = units.get(l.id) ?? 0;
+  const { cx, cy } = center(u);
+  // 由左到右第幾張：跟 carouselLayout 算焦點時用的順序一樣
+  const order = [...new Set(units.values())].sort((p, q) => center(p).cx - center(q).cx);
+  const i = order.indexOf(u), n = order.length;
+  const slot = carouselSlot(i, n, layout.focus, s, layout.spacing, dir, anchorX, 0.3 * Math.max(0, Math.min(1, a.intensity)), a.wrap !== false);
+  // 以「排得整整齊齊時」的位置為準算位移，這張卡沒完全對齊也不會跳
+  const tx = slot.x - (anchorX + (i - layout.focus) * layout.spacing);
+  const frac = s - Math.floor(s);
+  return { tx, px: cx, py: cy, scale: slot.scale, blur: a.blur && frac > 0 ? Math.sin(Math.PI * frac) : 0 };
+}
+/**
+ * 選到的圖層如果在輪播裡：它是第幾張卡、這張卡有哪些字和圖（右側動畫分頁直接改）。
+ * 用面板的圖層快照算（render 期間不能讀 ref）。
+ */
+function carouselCardOf(layers: EL[], sel: EL) {
+  const a = sel.anims?.find((x) => x.kind === "carousel");
+  if (!a) return undefined;
+  const { units, center } = carouselGroupLayout(layers, a.group, a.anchorX ?? 0, a.slideDir ?? "left");
+  const order = [...new Set(units.values())].sort((p, q) => center(p).cx - center(q).cx);
+  const u = units.get(sel.id);
+  if (u === undefined) return undefined;
+  const members = layers.filter((l) => units.get(l.id) === u && l.anims?.some((x) => x.kind === "carousel" && x.group === a.group));
+  return {
+    index: order.indexOf(u), total: order.length,
+    texts: members.filter((l) => l.isText).map((l) => ({ id: l.id, text: isVerticalText(l.text) ? l.text.replace(/\n/g, "") : l.text, vertical: isVerticalText(l.text) })),
+    images: members.filter(isPaintable).map((l) => ({ id: l.id, thumb: l.thumb })),
+  };
+}
+/** 輪播可以滑幾格（影片長度用）：同組每個圖層都記一份。 */
+function refreshCarouselSteps(layers: EL[], group: string | undefined) {
+  const a = layers.flatMap((l) => l.anims ?? []).find((x) => x.kind === "carousel" && x.group === group);
+  if (!a) return;
+  const { layout } = carouselGroupLayout(layers, group, a.anchorX ?? 0, a.slideDir ?? "left");
+  for (const l of layers) l.anims = l.anims?.map((x) => (x.kind === "carousel" && x.group === group ? { ...x, steps: layout.maxSteps } : x));
+}
+/** 改動畫設定：輪播是一整組共用一份設定，改一張就全部一起改。 */
+function patchAnimShared(layers: EL[], l: EL, animId: string, patch: Partial<LayerAnim>) {
+  const a = l.anims?.find((x) => x.id === animId);
+  if (a?.kind !== "carousel") { patchAnim(l, animId, patch); return; }
+  for (const m of layers) m.anims = m.anims?.map((x) => (x.kind === "carousel" && x.group === a.group ? { ...x, ...patch, id: x.id } : x));
+  refreshCarouselSteps(layers, a.group);
+}
+/** 拿掉動畫：輪播整組一起拿掉（只拿掉一張的話，那張會停在原地、其他卡照樣滑，很怪）。 */
+function removeAnimShared(layers: EL[], l: EL, animId: string) {
+  const a = l.anims?.find((x) => x.id === animId);
+  if (a?.kind !== "carousel") { removeAnim(l, animId); return; }
+  for (const m of layers) {
+    const keep = (m.anims ?? []).filter((x) => !(x.kind === "carousel" && x.group === a.group));
+    m.anims = keep.length ? keep : undefined;
+  }
+}
+function addAnimsTo(layers: EL[], kind: AnimKind, anchorX = 0, all: EL[] = layers) {
+  if (kind === "carousel") {
+    // 一整組共用一個 group；焦點＝套用時畫布的中線
+    const group = `carousel_${crypto.randomUUID().slice(0, 6)}`;
+    for (const l of layers) {
+      const a = { ...defaultAnim("carousel", `anim_${crypto.randomUUID().slice(0, 6)}`, 0.3), group, anchorX };
+      l.anims = [...(l.anims ?? []).filter((x) => x.kind !== "carousel"), a];
+    }
+    refreshCarouselSteps(all, group);
+    return;
+  }
   const units = animUnits(layers.map((l) => {
     const c = layerCorners(l);
     return { id: l.id, x0: Math.min(...c.map((p) => p.x)), y0: Math.min(...c.map((p) => p.y)), x1: Math.max(...c.map((p) => p.x)), y1: Math.max(...c.map((p) => p.y)), groupId: l.groupId };
@@ -3194,19 +3477,20 @@ function addAnimsTo(layers: EL[], kind: AnimKind) {
 }
 /** 時間軸的列：同一個效果＋同一個開始時間的圖層合成一列（一個物件的幾個零件），列名優先用裡面的文字。 */
 function animTrackRows(layers: EL[]): AnimTrack[] {
-  const rows = new Map<string, { key: string; id: string; names: string[]; anim: LayerAnim }>();
+  const rows = new Map<string, { key: string; id: string; names: string[]; label?: string; anim: LayerAnim }>();
   for (const l of layers) {
     for (const a of l.anims ?? []) {
       const key = `${a.kind}@${a.start}`;
       const r = rows.get(key) ?? { key, id: l.id, names: [] as string[], anim: a };
       r.names.push(l.isText && l.text.trim() ? l.text.replace(/\s+/g, "") : "");
+      r.label ??= a.label;
       if (l.isText && !rows.has(key)) r.id = l.id;
       rows.set(key, r);
     }
   }
   return [...rows.values()]
     .sort((a, b) => a.anim.start - b.anim.start)
-    .map((r) => ({ key: r.key, id: r.id, name: r.names.find(Boolean)?.slice(0, 14) || layers.find((l) => l.id === r.id)?.name || "圖層", anims: [r.anim] }));
+    .map((r) => ({ key: r.key, id: r.id, name: r.label || r.names.find(Boolean)?.slice(0, 14) || layers.find((l) => l.id === r.id)?.name || "圖層", custom: !!r.label, anims: [r.anim] }));
 }
 /** 拖時間軸：同一個效果、同一個開始時間的其他圖層（同一個物件的零件）一起移。 */
 function moveAnimGroup(layers: EL[], layerId: string, animId: string, start: number) {
@@ -3214,6 +3498,13 @@ function moveAnimGroup(layers: EL[], layerId: string, animId: string, start: num
   if (!src) return;
   const kind = src.kind, old = src.start;
   for (const l of layers) l.anims = l.anims?.map((a) => (a.kind === kind && a.start === old ? { ...a, start } : a));
+}
+/** 時間軸列改名：同一列（同一個效果、同一個開始時間）的動畫都記上這個名字；空的＝回到自動取名。 */
+function renameAnimGroup(layers: EL[], layerId: string, animId: string, name: string) {
+  const src = layers.find((l) => l.id === layerId)?.anims?.find((a) => a.id === animId);
+  if (!src) return;
+  const label = name.trim().slice(0, 30) || undefined;
+  for (const l of layers) l.anims = l.anims?.map((a) => (a.kind === src.kind && a.start === src.start ? { ...a, label } : a));
 }
 function patchAnim(l: EL, animId: string, patch: Partial<LayerAnim>) {
   l.anims = (l.anims ?? []).map((a) => (a.id === animId ? { ...a, ...patch } : a));
@@ -3388,7 +3679,9 @@ function fitTextBox(l: EL, docW: number, keepCenter = false) {
   const lh = fs * (l.textLayout?.lineHeight ?? 1.25), pad = fs * 0.15;
   if (!l.textLayout && !l.wrap) {
     const m = textMeasurer(l);
-    const r = autoWidth({ need: widestLine(wrapRanges(l.text, null, m), m) + pad * 2, cx: l.cx, w: l.w, docW, align: l.align, rotated: Math.abs(l.rotation) > 1e-3, min: fs * 0.6, margin: docW * 0.03 });
+    // 在畫布外面的字（輪播等著滑進來的卡）：當成在畫布中間來算可用寬度，不然會被擠成一條
+    const cx = l.cx < 0 || l.cx > docW ? docW / 2 : l.cx;
+    const r = autoWidth({ need: widestLine(wrapRanges(l.text, null, m), m) + pad * 2, cx, w: l.w, docW, align: l.align, rotated: Math.abs(l.rotation) > 1e-3, min: fs * 0.6, margin: docW * 0.03 });
     setTextWidth(l, r.w);
     if (r.fixed) l.wrap = true;
   }
@@ -3587,6 +3880,10 @@ type EditorPage = {
   els: EL[] | null; loading: Promise<EL[]> | null;
   history: EL[][]; histIdx: number; savedIdx: number;
   thumb: string | null;
+  /** 做成影片時這一頁播多久；null＝照動畫自動決定。 */
+  videoLen: number | null;
+  /** 從上一頁換到這一頁的過場；null＝直接切換。 */
+  transitionIn: PageTransition | null;
 };
 const PAGE_THUMB = 140;
 
@@ -3628,10 +3925,144 @@ function duplicateEls(els: EL[]): EL[] {
  * 畫布下方的頁面列（像 Canva）：點縮圖切換、拖曳排序；滑鼠移上去可以複製、刪除；
  * 最後一格加空白頁。只有一頁時也顯示，讓人知道可以加頁。
  */
-function PageStrip({ pages, current, currentThumb, onSelect, onAdd, onDuplicate, onDelete, onMove, onRename }: {
-  pages: { id: string; name: string; thumb: string | null; w: number; h: number }[]; current: number; currentThumb: string | null;
+/** 把輸出好的影片存到電腦（檔名用設計名稱或第一段字）。 */
+function downloadMp4(blob: Blob, title?: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url;
+  a.download = `${(title || "設計稿").replace(/[\\/:*?"<>|\n\r\t]+/g, " ").trim().slice(0, 40) || "設計稿"}.mp4`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
+}
+/** 整份影片的一頁。 */
+type SeqItem = { els: EL[]; w: number; h: number; duration: number; transitionIn: PageTransition | null };
+/** 這一頁播多久：有設定照設定；沒設就照動畫自動決定，沒有動畫的頁停 3 秒。 */
+function pageDuration(els: EL[], chosen: number | null): number {
+  // 輪播能滑幾格跟卡片現在的位置有關：先照目前的排法重算一次
+  for (const g of new Set(els.flatMap((l) => l.anims ?? []).filter((a) => a.kind === "carousel").map((a) => a.group))) refreshCarouselSteps(els, g);
+  const anims = els.flatMap((l) => l.anims ?? []);
+  return chosen ? Math.min(30, chosen) : anims.length ? videoDuration(anims, null) : 3;
+}
+/** 把一頁的第 t 秒畫滿 W×H（尺寸跟影片不同就等比縮放置中、旁邊補白）。 */
+function drawPageAt(ctx: CanvasRenderingContext2D, item: SeqItem, W: number, H: number, t: number) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1; ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
+  const s = Math.min(W / item.w, H / item.h);
+  ctx.translate((W - item.w * s) / 2, (H - item.h * s) / 2); ctx.scale(s, s);
+  ctx.save(); ctx.beginPath(); ctx.rect(0, 0, item.w, item.h); ctx.clip();
+  for (const l of item.els) if (l.visible) drawLayerAnimated(ctx, l, item.els, t);
+  ctx.restore();
+}
+/** 把一張畫好的頁照過場的位置（透明、位移、縮放、只露出一塊）貼上去。 */
+function drawPosed(ctx: CanvasRenderingContext2D, src: HTMLCanvasElement, p: Pose, W: number, H: number) {
+  if (p.alpha <= 0.001) return;
+  ctx.save(); ctx.globalAlpha = p.alpha;
+  if (p.blend) ctx.globalCompositeOperation = p.blend;
+  if (p.clip) { ctx.beginPath(); ctx.rect(p.clip.x0 * W, p.clip.y0 * H, (p.clip.x1 - p.clip.x0) * W, (p.clip.y1 - p.clip.y0) * H); ctx.clip(); }
+  ctx.translate(W / 2 + p.dx * W, H / 2 + p.dy * H);
+  if (p.scale !== 1) ctx.scale(p.scale, p.scale);
+  ctx.drawImage(src, -W / 2, -H / 2, W, H);
+  ctx.restore();
+}
+/** 翻頁掀開：掀開的那條邊在舊的一頁上投一道淡淡的影子，看起來像紙翻過來。 */
+function drawWipeEdge(ctx: CanvasRenderingContext2D, c: NonNullable<Pose["clip"]>, W: number, H: number) {
+  const depth = Math.min(W, H) * 0.05;
+  const edge = c.x0 > 0.001 ? { x: c.x0 * W, dx: -1, dy: 0 } : c.x1 < 0.999 ? { x: c.x1 * W, dx: 1, dy: 0 }
+    : c.y0 > 0.001 ? { y: c.y0 * H, dx: 0, dy: -1 } : c.y1 < 0.999 ? { y: c.y1 * H, dx: 0, dy: 1 } : null;
+  if (!edge) return;
+  const x0 = "x" in edge ? edge.x! : 0, y0 = "y" in edge ? edge.y! : 0;
+  const g = ctx.createLinearGradient(x0, y0, x0 + edge.dx * depth, y0 + edge.dy * depth);
+  g.addColorStop(0, "rgba(0,0,0,.22)"); g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.save(); ctx.fillStyle = g;
+  if (edge.dx) ctx.fillRect(edge.dx < 0 ? x0 - depth : x0, 0, depth, H); else ctx.fillRect(0, edge.dy < 0 ? y0 - depth : y0, W, depth);
+  ctx.restore();
+}
+/** 整份影片的畫法：第 t 秒畫出來（預覽和輸出 MP4 共用）。 */
+function makeSequenceRenderer(items: SeqItem[], W: number, H: number): { layout: SeqLayout; draw: (ctx: CanvasRenderingContext2D, t: number) => void } {
+  const layout = sequenceLayout(items);
+  const bufs = [0, 1].map(() => { const c = document.createElement("canvas"); c.width = W; c.height = H; return c; });
+  const draw = (ctx: CanvasRenderingContext2D, t: number) => {
+    const f = sequenceAt(layout, items, t);
+    drawPageAt(bufs[0].getContext("2d")!, items[f.from.page], W, H, f.from.local);
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1; ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
+    if (!f.to || !f.transition) { ctx.drawImage(bufs[0], 0, 0); ctx.restore(); return; }
+    drawPageAt(bufs[1].getContext("2d")!, items[f.to.page], W, H, f.to.local);
+    const pose = transitionPoses(f.transition, f.mix ?? 0);
+    if (pose.base) { ctx.fillStyle = pose.base; ctx.fillRect(0, 0, W, H); }
+    if (pose.toOnTop) { drawPosed(ctx, bufs[0], pose.from, W, H); drawPosed(ctx, bufs[1], pose.to, W, H); }
+    else { drawPosed(ctx, bufs[1], pose.to, W, H); drawPosed(ctx, bufs[0], pose.from, W, H); }
+    if (f.transition.kind === "wipe" && pose.to.clip) drawWipeEdge(ctx, pose.to.clip, W, H);
+    if (pose.overlay && pose.overlay.alpha > 0) { ctx.globalAlpha = pose.overlay.alpha; ctx.fillStyle = pose.overlay.color; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+    ctx.restore();
+  };
+  return { layout, draw };
+}
+
+/** 過場選單分組：溶解類跟 Premiere 的「溶解」資料夾一樣。 */
+const TRANSITION_GROUPS: [string, TransitionKind[]][] = [
+  ["基本", ["none", "fade"]],
+  ["溶解", ["dipBlack", "dipWhite", "additive", "nonAdditive", "filmDissolve"]],
+  ["移動", ["push", "wipe", "zoom"]],
+];
+/** 兩頁中間的過場按鈕：點開選效果、方向、秒數。 */
+function TransitionButton({ value, onChange }: { value: PageTransition | null; onChange: (tr: PageTransition | null) => void }) {
+  const [open, setOpen] = useState<{ x: number; y: number } | null>(null);
+  const on = value && value.kind !== "none";
+  const pill = (active: boolean): React.CSSProperties => ({ height: 26, padding: "0 8px", borderRadius: 7, fontSize: 11, fontWeight: 600, cursor: "pointer",
+    border: active ? "1px solid #7c3aed" : "1px solid #e5e7eb", background: active ? "#f5f3ff" : "#fff", color: active ? "#6d28d9" : "#374151" });
+  const kind = value?.kind ?? "none";
+  return (
+    <>
+      <button onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setOpen(open ? null : { x: r.left + r.width / 2, y: r.top }); }}
+        title={on ? `過場：${TRANSITION_LABELS[value!.kind]}（點一下修改）` : "加過場效果"} aria-label="頁面過場"
+        style={{ flex: "0 0 auto", alignSelf: "center", marginBottom: 18, height: 22, minWidth: 22, padding: on ? "0 6px" : 0, borderRadius: 11, cursor: "pointer",
+          border: on ? "1px solid #7c3aed" : "1px dashed #c4b5fd", background: on ? "#f5f3ff" : "#fff", color: "#7c3aed", fontSize: 10, fontWeight: 700,
+          display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 2, whiteSpace: "nowrap" }}>
+        <Clapperboard size={11} />{on ? TRANSITION_LABELS[value!.kind] : null}
+      </button>
+      {open && (<>
+        <div onClick={() => setOpen(null)} style={{ position: "fixed", inset: 0, zIndex: 900 }} />
+        <div style={{ position: "fixed", left: Math.max(8, open.x - 150), top: open.y - 8, transform: "translateY(-100%)", zIndex: 901, width: 300, background: "#fff",
+          border: "1px solid #e5e7eb", borderRadius: 12, boxShadow: "0 12px 32px rgba(17,24,39,.18)", padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#1f2937" }}>換頁過場</div>
+          {TRANSITION_GROUPS.map(([title, kinds]) => (
+            <div key={title}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", marginBottom: 4 }}>{title}</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                {kinds.map((k) => (
+                  <button key={k} onClick={() => onChange(k === "none" ? null : { ...defaultTransition(k), ...(value && value.kind !== "none" ? { duration: value.duration } : {}) })} style={pill(kind === k)}>{TRANSITION_LABELS[k]}</button>
+                ))}
+              </div>
+            </div>
+          ))}
+          {value && hasDir(value.kind) && (
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ fontSize: 11, color: "#6b7280", marginRight: 4 }}>方向</span>
+              {([["left", "←"], ["right", "→"], ["up", "↑"], ["down", "↓"]] as const).map(([d, t]) => (
+                <button key={d} onClick={() => onChange({ ...value, dir: d })} title={value.kind === "push" ? `往${{ left: "左", right: "右", up: "上", down: "下" }[d]}推` : `往${{ left: "左", right: "右", up: "上", down: "下" }[d]}掀開`}
+                  aria-label={`過場方向${t}`} style={{ ...pill((value.dir ?? "left") === d), width: 32, padding: 0, fontSize: 13 }}>{t}</button>
+              ))}
+            </div>
+          )}
+          {value && value.kind !== "none" && (
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6b7280" }}>
+              多久（秒）
+              <input type="number" min={0.1} max={2} step={0.1} value={value.duration}
+                onChange={(e) => onChange({ ...value, duration: Math.min(2, Math.max(0.1, Number(e.target.value) || 0.5)) })}
+                style={{ width: 64, height: 26, border: "1px solid #e5e7eb", borderRadius: 6, padding: "0 6px", fontSize: 12 }} />
+            </label>
+          )}
+          <div style={{ fontSize: 10, color: "#9ca3af", lineHeight: 1.5 }}>在「動畫」分頁按「預覽整份影片」看效果；下載 MP4 選全部頁面才會有過場。</div>
+        </div>
+      </>)}
+    </>
+  );
+}
+
+function PageStrip({ pages, current, currentThumb, onSelect, onAdd, onDuplicate, onDelete, onMove, onRename, onTransition }: {
+  pages: { id: string; name: string; thumb: string | null; w: number; h: number; transitionIn?: PageTransition | null }[]; current: number; currentThumb: string | null;
   onSelect: (i: number) => void; onAdd: () => void; onDuplicate: () => void; onDelete: (i: number) => void; onMove: (from: number, to: number) => void;
-  onRename: (i: number, name: string) => void;
+  onRename: (i: number, name: string) => void; onTransition: (i: number, tr: PageTransition | null) => void;
 }) {
   const [drag, setDrag] = useState<number | null>(null);
   const [hover, setHover] = useState<number | null>(null);
@@ -3644,8 +4075,10 @@ function PageStrip({ pages, current, currentThumb, onSelect, onAdd, onDuplicate,
     <div style={{ flex: "0 0 auto", height: 98, display: "flex", alignItems: "center", gap: 10, padding: "0 16px", background: "#fff", borderTop: "1px solid #e5e7eb", overflowX: "auto" }}>
       {list.map((p, i) => {
         const thumb = i === current ? currentThumb ?? p.thumb : p.thumb;
-        return (
-          <div key={p.id} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}
+        return (<Fragment key={p.id}>
+          {/* 兩頁中間：從上一頁換到這一頁的過場 */}
+          {i > 0 && <TransitionButton value={p.transitionIn ?? null} onChange={(tr) => onTransition(i, tr)} />}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}
             onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
             <div draggable onDragStart={(e) => { setDrag(i); e.dataTransfer.effectAllowed = "move"; }} onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => { e.preventDefault(); if (drag !== null) onMove(drag, i); setDrag(null); }} onDragEnd={() => setDrag(null)}
@@ -3679,7 +4112,7 @@ function PageStrip({ pages, current, currentThumb, onSelect, onAdd, onDuplicate,
               </span>
             )}
           </div>
-        );
+        </Fragment>);
       })}
       <div style={{ display: "flex", flexDirection: "column", gap: 6, marginLeft: 4 }}>
         <button onClick={onAdd} title="在這一頁後面加一個空白頁"

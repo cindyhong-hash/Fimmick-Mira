@@ -7,7 +7,8 @@
    時間單位都是秒；位移是圖層自己的座標（跟著圖層旋轉）、以圖層高度的比例表示。
    ============================================================ */
 
-export type AnimKind = "shine" | "bounce" | "pulse" | "twinkle" | "float" | "fadeIn" | "popIn" | "typeIn";
+export type AnimKind = "shine" | "bounce" | "pulse" | "twinkle" | "float" | "fadeIn" | "popIn" | "typeIn" | "carousel";
+export type SlideDir = "left" | "right";
 /** 逐字出現時，每個字怎麼進場：打字（直接冒出來）／淡入／彈出／飛入（從上面滑下來）。 */
 export type TypeStyle = "type" | "fade" | "pop" | "slide";
 export const TYPE_STYLES: TypeStyle[] = ["type", "fade", "pop", "slide"];
@@ -41,12 +42,22 @@ export type LayerAnim = {
   width?: number;
   /** 淡入：一邊淡入一邊往這個方向滑進來；沒有＝原地淡入。滑多遠用 intensity。 */
   enterDir?: ShineDirection;
+  /** 時間軸上這一列的名字（使用者自己取的）；沒有就用圖層的字或名稱。 */
+  label?: string;
   /** 逐字出現：每個字怎麼進場。 */
   typeStyle?: TypeStyle;
+  /**
+   * 輪播：一排卡片一格一格滑，同一組的每個圖層都帶同一個 group。
+   * duration＝每次滑多久、gap＝每張停多久、intensity＝中間那張放大多少（0＝不放大）。
+   * anchorX＝焦點位置（套用時的畫布中線）、steps＝套用時算的可滑格數（影片長度用）。
+   */
+  group?: string; anchorX?: number; steps?: number; blur?: boolean; slideDir?: SlideDir;
+  /** 輪播：滑出去的卡繞到另一頭接著排（最後一張到中間時，旁邊接的是第一張，不留空白）。 */
+  wrap?: boolean;
 };
 
 export const ANIM_LABELS: Record<AnimKind, string> = {
-  shine: "閃光掃過", bounce: "依序彈跳", pulse: "呼吸放大", twinkle: "閃爍", float: "輕輕漂浮", fadeIn: "淡入", popIn: "彈出", typeIn: "逐字出現",
+  shine: "閃光掃過", bounce: "依序彈跳", pulse: "呼吸放大", twinkle: "閃爍", float: "輕輕漂浮", fadeIn: "淡入", popIn: "彈出", typeIn: "逐字出現", carousel: "輪播",
 };
 
 /** 每種動畫的預設值（套上去時用；使用者再自己調）。 */
@@ -62,12 +73,15 @@ export function defaultAnim(kind: AnimKind, id: string, start = 0): LayerAnim {
     case "popIn": return { ...base, duration: 0.5, repeat: 1, intensity: 0.6 };
     // duration 是整段字跑完的時間
     case "typeIn": return { ...base, duration: 1.2, repeat: 1, intensity: 0.6, typeStyle: "slide" };
+    case "carousel": return { ...base, duration: 0.4, gap: 1, repeat: 1, intensity: 0.5, blur: true, slideDir: "left", steps: 0, wrap: true };
   }
 }
 
 /** 這個動畫最晚在第幾秒結束（一直循環的回傳 Infinity）。 */
 export function animEnd(a: LayerAnim): number {
   if (isOneShot(a.kind)) return a.start + a.duration;
+  // 輪播：每一格「停＋滑」，滑完最後一張再多停一下讓人看清楚
+  if (a.kind === "carousel") return a.start + (a.steps ?? 0) * (Math.max(0, a.gap) + a.duration) + 0.8;
   if (!a.repeat) return Infinity;
   return a.start + a.repeat * a.duration + (a.repeat - 1) * Math.max(0, a.gap);
 }
@@ -178,6 +192,51 @@ export function typeChar(s: TypingState, i: number, n: number): { opacity: numbe
 }
 
 /**
+ * 輪播：第 t 秒整排滑了幾格（可以是小數，滑到一半＝0.5）。
+ * 每一格都是先停 gap 秒、再用 duration 秒滑過去；滑滿 maxSteps 格就停住。
+ */
+export function carouselSteps(a: LayerAnim, t: number, maxSteps: number): number {
+  if (t <= a.start || maxSteps <= 0) return 0;
+  const hold = Math.max(0, a.gap), slide = Math.max(0.05, a.duration), cycle = hold + slide;
+  const k = Math.floor((t - a.start) / cycle), within = t - a.start - k * cycle;
+  const s = within < hold ? k : k + easeInOut((within - hold) / slide);
+  return Math.min(maxSteps, s);
+}
+
+/**
+ * 輪播的排法：卡片中心（由左到右）→ 間距、一開始在焦點上的是第幾張、最多能滑幾格。
+ * 間距用相鄰卡片距離的中位數，排得不太整齊也不會跳。
+ */
+export function carouselLayout(centers: number[], anchorX: number, dir: SlideDir): { spacing: number; focus: number; maxSteps: number } {
+  const xs = [...centers].sort((a, b) => a - b);
+  const gaps = xs.slice(1).map((x, i) => x - xs[i]).sort((a, b) => a - b);
+  const spacing = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 0;
+  let focus = 0;
+  xs.forEach((x, i) => { if (Math.abs(x - anchorX) < Math.abs(xs[focus] - anchorX)) focus = i; });
+  return { spacing, focus, maxSteps: spacing > 0 ? (dir === "left" ? xs.length - 1 - focus : focus) : 0 };
+}
+
+/** 輪播：中心在 cx 的那張卡，滑了 s 格之後往哪移（畫布座標）、放大多少（越靠近焦點越大）。 */
+export function carouselPose(cx: number, s: number, spacing: number, dir: SlideDir, anchorX: number, zoom: number): { tx: number; scale: number } {
+  const tx = (dir === "left" ? -1 : 1) * spacing * s;
+  const dist = spacing > 0 ? Math.abs(cx + tx - anchorX) / spacing : 1;
+  return { tx, scale: 1 + zoom * Math.max(0, 1 - dist) };
+}
+
+/**
+ * 輪播：由左到右第 i 張卡（共 n 張，一開始第 focus 張在焦點上），滑了 s 格之後中心在哪、放大多少。
+ * wrap＝滑出去的卡繞到另一頭補上：可見範圍是焦點左右各約半圈，繞回去的那一下發生在最遠的地方（畫面外）。
+ */
+export function carouselSlot(i: number, n: number, focus: number, s: number, spacing: number, dir: SlideDir, anchorX: number, zoom: number, wrap: boolean): { x: number; scale: number } {
+  let rel = i - focus + (dir === "left" ? -s : s);
+  if (wrap && n > 1) {
+    const lo = -Math.ceil(n / 2);
+    rel = ((((rel - lo) % n) + n) % n) + lo;
+  }
+  return { x: anchorX + rel * spacing, scale: 1 + zoom * Math.max(0, 1 - Math.abs(rel)) };
+}
+
+/**
  * 光帶在圖層座標裡的位置：回傳漸層的起點、終點（光帶中心從 from 走到 to 的那條線上）。
  * direction 是光前進的方向（見 SHINE_VECTORS），例如 down = 從上往下（光帶是橫的）、upRight = 從左下往右上。
  */
@@ -208,7 +267,7 @@ export function videoDuration(allAnims: LayerAnim[], chosen?: number | null): nu
 /** 讀存檔：格式不對的動畫丟掉，數值夾在合理範圍。 */
 export function readAnims(value: unknown): LayerAnim[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  const kinds: AnimKind[] = ["shine", "bounce", "pulse", "twinkle", "float", "fadeIn", "popIn", "typeIn"];
+  const kinds: AnimKind[] = ["shine", "bounce", "pulse", "twinkle", "float", "fadeIn", "popIn", "typeIn", "carousel"];
   const num = (v: unknown, lo: number, hi: number, dflt: number) => (typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : dflt);
   const out: LayerAnim[] = [];
   for (const raw of value) {
@@ -219,12 +278,18 @@ export function readAnims(value: unknown): LayerAnim[] | undefined {
     out.push({
       ...d,
       start: num(r.start, 0, 30, d.start), duration: num(r.duration, 0.1, 10, d.duration),
-      repeat: isOneShot(d.kind) ? 1 : Math.round(num(r.repeat, 0, 50, d.repeat)), gap: num(r.gap, 0, 10, d.gap), intensity: num(r.intensity, 0, 1, d.intensity),
+      repeat: isOneShot(d.kind) || d.kind === "carousel" ? 1 : Math.round(num(r.repeat, 0, 50, d.repeat)), gap: num(r.gap, 0, 10, d.gap), intensity: num(r.intensity, 0, 1, d.intensity),
       ...(d.kind === "shine" ? {
         // 舊存檔只有三個方向，「diagonal」就是現在的 ↘
         direction: r.direction === "diagonal" ? "downRight" : typeof r.direction === "string" && Object.hasOwn(SHINE_VECTORS, r.direction) ? (r.direction as ShineDirection) : d.direction,
         width: num(r.width, 0.1, 0.8, d.width ?? 0.35),
       } : {}),
+      ...(d.kind === "carousel" ? {
+        group: typeof r.group === "string" ? r.group.slice(0, 40) : `carousel_${out.length}`,
+        anchorX: num(r.anchorX, -100000, 100000, 0), steps: Math.round(num(r.steps, 0, 50, 0)), blur: r.blur !== false,
+        slideDir: r.slideDir === "right" ? "right" as const : "left" as const, wrap: r.wrap !== false,
+      } : {}),
+      ...(typeof r.label === "string" && r.label.trim() ? { label: r.label.trim().slice(0, 30) } : {}),
       ...(d.kind === "fadeIn" && typeof r.enterDir === "string" && Object.hasOwn(SHINE_VECTORS, r.enterDir) ? { enterDir: r.enterDir as ShineDirection } : {}),
       ...(d.kind === "typeIn" ? { typeStyle: TYPE_STYLES.includes(r.typeStyle as TypeStyle) ? (r.typeStyle as TypeStyle) : d.typeStyle } : {}),
     });

@@ -68,11 +68,21 @@ export function clipToShape(ctx: CanvasRenderingContext2D, w: number, h: number,
   return true;
 }
 
+/** 把 #rgb／#rrggbb 變成同色但完全透明的 rgba（柔邊淡出用）；其他寫法退回 transparent。 */
+function clearOf(color: string): string {
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})([0-9a-f]{2})?$/i.exec(color.trim());
+  if (!m) return "transparent";
+  const hex = m[1].length === 3 ? [...m[1]].map((c) => c + c).join("") : m[1];
+  const n = parseInt(hex, 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},0)`;
+}
+
 export function drawEditableShape(ctx: CanvasRenderingContext2D, w: number, h: number, sh: ShapeSpec) {
   if (sh.kind === "ellipse" && sh.softness && !sh.gradient) {
     ctx.save(); ctx.scale(w/2,h/2);
     const g = ctx.createRadialGradient(0,0,0,0,0,1);
-    g.addColorStop(0,sh.fill); g.addColorStop(Math.max(0.05,1-sh.softness),sh.fill); g.addColorStop(1,"transparent");
+    // 淡出到「同一個顏色的透明」：用 "transparent"（透明黑）的話，白色柔邊中間會經過一圈灰
+    g.addColorStop(0,sh.fill); g.addColorStop(Math.max(0.05,1-sh.softness),sh.fill); g.addColorStop(1,clearOf(sh.fill));
     ctx.fillStyle=g; ctx.beginPath(); ctx.arc(0,0,1,0,Math.PI*2); ctx.fill(); ctx.restore(); return;
   }
   const doFill = !!sh.gradient || (sh.fill && sh.fill !== "none");

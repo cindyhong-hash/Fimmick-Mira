@@ -35,6 +35,7 @@ import { FAMILY as F20 } from "./family-20-timeline-capsules.mjs";
 import { FAMILY as F21 } from "./family-21-bingo-circle.mjs";
 import { FAMILY as F22 } from "./family-22-mincho-tilt.mjs";
 import { FAMILY as F23 } from "./family-23-sticker-frame.mjs";
+import { FAMILY as F24 } from "./family-24-foam-cloud.mjs";
 
 const DB = "prisma/dev-release.db";
 const OUT = "src/lib/magic-layers/builtin-templates.json";
@@ -79,7 +80,7 @@ const DRAFT = process.argv.includes("--draft");
 const thumbs = thumbnails();
 const entries = [
   ...LEGACY.slice(10).map((t) => ({ name: t.name, layers: t.layers(), art: null })),
-  ...[...F1, ...F2, ...F3, ...F4, ...SHOWCASE, ...F5, ...F6, ...F7, ...F8, ...F9, ...F10, ...F11, ...F12, ...F13, ...F14, ...F15, ...F16, ...F17, ...F18, ...F19, ...F20, ...F21, ...F22, ...F23].map((f) => ({
+  ...[...F1, ...F2, ...F3, ...F4, ...SHOWCASE, ...F5, ...F6, ...F7, ...F8, ...F9, ...F10, ...F11, ...F12, ...F13, ...F14, ...F15, ...F16, ...F17, ...F18, ...F19, ...F20, ...F21, ...F22, ...F23, ...F24].map((f) => ({
     name: f.art.name, layers: f.layers(),
     // 直式範本在 art 裡帶自己的尺寸（預設 1200×1200）
     docW: f.art.docW, docH: f.art.docH,

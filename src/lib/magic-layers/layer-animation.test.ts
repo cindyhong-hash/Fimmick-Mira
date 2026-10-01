@@ -25,7 +25,7 @@ test("淡入：開始前透明、結束後保持顯示", () => {
 });
 
 test("各種效果：沒動畫時不變；呼吸放大、彈跳、漂浮、閃爍、閃光", () => {
-  assert.deepEqual(animFrame(undefined, 3), { dx: 0, dy: 0, scale: 1, opacity: 1, shines: [] });
+  assert.deepEqual(animFrame(undefined, 3), { dx: 0, dy: 0, scale: 1, opacity: 1, rot: 0, blur: 0, shines: [] });
   const pulse = { ...defaultAnim("pulse", "p"), duration: 2, intensity: 1 };
   near(animFrame([pulse], 0).scale, 1);
   near(animFrame([pulse], 1).scale, 1.12);      // 半輪最大
@@ -204,4 +204,30 @@ test("速度：慢／適中／快只改動作本身多快，適中＝預設；�
   assert.equal(speedOf({ ...shine, duration: 0.83 }), null);
   // 間隔不算在速度裡（多選錯開的閃光，間隔是算好的）
   assert.equal(speedOf({ ...shine, gap: 9 }), "normal");
+});
+
+test("扭擺：一輪裡左右扭、最後停回原位；模糊化：從模糊變清楚", () => {
+  const w = defaultAnim("wiggle", "w", 0);
+  const mid = animFrame([w], w.duration * 0.15);
+  assert.ok(Math.abs(mid.rot) > 0.02);
+  near(animFrame([w], w.duration * 0.999).rot, 0, 0.01);
+  const b = defaultAnim("blurIn", "b", 0);
+  const early = animFrame([b], 0.05), later = animFrame([b], b.duration * 0.7), done = animFrame([b], 9);
+  assert.ok(early.blur > later.blur && later.blur > 0);
+  near(done.blur, 0); near(done.opacity, 1);
+});
+
+test("重踏：一開始很大、落地壓一下再回到原本大小；旋轉：一輪轉一圈", () => {
+  const s = defaultAnim("stomp", "s", 0);
+  assert.ok(animFrame([s], 0.02).scale > 1.5);
+  near(animFrame([s], 9).scale, 1);
+  const minScale = Math.min(...[0.62, 0.66, 0.7, 0.74, 0.78].map((q) => animFrame([s], q * s.duration).scale));
+  assert.ok(minScale < 0.99);   // 落地時壓扁一點
+  const r = defaultAnim("spin", "r", 0);
+  near(animFrame([r], r.duration / 4).rot, Math.PI / 2);
+  near(animFrame([{ ...r, ccw: true }], r.duration / 4).rot, -Math.PI / 2);
+  const back = readAnims([{ kind: "spin", ccw: true }, { kind: "stomp" }, { kind: "wiggle" }, { kind: "blurIn" }])!;
+  assert.deepEqual(back.map((a) => a.kind), ["spin", "stomp", "wiggle", "blurIn"]);
+  assert.equal(back[0].ccw, true);
+  for (const k of ["wiggle", "blurIn", "stomp", "spin"] as const) assert.equal(speedOf(defaultAnim(k, "x")), "normal");
 });

@@ -6,7 +6,7 @@
    只負責畫面與回呼；圖層怎麼改、怎麼畫、怎麼輸出都在編輯器（MagicLayersEditor）裡。
    ============================================================ */
 import { useEffect, useRef, useState } from "react";
-import { Pause, Play, Sparkles, Trash2, Film, Plus } from "lucide-react";
+import { Pause, Play, Sparkles, Trash2, Film, Plus, ChevronsUp, HeartPulse, Star, Waves, Sunrise, Zap, Keyboard, GalleryHorizontal, Vibrate, Focus, ArrowDownToLine, RotateCw, type LucideIcon } from "lucide-react";
 import { ImageLibraryPicker } from "./ImageLibraryPicker";
 import { ANIM_LABELS, animEnd, isOneShot, speedOf, SPEED_LABELS, SPEED_PRESETS, type AnimSpeed, TYPE_STYLES, type AnimKind, type LayerAnim, type ShineDirection, type TypeStyle } from "@/lib/magic-layers/layer-animation.ts";
 
@@ -19,8 +19,26 @@ const KINDS: { kind: AnimKind; hint: string }[] = [
   { kind: "fadeIn", hint: "開場時慢慢出現" },
   { kind: "popIn", hint: "從無到有「啵」一下冒出來；選好幾個會一個接一個出現，適合圖示、標籤" },
   { kind: "typeIn", hint: "文字一個字一個字出現（打字、淡入、彈出、飛入）；選好幾段字會一段接一段" },
+  { kind: "wiggle", hint: "左右扭一扭再停住，隔一下再扭；適合價格標、「立即購買」按鈕" },
+  { kind: "blurIn", hint: "從模糊慢慢變清楚；適合大標、商品" },
+  { kind: "stomp", hint: "從很大「碰」一下砸到定位；適合折扣數字。選好幾個會一個接一個砸下來" },
+  { kind: "spin", hint: "一直轉；適合星星、徽章、小裝飾" },
   { kind: "carousel", hint: "選一張做好的卡片（底框＋字＋圖），按這個就會複製成一排，一格一格往左滑、停在最後一張" },
 ];
+
+/** 每個效果的小圖示（顏色跟時間軸色條一樣）。 */
+const ANIM_ICONS: Record<AnimKind, LucideIcon> = {
+  shine: Sparkles, bounce: ChevronsUp, pulse: HeartPulse, twinkle: Star, float: Waves,
+  fadeIn: Sunrise, popIn: Zap, typeIn: Keyboard, carousel: GalleryHorizontal,
+  wiggle: Vibrate, blurIn: Focus, stomp: ArrowDownToLine, spin: RotateCw,
+};
+/** 左側效果分組：讓它出現／讓它一直動／特殊。 */
+const KIND_GROUPS: { title: string; note: string; kinds: AnimKind[] }[] = [
+  { title: "進場", note: "讓它出現", kinds: ["fadeIn", "popIn", "typeIn", "blurIn", "stomp"] },
+  { title: "一直動", note: "吸引目光", kinds: ["shine", "bounce", "pulse", "twinkle", "float", "wiggle", "spin"] },
+  { title: "特殊", note: "", kinds: ["carousel"] },
+];
+const hintOf = (k: AnimKind) => KINDS.find((x) => x.kind === k)?.hint ?? "";
 
 const TYPE_STYLE_LABELS: Record<TypeStyle, string> = { type: "打字", fade: "淡入", pop: "彈出", slide: "飛入" };
 
@@ -35,6 +53,9 @@ export function AnimationTab(props: {
   getDuration: () => number; autoDuration: boolean; onDuration: (d: number | null) => void;
   playing: boolean; getTime: () => number | null; onPlay: () => void; onPause: () => void; onSeek: (t: number) => void;
   selectionCount: number; onApply: (kind: AnimKind) => void; onAddZone: () => void;
+  /** 滑鼠移到效果按鈕上：先在畫布上試播（null＝移開了）。 */
+  onTry: (kind: AnimKind | null) => void;
+  onClearAll: () => void;
   getTracks: () => AnimTrack[]; selectedIds: string[]; onSelectLayer: (id: string) => void;
   onMoveStart: (layerId: string, animId: string, start: number) => void; onCommitMove: () => void;
   onRenameTrack: (layerId: string, animId: string, name: string) => void;
@@ -61,7 +82,7 @@ export function AnimationTab(props: {
   return (
     <div style={{ display: "flex", flexDirection: "column" }}>
       <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.6, padding: "0 2px 4px" }}>
-        先在畫布上選圖層（可以拉框選好幾個），再點下面的效果；細節在右側面板調。
+        先在畫布上選圖層（可以拉框選好幾個），滑鼠移到效果上會先試播，點下去才套用；細節在右側面板調。
       </div>
 
       <div style={label}>{multi ? "這一頁播多久" : "影片長度"}</div>
@@ -93,22 +114,43 @@ export function AnimationTab(props: {
       </div>
 
       <div style={label}>套用效果{props.selectionCount ? `（${props.selectionCount} 個圖層）` : ""}</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-        {KINDS.map(({ kind, hint }) => (
-          <button key={kind} onClick={() => props.onApply(kind)} disabled={!props.selectionCount} title={props.selectionCount ? hint : "先在畫布上選一個圖層"}
-            style={{ ...btn, ...(props.selectionCount ? {} : { opacity: 0.45, cursor: "not-allowed" }) }}>
-            {ANIM_LABELS[kind]}
-          </button>
-        ))}
-      </div>
+      {KIND_GROUPS.map((g) => (
+        <div key={g.title} style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", margin: "2px 2px 5px" }}>
+            {g.title}{g.note && <span style={{ fontWeight: 500, color: "#9ca3af", marginLeft: 6 }}>{g.note}</span>}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+            {g.kinds.map((kind) => {
+              const Icon = ANIM_ICONS[kind];
+              return (
+                <button key={kind} onClick={() => props.onApply(kind)} disabled={!props.selectionCount}
+                  onMouseEnter={() => { if (props.selectionCount) props.onTry(kind); }} onMouseLeave={() => props.onTry(null)}
+                  title={props.selectionCount ? `${hintOf(kind)}${kind === "carousel" ? "" : "（滑鼠移上來會先試播，點下去才套用）"}` : "先在畫布上選一個圖層"}
+                  style={{ ...btn, display: "inline-flex", alignItems: "center", justifyContent: "flex-start", gap: 7, padding: "0 10px", ...(props.selectionCount ? {} : { opacity: 0.45, cursor: "not-allowed" }) }}>
+                  <Icon size={15} color={ANIM_COLORS[kind]} style={{ flex: "0 0 auto" }} />{ANIM_LABELS[kind]}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
       <button onClick={props.onAddZone} style={{ ...btn, marginTop: 8, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}
         title="加一塊看不見的範圍，只有閃光掃過時在裡面亮一下（例如只想讓照片的某一塊發亮）">
         <Sparkles size={14} color="#7c3aed" />加一塊光澤範圍
       </button>
 
-      <div style={label}>時間軸（拖曳色條調整開始時間；雙擊名稱可以改名）</div>
+      <div style={{ ...label, display: "flex", alignItems: "center", gap: 6 }}>
+        <span style={{ flex: 1, minWidth: 0 }}>時間軸（拖曳色條調整開始時間；雙擊名稱可以改名）</span>
+        {tracks.length > 0 && (
+          <button onClick={props.onClearAll} title="拿掉這一頁所有圖層的動畫（可以 ⌘Z 復原）"
+            style={{ flex: "0 0 auto", height: 24, padding: "0 8px", borderRadius: 6, border: "1px solid #fecaca", background: "#fff", color: "#dc2626", fontSize: 11, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 3 }}>
+            <Trash2 size={11} />清除全部
+          </button>
+        )}
+      </div>
       <Timeline duration={duration} tracks={tracks} selectedIds={props.selectedIds} onSelectLayer={props.onSelectLayer}
         onMoveStart={props.onMoveStart} onCommitMove={props.onCommitMove} onRename={props.onRenameTrack} />
+
 
       {multi && (
         <button onClick={props.onPreviewAll} disabled={props.exporting}
@@ -130,7 +172,8 @@ export function AnimationTab(props: {
   );
 }
 
-const ANIM_COLORS: Record<AnimKind, string> = { shine: "#f59e0b", bounce: "#ec4899", pulse: "#8b5cf6", twinkle: "#06b6d4", float: "#10b981", fadeIn: "#6b7280", popIn: "#f97316", typeIn: "#3b82f6", carousel: "#14b8a6" };
+const ANIM_COLORS: Record<AnimKind, string> = { shine: "#f59e0b", bounce: "#ec4899", pulse: "#8b5cf6", twinkle: "#06b6d4", float: "#10b981", fadeIn: "#6b7280", popIn: "#f97316", typeIn: "#3b82f6", carousel: "#14b8a6",
+  wiggle: "#e11d48", blurIn: "#64748b", stomp: "#b45309", spin: "#0ea5e9" };
 
 /** 每個有動畫的圖層一列，色條是動畫的時間（循環的後面接淡淡的重複）。拖色條改開始時間。 */
 function Timeline(props: {
@@ -213,14 +256,22 @@ export function LayerAnimSettings(props: {
       {props.shineOnly && <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.6, marginBottom: 6 }}>這是一塊「光澤範圍」：輸出時看不見，只有閃光掃過時在這個形狀裡亮一下。</div>}
       {adding && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4, marginBottom: 8 }}>
-          {KINDS.map(({ kind }) => <button key={kind} onClick={() => { props.onAdd(kind); setAdding(false); }} style={{ ...btn, height: 28, fontSize: 11 }}>{ANIM_LABELS[kind]}</button>)}
+          {KIND_GROUPS.flatMap((g) => g.kinds).map((kind) => {
+            const Icon = ANIM_ICONS[kind];
+            return (
+              <button key={kind} onClick={() => { props.onAdd(kind); setAdding(false); }} title={hintOf(kind)}
+                style={{ ...btn, height: 28, fontSize: 11, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4, padding: "0 4px" }}>
+                <Icon size={12} color={ANIM_COLORS[kind]} style={{ flex: "0 0 auto" }} />{ANIM_LABELS[kind]}
+              </button>
+            );
+          })}
         </div>
       )}
       {!anims.length && !adding && <div style={{ fontSize: 11, color: "#9ca3af" }}>沒有動畫。可以在左側「動畫」分頁套用，或按「加效果」。</div>}
       {anims.map((a) => (
         <div key={a.id} style={{ border: "1px solid #ede9fe", background: "#faf8ff", borderRadius: 10, padding: 10, marginBottom: 8 }}>
           <div style={{ display: "flex", alignItems: "center", marginBottom: 6 }}>
-            <span style={{ width: 8, height: 8, borderRadius: 4, background: ANIM_COLORS[a.kind], marginRight: 6 }} />
+            {(() => { const Icon = ANIM_ICONS[a.kind]; return <Icon size={14} color={ANIM_COLORS[a.kind]} style={{ marginRight: 6, flex: "0 0 auto" }} />; })()}
             <span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>{ANIM_LABELS[a.kind]}</span>
             <button onClick={() => props.onRemove(a.id)} title="拿掉這個動畫" style={{ marginLeft: "auto", border: "none", background: "transparent", cursor: "pointer", color: "#9ca3af" }}><Trash2 size={14} /></button>
           </div>
@@ -320,8 +371,18 @@ export function LayerAnimSettings(props: {
               </div>
             )}
           </>)}
-          {a.kind !== "fadeIn" && a.kind !== "carousel" && !(a.kind === "typeIn" && (a.typeStyle === "type" || a.typeStyle === "fade")) && (
-            <Field label={`${a.kind === "typeIn" && (a.typeStyle ?? "slide") === "slide" ? "飛入距離" : a.kind === "popIn" || a.kind === "typeIn" ? "彈的力道" : "強度"} ${Math.round(a.intensity * 100)}%`}>
+          {a.kind === "spin" && (
+            <Field label="轉的方向">
+              <div style={{ display: "flex", gap: 4 }}>
+                {([[false, "↻ 順時針"], [true, "↺ 逆時針"]] as const).map(([ccw, t]) => (
+                  <button key={t} type="button" onClick={() => props.onChange(a.id, { ccw })}
+                    style={{ ...btn, flex: 1, height: 28, fontSize: 11, ...(!!a.ccw === ccw ? { border: "1px solid #7c3aed", color: "#6d28d9", background: "#f5f3ff" } : {}) }}>{t}</button>
+                ))}
+              </div>
+            </Field>
+          )}
+          {a.kind !== "fadeIn" && a.kind !== "carousel" && a.kind !== "spin" && !(a.kind === "typeIn" && (a.typeStyle === "type" || a.typeStyle === "fade")) && (
+            <Field label={`${a.kind === "typeIn" && (a.typeStyle ?? "slide") === "slide" ? "飛入距離" : a.kind === "popIn" || a.kind === "typeIn" || a.kind === "stomp" ? "力道" : a.kind === "wiggle" ? "扭的幅度" : a.kind === "blurIn" ? "一開始多模糊" : "強度"} ${Math.round(a.intensity * 100)}%`}>
               <input type="range" min={5} max={100} value={Math.round(a.intensity * 100)} onChange={(e) => props.onChange(a.id, { intensity: Number(e.target.value) / 100 })} style={{ width: "100%", accentColor: "#7c3aed" }} />
             </Field>
           )}

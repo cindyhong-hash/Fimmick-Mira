@@ -7,13 +7,13 @@
    時間單位都是秒；位移是圖層自己的座標（跟著圖層旋轉）、以圖層高度的比例表示。
    ============================================================ */
 
-export type AnimKind = "shine" | "bounce" | "pulse" | "twinkle" | "float" | "fadeIn" | "popIn" | "typeIn" | "carousel";
+export type AnimKind = "shine" | "bounce" | "pulse" | "twinkle" | "float" | "fadeIn" | "popIn" | "typeIn" | "carousel" | "wiggle" | "blurIn" | "stomp" | "spin";
 export type SlideDir = "left" | "right";
 /** 逐字出現時，每個字怎麼進場：打字（直接冒出來）／淡入／彈出／飛入（從上面滑下來）。 */
 export type TypeStyle = "type" | "fade" | "pop" | "slide";
 export const TYPE_STYLES: TypeStyle[] = ["type", "fade", "pop", "slide"];
 /** 只跑一次的「進場」效果：開始前看不見，跑完保持顯示。 */
-const ONE_SHOT: ReadonlySet<AnimKind> = new Set(["fadeIn", "popIn", "typeIn"]);
+const ONE_SHOT: ReadonlySet<AnimKind> = new Set(["fadeIn", "popIn", "typeIn", "blurIn", "stomp"]);
 export const isOneShot = (kind: AnimKind) => ONE_SHOT.has(kind);
 export type ShineDirection = "down" | "up" | "right" | "left" | "downRight" | "downLeft" | "upRight" | "upLeft";
 
@@ -52,12 +52,15 @@ export type LayerAnim = {
    * anchorX＝焦點位置（套用時的畫布中線）、steps＝套用時算的可滑格數（影片長度用）。
    */
   group?: string; anchorX?: number; steps?: number; blur?: boolean; slideDir?: SlideDir;
+  /** 旋轉：逆時針轉（預設順時針）。 */
+  ccw?: boolean;
   /** 輪播：滑出去的卡繞到另一頭接著排（最後一張到中間時，旁邊接的是第一張，不留空白）。 */
   wrap?: boolean;
 };
 
 export const ANIM_LABELS: Record<AnimKind, string> = {
   shine: "閃光掃過", bounce: "依序彈跳", pulse: "呼吸放大", twinkle: "閃爍", float: "輕輕漂浮", fadeIn: "淡入", popIn: "彈出", typeIn: "逐字出現", carousel: "輪播",
+  wiggle: "扭擺", blurIn: "模糊化", stomp: "重踏", spin: "旋轉",
 };
 
 /** 每種動畫的預設值（套上去時用；使用者再自己調）。 */
@@ -73,6 +76,10 @@ export function defaultAnim(kind: AnimKind, id: string, start = 0): LayerAnim {
     case "popIn": return { ...base, duration: 0.5, repeat: 1, intensity: 0.6 };
     // duration 是整段字跑完的時間
     case "typeIn": return { ...base, duration: 1.2, repeat: 1, intensity: 0.6, typeStyle: "slide" };
+    case "wiggle": return { ...base, duration: 0.6, gap: 1.6, intensity: 0.5 };
+    case "blurIn": return { ...base, duration: 0.8, repeat: 1, intensity: 0.5 };
+    case "stomp": return { ...base, duration: 0.6, repeat: 1, intensity: 0.6 };
+    case "spin": return { ...base, duration: 3, intensity: 1 };
     case "carousel": return { ...base, duration: 0.4, gap: 1, repeat: 1, intensity: 0.5, blur: true, slideDir: "left", steps: 0, wrap: true };
   }
 }
@@ -93,6 +100,10 @@ export const SPEED_PRESETS: Record<AnimKind, Record<AnimSpeed, number>> = {
   popIn: { slow: 0.8, normal: 0.5, fast: 0.3 },
   typeIn: { slow: 2, normal: 1.2, fast: 0.7 },
   carousel: { slow: 0.7, normal: 0.4, fast: 0.25 },
+  wiggle: { slow: 0.9, normal: 0.6, fast: 0.4 },
+  blurIn: { slow: 1.2, normal: 0.8, fast: 0.45 },
+  stomp: { slow: 0.9, normal: 0.6, fast: 0.4 },
+  spin: { slow: 5, normal: 3, fast: 1.5 },
 };
 /** 目前的長度剛好是哪一個速度；手動填過別的數字＝null（自訂）。 */
 export function speedOf(a: LayerAnim): AnimSpeed | null {
@@ -136,6 +147,10 @@ export type AnimFrame = {
   scale: number;
   /** 透明度倍數（0–1）。 */
   opacity: number;
+  /** 旋轉（弧度，以圖層中心）。 */
+  rot: number;
+  /** 模糊（圖層高度的比例；0＝清楚）。 */
+  blur: number;
   /** 閃光：這一格光帶跑到哪（0–1）＋方向、寬度、亮度；沒有光就沒有這欄。 */
   shines: { progress: number; direction: ShineDirection; width: number; intensity: number }[];
   /** 逐字出現跑到哪（0–1）；沒有或已經跑完就沒有這欄（整段照常畫）。 */
@@ -144,12 +159,12 @@ export type AnimFrame = {
 
 export type TypingState = { p: number; style: TypeStyle; intensity: number };
 
-export const REST: AnimFrame = { dx: 0, dy: 0, scale: 1, opacity: 1, shines: [] };
+export const REST: AnimFrame = { dx: 0, dy: 0, scale: 1, opacity: 1, rot: 0, blur: 0, shines: [] };
 
 /** 把一個圖層的所有動畫在第 t 秒的效果疊起來。 */
 export function animFrame(anims: LayerAnim[] | undefined, t: number): AnimFrame {
   if (!anims?.length) return REST;
-  const f: AnimFrame = { dx: 0, dy: 0, scale: 1, opacity: 1, shines: [] };
+  const f: AnimFrame = { dx: 0, dy: 0, scale: 1, opacity: 1, rot: 0, blur: 0, shines: [] };
   for (const a of anims) {
     const p = animPhase(a, t);
     if (p === null) continue;
@@ -190,6 +205,31 @@ export function animFrame(anims: LayerAnim[] | undefined, t: number): AnimFrame 
         break;
       case "typeIn":
         if (p < 1) f.typing = { p, style: a.typeStyle ?? "slide", intensity: k };
+        break;
+      case "wiggle":
+        // 左右扭三下、越扭越小，最後停回原位（像在叫你看這裡）
+        f.rot += Math.sin(p * Math.PI * 6) * (1 - p) * (0.06 + 0.22 * k);
+        break;
+      case "blurIn":
+        f.blur += (1 - easeOut(p)) * (0.03 + 0.12 * k);
+        f.opacity *= Math.min(1, 0.15 + p * 1.5);
+        break;
+      case "stomp": {
+        // 前 55%：從很大很快砸下來；落地後壓扁一下再回彈、抖一抖
+        const big = 1 + 0.8 + 1.4 * k, hit = 0.55;
+        if (p < hit) {
+          const q = p / hit;
+          f.scale *= big + (1 - big) * q * q;
+          f.opacity *= Math.min(1, q * 2.5);
+        } else {
+          const q = (p - hit) / (1 - hit);
+          f.scale *= 1 - Math.sin(q * Math.PI * 2) * (1 - q) * 0.12 * (0.5 + k);
+          f.dx += Math.sin(q * Math.PI * 7) * (1 - q) * 0.03 * k;
+        }
+        break;
+      }
+      case "spin":
+        f.rot += (a.ccw ? -1 : 1) * p * Math.PI * 2;
         break;
     }
   }
@@ -290,7 +330,7 @@ export function videoDuration(allAnims: LayerAnim[], chosen?: number | null): nu
 /** 讀存檔：格式不對的動畫丟掉，數值夾在合理範圍。 */
 export function readAnims(value: unknown): LayerAnim[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  const kinds: AnimKind[] = ["shine", "bounce", "pulse", "twinkle", "float", "fadeIn", "popIn", "typeIn", "carousel"];
+  const kinds: AnimKind[] = ["shine", "bounce", "pulse", "twinkle", "float", "fadeIn", "popIn", "typeIn", "carousel", "wiggle", "blurIn", "stomp", "spin"];
   const num = (v: unknown, lo: number, hi: number, dflt: number) => (typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : dflt);
   const out: LayerAnim[] = [];
   for (const raw of value) {
@@ -312,6 +352,7 @@ export function readAnims(value: unknown): LayerAnim[] | undefined {
         anchorX: num(r.anchorX, -100000, 100000, 0), steps: Math.round(num(r.steps, 0, 50, 0)), blur: r.blur !== false,
         slideDir: r.slideDir === "right" ? "right" as const : "left" as const, wrap: r.wrap !== false,
       } : {}),
+      ...(d.kind === "spin" && r.ccw === true ? { ccw: true } : {}),
       ...(typeof r.label === "string" && r.label.trim() ? { label: r.label.trim().slice(0, 30) } : {}),
       ...(d.kind === "fadeIn" && typeof r.enterDir === "string" && Object.hasOwn(SHINE_VECTORS, r.enterDir) ? { enterDir: r.enterDir as ShineDirection } : {}),
       ...(d.kind === "typeIn" ? { typeStyle: TYPE_STYLES.includes(r.typeStyle as TypeStyle) ? (r.typeStyle as TypeStyle) : d.typeStyle } : {}),

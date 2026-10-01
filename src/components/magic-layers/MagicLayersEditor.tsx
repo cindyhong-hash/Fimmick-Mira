@@ -15,7 +15,7 @@ import { distanceToPolyline, drawPaint, paintHits, samplePath, smoothStroke, str
    ============================================================ */
 import { drawEditableText, layoutText, readTextLayout, DEFAULT_TEXT_LAYOUT, type TextLayout } from "@/lib/magic-layers/editable-text.ts";
 import { idsInBox, selectableIds } from "@/lib/magic-layers/box-select.ts";
-import { animFrame, animUnits, carouselLayout, carouselSlot, carouselSteps, defaultAnim, isOneShot, readAnims, shineBand, staggeredStarts, typeChar, videoDuration, REST, type AnimFrame, type AnimKind, type LayerAnim, type TypingState } from "@/lib/magic-layers/layer-animation.ts";
+import { animEnd, animFrame, animUnits, carouselLayout, carouselSlot, carouselSteps, defaultAnim, isOneShot, readAnims, shineBand, staggeredStarts, typeChar, videoDuration, REST, type AnimFrame, type AnimKind, type LayerAnim, type TypingState } from "@/lib/magic-layers/layer-animation.ts";
 import { encodeMp4, videoSize } from "@/lib/magic-layers/mp4-export.ts";
 import { AnimationTab, LayerAnimSettings, SequencePreview, type AnimTrack } from "./AnimationPanel";
 import { ImageLibraryPicker } from "./ImageLibraryPicker";
@@ -31,7 +31,7 @@ export type SavedPage = { docW: number; docH: number; layers: SavedLayer[]; /** 
   /** 做成影片時這一頁播多久（秒）；沒有＝照動畫自動決定。第 1 頁存在外層的 animDuration。 */ animDuration?: number;
   /** 從上一頁換到這一頁的過場（第 1 頁沒有）。 */ transitionIn?: PageTransition };
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalDistributeCenter, AlignStartHorizontal, AlignStartVertical, AlignVerticalDistributeCenter, ChevronUp, ChevronDown, ChevronLeft, Scissors, Sparkles, Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowLeft, Plus, Download, Image as ImageIcon, Upload, Type, BadgeCheck, Square, Star, Minus, Pencil, Undo2, Redo2, Eraser, Maximize2, GripVertical, WandSparkles, Save, Layers, LayoutTemplate, Wrench, PenTool, Clapperboard } from "lucide-react";
+import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalDistributeCenter, AlignStartHorizontal, AlignStartVertical, AlignVerticalDistributeCenter, ChevronUp, ChevronDown, ChevronLeft, Scissors, Sparkles, Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowLeft, Plus, Download, Image as ImageIcon, Upload, Type, BadgeCheck, Square, Star, Minus, Pencil, Undo2, Redo2, Eraser, Maximize2, GripVertical, WandSparkles, Save, Layers, LayoutTemplate, Wrench, PenTool, Clapperboard, Hand } from "lucide-react";
 import type { LayerData, FragmentationReport } from "@/lib/magic-layers/types.ts";
 import { extractLayer } from "@/lib/magic-layers/extract-browser.ts";
 import { alphaHit } from "@/lib/magic-layers/alpha-hit-test.ts";
@@ -177,6 +177,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const view = useRef({ zoom: 1, panX: 0, panY: 0 });
   const drag = useRef<any>(null);
   const space = useRef(false);
+  // 手形工具：開著時在畫布上直接拖＝移動畫面（游標是手）；按 H 或上方的手形按鈕切換
+  const handRef = useRef(false);
+  const [handMode, setHandMode] = useState(false);
   const dpr = useRef(1);
 
   const [, force] = useState(0);
@@ -591,7 +594,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     const down = (e: PointerEvent) => {
       cv.setPointerCapture(e.pointerId);
       const s = evPt(e), d = s2d(s.x, s.y);
-      const wantPan = e.button === 1 || space.current;
+      const wantPan = e.button === 1 || space.current || handRef.current;
       // 橡皮擦模式：在圖片圖層上局部擦除（優先用選中的圖片圖層，其次點到的圖層）
       if (!wantPan && toolRef.current === "erase") {
         let l = sel();
@@ -671,6 +674,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         render(); return;
       }
       drag.current = { mode: "pan", sx: s.x, sy: s.y, opx: view.current.panX, opy: view.current.panY };
+      if (wantPan) cv.style.cursor = "grabbing";   // 拖著畫面時是「抓住的手」
       if (!wantPan && selectedId) selectOnly(null);
     };
     const move = (e: PointerEvent) => {
@@ -788,9 +792,10 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         else { marqueeRef.current = null; setMarquee(null); }
         drag.current = null; render(); return;
       }
+      if (drag.current?.mode === "pan") cv.style.cursor = space.current || handRef.current ? "grab" : "default";
       if (drag.current && drag.current.l) { for (const item of drag.current.moving ?? [{ l: drag.current.l }]) item.l.thumb = makeThumb(item.l); if (drag.current.mode !== "pan") markDirty(); } drag.current = null; refresh(); render(); };
     const hover = (s: { x: number; y: number }) => {
-      if (space.current) { cv.style.cursor = "grab"; return; }
+      if (space.current || handRef.current) { cv.style.cursor = "grab"; return; }
       if (editingRef.current) {
         const el = layersRef.current.find((x) => x.id === editingRef.current), d = s2d(s.x, s.y);
         if (el) { const lp = toLocal(el, d.x, d.y); if (Math.abs(lp.x) <= el.w / 2 && Math.abs(lp.y) <= el.h / 2) { cv.style.cursor = "text"; return; } }
@@ -811,7 +816,13 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   useEffect(() => {
     const kd = (e: KeyboardEvent) => {
       const typing = /INPUT|TEXTAREA/.test((e.target as HTMLElement).tagName);
-      if (e.code === "Space" && !typing) { space.current = true; if (canvasRef.current) canvasRef.current.style.cursor = "grab"; e.preventDefault(); }
+      if (e.code === "Space" && !typing) { space.current = true; if (canvasRef.current && drag.current?.mode !== "pan") canvasRef.current.style.cursor = "grab"; e.preventDefault(); }
+      // H：切換手形工具（移動畫面）；Esc 關掉
+      if (!typing && !e.metaKey && !e.ctrlKey && !e.altKey && (e.key === "h" || e.key === "H" || (e.key === "Escape" && handRef.current))) {
+        const on = e.key !== "Escape" && !handRef.current;
+        handRef.current = on; setHandMode(on);
+        if (canvasRef.current) canvasRef.current.style.cursor = on ? "grab" : "default";
+      }
       if (e.key === "Escape" && toolRef.current === "draw" && !typing) { e.preventDefault(); strokeRef.current = null; setTool("select"); if (canvasRef.current) canvasRef.current.style.cursor = "default"; render(); return; }
       if (e.shiftKey && !e.metaKey && !e.ctrlKey && e.key.toLowerCase() === "p" && !typing) {
         e.preventDefault(); const on = toolRef.current !== "draw"; setTool(on ? "draw" : "select"); if (on && !keepsPaintSelection(layersRef.current, selectedIdsRef.current)) applySelection([]); return;
@@ -859,7 +870,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       if ((e.metaKey || e.ctrlKey) && (e.key === "z" || e.key === "Z") && !typing) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
       if ((e.metaKey || e.ctrlKey) && (e.key === "y" || e.key === "Y") && !typing) { e.preventDefault(); redo(); }
     };
-    const ku = (e: KeyboardEvent) => { if (e.code === "Space") { space.current = false; if (canvasRef.current) canvasRef.current.style.cursor = "default"; } };
+    const ku = (e: KeyboardEvent) => { if (e.code === "Space") { space.current = false; if (canvasRef.current && drag.current?.mode !== "pan") canvasRef.current.style.cursor = handRef.current ? "grab" : "default"; } };
     window.addEventListener("keydown", kd); window.addEventListener("keyup", ku);
     return () => { window.removeEventListener("keydown", kd); window.removeEventListener("keyup", ku); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1140,8 +1151,57 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   // 離開「動畫」分頁就回到平常的編輯畫面（回來時如果還在播就繼續播）
   useEffect(() => { if (leftTab !== "animate") { animTimeRef.current = null; render(); } }, [leftTab, render]);
 
+  /**
+   * 滑過效果按鈕時試播：暫時把選到的圖層換成只有這個效果、從頭一直重播；
+   * 滑鼠移開（或點下去套用）就把原本的動畫換回來。試播不記進復原、也不會存檔。
+   */
+  const tryRef = useRef<{ saved: Map<string, LayerAnim[] | undefined>; raf: number; time: number | null; wasPlaying: boolean } | null>(null);
+  const endTryAnim = () => {
+    const tr = tryRef.current; if (!tr) return;
+    cancelAnimationFrame(tr.raf);
+    restoreAnims(layersRef.current, tr.saved);
+    // 試播期間如果面板重畫過，會顯示試播用的效果：這裡同步回真正的動畫
+    tryRef.current = null; animTimeRef.current = tr.time; refresh(); render();
+    if (tr.wasPlaying) setPlaying(true);
+  };
+  const tryAnim = (kind: AnimKind | null) => {
+    endTryAnim();
+    if (!kind || kind === "carousel") return;
+    const picked = layersRef.current.filter((l) => selectedIdsRef.current.includes(l.id) && !l.locked);
+    if (!picked.length) return;
+    const time = animTimeRef.current;
+    if (playing) setPlaying(false);
+    const saved = new Map(picked.map((l) => [l.id, l.anims] as const));
+    clearAnims(picked);
+    addAnimsTo(picked, kind, doc.w / 2, layersRef.current);
+    // 第一個馬上開始；只跑一次的效果播完停一下再重來，一直動的效果看幾秒就重來
+    const anims = picked.flatMap((l) => l.anims ?? []);
+    const first = Math.min(...anims.map((a) => a.start));
+    shiftAnims(picked, -first);
+    const ends = picked.flatMap((l) => l.anims ?? []).map(animEnd).filter(Number.isFinite);
+    const loop = ends.length ? Math.max(...ends) + 0.6 : 3;
+    const t0 = performance.now();
+    const tr = { saved, raf: 0, time, wasPlaying: playing };
+    const tick = () => { animTimeRef.current = ((performance.now() - t0) / 1000) % loop; render(); tr.raf = requestAnimationFrame(tick); };
+    tr.raf = requestAnimationFrame(tick);
+    tryRef.current = tr;
+  };
+  useEffect(() => () => { const tr = tryRef.current; if (tr) cancelAnimationFrame(tr.raf); }, []);
+  /** 清除這一頁所有動畫；只拿來閃光的「光澤範圍」也一起刪掉。可以 ⌘Z 復原。 */
+  const clearPageAnims = () => {
+    endTryAnim();
+    const zones = layersRef.current.filter((l) => l.shineOnly).length;
+    if (!window.confirm(`拿掉這一頁所有圖層的動畫${zones ? `（${zones} 塊光澤範圍也會一起刪掉）` : ""}？之後可以按 ⌘Z 復原。`)) return;
+    layersRef.current = layersRef.current.filter((l) => !l.shineOnly);
+    clearAnims(layersRef.current);
+    setPlaying(false); animTimeRef.current = null;
+    applySelection(selectedIdsRef.current.filter((id) => layersRef.current.some((l) => l.id === id)));
+    markDirty(); refresh(); render();
+  };
+
   /** 把效果套到選到的圖層；選好幾個時，閃光／彈跳／閃爍依由左到右自動錯開，循環時也保持同樣順序。 */
   const applyAnimToSelection = (kind: AnimKind) => {
+    endTryAnim();
     const picked = layersRef.current.filter((l) => selectedIdsRef.current.includes(l.id) && !l.locked).sort((a, b) => a.cx - b.cx);
     if (!picked.length) return;
     // 輪播只選了一張卡：問要幾張，自動複製排成一排（不用自己排、自己全選）
@@ -2229,6 +2289,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         <button style={{ ...S.tbtn, ...(canUndo ? {} : S.toolOff) }} onClick={undo} disabled={!canUndo} title="復原 (Ctrl+Z)"><Undo2 size={15} /></button>
         <button style={{ ...S.tbtn, ...(canRedo ? {} : S.toolOff) }} onClick={redo} disabled={!canRedo} title="重做 (Ctrl+Shift+Z)"><Redo2 size={15} /></button>
         <span style={S.divider} />
+        <button style={{ ...S.tbtn, ...(handMode ? { background: "#f5f3ff", color: "#6d28d9", border: "1px solid #c4b5fd" } : {}) }} aria-pressed={handMode}
+          title={handMode ? "手形工具開著：拖曳移動畫面（按 H 或 Esc 關掉）" : "手形工具（H）：拖曳移動畫面；也可以按住空白鍵拖曳"}
+          onClick={() => { const on = !handRef.current; handRef.current = on; setHandMode(on); if (canvasRef.current) canvasRef.current.style.cursor = on ? "grab" : "default"; }}><Hand size={15} /></button>
         <button style={S.tbtn} onClick={() => setZoom(view.current.zoom / 1.2)}>−</button>
         <span style={{ width: 52, textAlign: "center", color: "#9a9cab", fontVariantNumeric: "tabular-nums" }}>{zoomPct}%</span>
         <button style={S.tbtn} onClick={() => setZoom(view.current.zoom * 1.2)}>＋</button>
@@ -2435,6 +2498,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                 onMoveStart={(layerId, animId, start) => { moveAnimGroup(layersRef.current, layerId, animId, start); seekAnim(start); refresh(); }}
                 onCommitMove={() => markDirty()}
                 onRenameTrack={(layerId, animId, name) => { renameAnimGroup(layersRef.current, layerId, animId, name); markDirty(); refresh(); }}
+                onTry={tryAnim} onClearAll={clearPageAnims}
                 pageCount={pagesView.length || 1} onPreviewAll={() => void openSequencePreview()}
                 onExport={(all) => void (all ? exportWholeMp4() : exportMp4())} exporting={mp4Busy !== null} progress={mp4Busy ?? 0} />
             )}
@@ -3259,7 +3323,13 @@ function drawLayerAnimated(ctx: CanvasRenderingContext2D, l: EL, layers: EL[], t
   applyClip(ctx, l, layers);
   applyLayerTransform(ctx, l);
   if (f.dx || f.dy) ctx.translate(f.dx * l.h, f.dy * l.h);
+  if (f.rot) ctx.rotate(f.rot);
   if (f.scale !== 1) ctx.scale(f.scale, f.scale);
+  // 模糊化：跟輪播的滑動模糊疊在一起（以畫面上的像素算，縮放畫布也一樣模糊）
+  if (f.blur > 0.0005) {
+    const m = ctx.getTransform(), px = f.blur * l.h * Math.hypot(m.a, m.b);
+    ctx.filter = `${ctx.filter && ctx.filter !== "none" ? ctx.filter + " " : ""}blur(${px.toFixed(1)}px)`;
+  }
   ctx.globalAlpha = l.opacity * f.opacity;
   if (f.typing) drawTypingText(ctx, l, f.typing);
   else drawElBody(ctx, l);
@@ -3366,6 +3436,14 @@ function drawShineZoneHint(ctx: CanvasRenderingContext2D, l: EL, zoom: number) {
  * 套效果：選好幾個時，閃光／彈跳／閃爍照「物件」自動錯開（疊在一起的圖層、同一群組算同一個物件，一起動），
  * 順序是由上到下、同一排由左到右；每個的循環長度一樣，循環時順序才不會亂掉。
  */
+/** 試播／清除用：把動畫換回存起來的、全部拿掉、或整批往前後移。 */
+function restoreAnims(layers: EL[], saved: Map<string, LayerAnim[] | undefined>) {
+  for (const l of layers) if (saved.has(l.id)) l.anims = saved.get(l.id);
+}
+function clearAnims(layers: EL[]) { for (const l of layers) l.anims = undefined; }
+function shiftAnims(layers: EL[], by: number) {
+  for (const l of layers) l.anims = l.anims?.map((a) => ({ ...a, start: Math.max(0, Math.round((a.start + by) * 100) / 100) }));
+}
 /** 圖層在畫布上的外框。 */
 function layerBox(l: EL) {
   const c = layerCorners(l);
@@ -3463,10 +3541,10 @@ function addAnimsTo(layers: EL[], kind: AnimKind, anchorX = 0, all: EL[] = layer
   }));
   const n = new Set(units.values()).size;
   const oneShot = isOneShot(kind);
-  const staggered = n > 1 && (kind === "shine" || kind === "bounce" || kind === "twinkle" || kind === "popIn" || kind === "typeIn");
+  const staggered = n > 1 && (kind === "shine" || kind === "bounce" || kind === "twinkle" || kind === "popIn" || kind === "typeIn" || kind === "stomp" || kind === "wiggle");
   const base = defaultAnim(kind, "x");
   // 彈出像參考影片裡的圖示，一個接一個間隔半秒；逐字是一段字跑完再換下一段
-  const step = kind === "popIn" ? 0.5 : base.duration + 0.15;
+  const step = kind === "popIn" || kind === "stomp" ? 0.5 : base.duration + 0.15;
   const starts = staggeredStarts(n, 0.3, step);
   const cycle = n * step + 1;
   for (const l of layers) {

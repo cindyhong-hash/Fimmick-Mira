@@ -490,7 +490,12 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     ctx.restore();
 
     // 改字時只留細虛線框（drawTextEditing 畫的），不顯示縮放／旋轉把手
-    if (toolRef.current === "select" && animTimeRef.current === null) for (const id of selectedIds) { if (id === editId) continue; const s = layersRef.current.find((l) => l.id === id); if (s?.visible) drawSelection(ctx, s, id === selectedId); }
+    if (toolRef.current === "select" && animTimeRef.current === null) {
+      // 選了好幾個：每個圖層只畫框，外面再畫一個包住全部的大框＋四角把手（拖角落一起等比縮放）
+      const grp = editId ? null : unionBox(movableOf(layersRef.current, selectedIds));
+      for (const id of selectedIds) { if (id === editId) continue; const s = layersRef.current.find((l) => l.id === id); if (s?.visible) drawSelection(ctx, s, !grp && id === selectedId); }
+      if (grp) { const v = view.current; drawGroupFrame(ctx, grp.x0 * v.zoom + v.panX, grp.y0 * v.zoom + v.panY, grp.x1 * v.zoom + v.panX, grp.y1 * v.zoom + v.panY); }
+    }
     // 看不見的 textarea 跟著文字框走：輸入法的選字視窗才會出現在字旁邊
     if (editEl && ta) placeTextArea(ta, editEl, view.current);
   }, [doc.w, doc.h, selectedId, selectedIds]);
@@ -545,6 +550,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     }
     ctx.restore();
   }
+  function groupCorners(b: { x0: number; y0: number; x1: number; y1: number }) { return [{ x: b.x0, y: b.y0 }, { x: b.x1, y: b.y0 }, { x: b.x1, y: b.y1 }, { x: b.x0, y: b.y1 }]; }
   function dot(ctx: CanvasRenderingContext2D, x: number, y: number, color: string, round: boolean) {
     ctx.beginPath(); if (round) ctx.arc(x, y, 6, 0, Math.PI * 2); else ctx.rect(x - 5, y - 5, 10, 10);
     ctx.fillStyle = "#fff"; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = color; ctx.stroke();
@@ -553,6 +559,12 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   /* ---------- hit testing ---------- */
   function hitHandle(sx: number, sy: number) {
     if (editingRef.current) return null;   // 改字時沒有縮放／旋轉把手
+    const grp = unionBox(movableOf(layersRef.current, selectedIdsRef.current));
+    if (grp) {
+      const cs = groupCorners(grp).map((p) => d2s(p.x, p.y));
+      for (let i = 0; i < 4; i++) if (dist(sx, sy, cs[i].x, cs[i].y) <= 10) return { type: "groupScale" as const, corner: i, box: grp };
+      return null;
+    }
     const l = sel(); if (!l || l.locked || !l.visible) return null;
     const cs = corners(l).map((p) => d2s(p.x, p.y));
     for (let i = 0; i < 4; i++) if (dist(sx, sy, cs[i].x, cs[i].y) <= 10) return { type: "scale" as const };
@@ -654,6 +666,13 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       }
       if (!wantPan) {
         const h = hitHandle(s.x, s.y);
+        if (h && h.type === "groupScale") {
+          // 對角固定不動，其他圖層照跟它的距離一起等比放大縮小
+          const anchor = groupCorners(h.box)[(h.corner + 2) % 4];
+          drag.current = { mode: "groupScale", anchor, d0: Math.max(1, Math.hypot(d.x - anchor.x, d.y - anchor.y)),
+            items: h.box.layers.map((l) => ({ l, cx: l.cx, cy: l.cy, w: l.w, h: l.h })) };
+          return;
+        }
         if (h) { const l = sel()!; drag.current = h.type === "rotate" ? { mode: "rotate", l, orot: l.rotation, grab: Math.atan2(d.y - l.cy, d.x - l.cx) } : { mode: "scale", l, ow: l.w, oh: l.h, handle: h }; return; }
         const l = hitLayer(d.x, d.y);
         if (l) {
@@ -737,6 +756,14 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         else { g.l.w = Math.max(min, Math.abs(lp.x) * 2); g.l.h = Math.max(min, Math.abs(lp.y) * 2); }           // 角落：自由改寬高（可壓扁）
         render();
       }
+      else if (g.mode === "groupScale") {
+        const k = Math.max(0.05, Math.hypot(d.x - g.anchor.x, d.y - g.anchor.y) / g.d0);
+        for (const it of g.items) {
+          it.l.cx = g.anchor.x + (it.cx - g.anchor.x) * k; it.l.cy = g.anchor.y + (it.cy - g.anchor.y) * k;
+          it.l.w = Math.max(2, it.w * k); it.l.h = Math.max(2, it.h * k);   // 文字的字級跟著框寬一起縮放
+        }
+        render();
+      }
       else if (g.mode === "rotate") { const now = Math.atan2(d.y - g.l.cy, d.x - g.l.cx); let r = g.orot + (now - g.grab); if (e.shiftKey) r = Math.round(r / (Math.PI / 12)) * (Math.PI / 12); g.l.rotation = r; render(); }
       else if (g.mode === "pan") { view.current.panX = g.opx + (s.x - g.sx); view.current.panY = g.opy + (s.y - g.sy); render(); }
     };
@@ -793,6 +820,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         drag.current = null; render(); return;
       }
       if (drag.current?.mode === "pan") cv.style.cursor = space.current || handRef.current ? "grab" : "default";
+      if (drag.current?.mode === "groupScale") { for (const it of drag.current.items) it.l.thumb = makeThumb(it.l); markDirty(); }
       if (drag.current && drag.current.l) { for (const item of drag.current.moving ?? [{ l: drag.current.l }]) item.l.thumb = makeThumb(item.l); if (drag.current.mode !== "pan") markDirty(); } drag.current = null; refresh(); render(); };
     const hover = (s: { x: number; y: number }) => {
       if (space.current || handRef.current) { cv.style.cursor = "grab"; return; }
@@ -800,7 +828,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         const el = layersRef.current.find((x) => x.id === editingRef.current), d = s2d(s.x, s.y);
         if (el) { const lp = toLocal(el, d.x, d.y); if (Math.abs(lp.x) <= el.w / 2 && Math.abs(lp.y) <= el.h / 2) { cv.style.cursor = "text"; return; } }
       }
-      const h = hitHandle(s.x, s.y); if (h) { cv.style.cursor = h.type === "rotate" ? "crosshair" : h.type === "resize" ? (h.axis === "x" ? "ew-resize" : "ns-resize") : "nwse-resize"; return; }
+      const h = hitHandle(s.x, s.y); if (h) { cv.style.cursor = h.type === "groupScale" ? (h.corner % 2 === 0 ? "nwse-resize" : "nesw-resize") : h.type === "rotate" ? "crosshair" : h.type === "resize" ? (h.axis === "x" ? "ew-resize" : "ns-resize") : "nwse-resize"; return; }
       const d = s2d(s.x, s.y); cv.style.cursor = hitLayer(d.x, d.y) ? "move" : "default";
     };
     const wheel = (e: WheelEvent) => { e.preventDefault(); const s = evPt(e); setZoom(view.current.zoom * Math.pow(1.0015, -e.deltaY), s); };
@@ -3447,6 +3475,24 @@ function restoreAnims(layers: EL[], saved: Map<string, LayerAnim[] | undefined>)
 function clearAnims(layers: EL[]) { for (const l of layers) l.anims = undefined; }
 function shiftAnims(layers: EL[], by: number) {
   for (const l of layers) l.anims = l.anims?.map((a) => ({ ...a, start: Math.max(0, Math.round((a.start + by) * 100) / 100) }));
+}
+/** 多選的總外框：紫色虛線＋四角方形把手（螢幕座標）。 */
+function drawGroupFrame(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number) {
+  ctx.save(); ctx.lineWidth = 1.5; ctx.strokeStyle = "#7c3aed"; ctx.setLineDash([6, 4]);
+  ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+  ctx.setLineDash([]);
+  for (const [x, y] of [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]) {
+    ctx.beginPath(); ctx.rect(x - 5, y - 5, 10, 10); ctx.fillStyle = "#fff"; ctx.fill(); ctx.stroke();
+  }
+  ctx.restore();
+}
+/** 選到的、看得到又沒鎖的圖層。 */
+function movableOf(layers: EL[], ids: string[]) { return layers.filter((l) => ids.includes(l.id) && l.visible && !l.locked); }
+/** 兩個以上圖層的總外框（多選一起縮放用）；不到兩個回傳 null。 */
+function unionBox(ls: EL[]) {
+  if (ls.length < 2) return null;
+  const bs = ls.map(layerBox);
+  return { x0: Math.min(...bs.map((b) => b.x0)), y0: Math.min(...bs.map((b) => b.y0)), x1: Math.max(...bs.map((b) => b.x1)), y1: Math.max(...bs.map((b) => b.y1)), layers: ls };
 }
 /** 圖層在畫布上的外框。 */
 function layerBox(l: EL) {

@@ -77,6 +77,29 @@ export function defaultAnim(kind: AnimKind, id: string, start = 0): LayerAnim {
   }
 }
 
+export type AnimSpeed = "slow" | "normal" | "fast";
+export const SPEED_LABELS: Record<AnimSpeed, string> = { slow: "慢", normal: "適中", fast: "快" };
+/**
+ * 速度按鈕：慢／適中／快各對應一個「動作本身多久」（duration），適中＝套用時的預設。
+ * 間隔（停多久）不算在裡面，那是節奏，另外直接填。
+ */
+export const SPEED_PRESETS: Record<AnimKind, Record<AnimSpeed, number>> = {
+  shine: { slow: 1, normal: 0.7, fast: 0.45 },
+  bounce: { slow: 0.7, normal: 0.5, fast: 0.35 },
+  pulse: { slow: 2.4, normal: 1.6, fast: 1 },
+  twinkle: { slow: 1.8, normal: 1.2, fast: 0.7 },
+  float: { slow: 4.5, normal: 3, fast: 2 },
+  fadeIn: { slow: 1.2, normal: 0.8, fast: 0.45 },
+  popIn: { slow: 0.8, normal: 0.5, fast: 0.3 },
+  typeIn: { slow: 2, normal: 1.2, fast: 0.7 },
+  carousel: { slow: 0.7, normal: 0.4, fast: 0.25 },
+};
+/** 目前的長度剛好是哪一個速度；手動填過別的數字＝null（自訂）。 */
+export function speedOf(a: LayerAnim): AnimSpeed | null {
+  const p = SPEED_PRESETS[a.kind];
+  return (Object.keys(p) as AnimSpeed[]).find((k) => Math.abs(p[k] - a.duration) < 0.005) ?? null;
+}
+
 /** 這個動畫最晚在第幾秒結束（一直循環的回傳 Infinity）。 */
 export function animEnd(a: LayerAnim): number {
   if (isOneShot(a.kind)) return a.start + a.duration;

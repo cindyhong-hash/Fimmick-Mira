@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Pause, Play, Sparkles, Trash2, Film, Plus } from "lucide-react";
 import { ImageLibraryPicker } from "./ImageLibraryPicker";
-import { ANIM_LABELS, animEnd, isOneShot, TYPE_STYLES, type AnimKind, type LayerAnim, type ShineDirection, type TypeStyle } from "@/lib/magic-layers/layer-animation.ts";
+import { ANIM_LABELS, animEnd, isOneShot, speedOf, SPEED_LABELS, SPEED_PRESETS, type AnimSpeed, TYPE_STYLES, type AnimKind, type LayerAnim, type ShineDirection, type TypeStyle } from "@/lib/magic-layers/layer-animation.ts";
 
 const KINDS: { kind: AnimKind; hint: string }[] = [
   { kind: "shine", hint: "一道光從物件上掃過去；選好幾個會一個接一個閃" },
@@ -201,6 +201,8 @@ export function LayerAnimSettings(props: {
   const [adding, setAdding] = useState(false);
   // 正在幫這張卡的哪張圖挑新圖
   const [picking, setPicking] = useState<string | null>(null);
+  // 哪幾個動畫打開了「自訂」（填過不是預設速度的數字會自動打開）
+  const [customOpen, setCustomOpen] = useState<Record<string, boolean>>({});
   const card = props.carouselCard;
   return (
     <div style={{ margin: "14px 0 6px" }}>
@@ -222,17 +224,41 @@ export function LayerAnimSettings(props: {
             <span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>{ANIM_LABELS[a.kind]}</span>
             <button onClick={() => props.onRemove(a.id)} title="拿掉這個動畫" style={{ marginLeft: "auto", border: "none", background: "transparent", cursor: "pointer", color: "#9ca3af" }}><Trash2 size={14} /></button>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-            <Field label="開始（秒）"><input type="number" min={0} max={30} step={0.1} value={a.start} onChange={(e) => props.onChange(a.id, { start: Math.max(0, Number(e.target.value) || 0) })} style={num} /></Field>
-            <Field label={a.kind === "typeIn" ? "整段跑完（秒）" : a.kind === "carousel" ? "每次滑多久（秒）" : isOneShot(a.kind) ? "多久（秒）" : "一輪（秒）"}><input type="number" min={0.1} max={10} step={0.1} value={a.duration} onChange={(e) => props.onChange(a.id, { duration: Math.max(0.1, Number(e.target.value) || 0.1) })} style={num} /></Field>
-            {a.kind === "carousel" && (
-              <Field label="每張停多久（秒）"><input type="number" min={0} max={10} step={0.1} value={a.gap} onChange={(e) => props.onChange(a.id, { gap: Math.max(0, Number(e.target.value) || 0) })} style={num} /></Field>
-            )}
-            {!isOneShot(a.kind) && a.kind !== "carousel" && (<>
-              <Field label="每輪間隔（秒）"><input type="number" min={0} max={10} step={0.1} value={a.gap} onChange={(e) => props.onChange(a.id, { gap: Math.max(0, Number(e.target.value) || 0) })} style={num} /></Field>
-              <Field label="重複（0＝一直）"><input type="number" min={0} max={50} step={1} value={a.repeat} onChange={(e) => props.onChange(a.id, { repeat: Math.max(0, Math.round(Number(e.target.value) || 0)) })} style={num} /></Field>
-            </>)}
-          </div>
+          {(() => {
+            const speed = speedOf(a);
+            const custom = speed === null || !!customOpen[a.id];
+            // 「停多久」是節奏，直接放外面填；只有一直循環的呼吸／閃爍／漂浮，間隔才收進自訂
+            const gapOutside = a.kind === "shine" || a.kind === "bounce" || a.kind === "carousel";
+            const gapField = (
+              <Field label={a.kind === "carousel" ? "每張停多久（秒）" : "每輪間隔（秒）"}><input type="number" min={0} max={10} step={0.1} value={a.gap} onChange={(e) => props.onChange(a.id, { gap: Math.max(0, Number(e.target.value) || 0) })} style={num} /></Field>
+            );
+            const on = { border: "1px solid #7c3aed", color: "#6d28d9", background: "#f5f3ff" };
+            return (<>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                <Field label="開始（秒）"><input type="number" min={0} max={30} step={0.1} value={a.start} onChange={(e) => props.onChange(a.id, { start: Math.max(0, Number(e.target.value) || 0) })} style={num} /></Field>
+                {gapOutside && gapField}
+              </div>
+              <Field label={a.kind === "carousel" ? "滑動速度" : a.kind === "typeIn" ? "打字速度" : "速度"}>
+                <div style={{ display: "flex", gap: 4 }}>
+                  {(["slow", "normal", "fast"] as AnimSpeed[]).map((sp) => (
+                    <button key={sp} type="button" onClick={() => { props.onChange(a.id, { duration: SPEED_PRESETS[a.kind][sp] }); setCustomOpen((c) => ({ ...c, [a.id]: false })); }}
+                      style={{ ...btn, flex: 1, height: 28, fontSize: 12, ...(speed === sp ? on : {}) }}>{SPEED_LABELS[sp]}</button>
+                  ))}
+                  <button type="button" onClick={() => setCustomOpen((c) => ({ ...c, [a.id]: !custom }))} title={custom ? "收起" : "自己填秒數、重複次數"}
+                    style={{ ...btn, flex: 1, height: 28, fontSize: 12, ...(speed === null ? on : custom ? { color: "#6d28d9" } : {}) }}>自訂{custom ? " ▴" : " ▾"}</button>
+                </div>
+              </Field>
+              {custom && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                  <Field label={a.kind === "typeIn" ? "整段跑完（秒）" : a.kind === "carousel" ? "每次滑多久（秒）" : isOneShot(a.kind) ? "多久（秒）" : "一輪（秒）"}><input type="number" min={0.1} max={10} step={0.1} value={a.duration} onChange={(e) => props.onChange(a.id, { duration: Math.max(0.1, Number(e.target.value) || 0.1) })} style={num} /></Field>
+                  {!isOneShot(a.kind) && a.kind !== "carousel" && (<>
+                    {!gapOutside && gapField}
+                    <Field label="重複（0＝一直）"><input type="number" min={0} max={50} step={1} value={a.repeat} onChange={(e) => props.onChange(a.id, { repeat: Math.max(0, Math.round(Number(e.target.value) || 0)) })} style={num} /></Field>
+                  </>)}
+                </div>
+              )}
+            </>);
+          })()}
           {a.kind === "typeIn" && (
             <Field label="每個字怎麼進場">
               <div style={{ display: "flex", gap: 4 }}>

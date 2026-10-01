@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { animEnd, animFrame, animUnits, animPhase, carouselLayout, carouselPose, carouselSlot, carouselSteps, defaultAnim, readAnims, shineBand, staggeredStarts, typeChar, videoDuration } from "./layer-animation.ts";
+import { animEnd, animFrame, animUnits, animPhase, carouselLayout, carouselPose, carouselSlot, carouselSteps, defaultAnim, readAnims, shineBand, speedOf, SPEED_PRESETS, staggeredStarts, typeChar, videoDuration } from "./layer-animation.ts";
 
 const near = (a: number, b: number, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} ≈ ${b}`);
 
@@ -191,4 +191,17 @@ test("輪播接回第一張：滑出左邊的卡繞到最右邊補上，不留�
   near(at(0, 3, false).x, -300);
   // 繞回去的瞬間在畫面外（左邊兩格外才換到右邊）
   assert.ok(at(1, 3, true).x <= 0);
+});
+
+test("速度：慢／適中／快只改動作本身多快，適中＝預設；手動填的數字認不出來就是自訂", () => {
+  for (const kind of ["shine", "bounce", "pulse", "twinkle", "float", "fadeIn", "popIn", "typeIn", "carousel"] as const) {
+    const d = defaultAnim(kind, "x");
+    assert.equal(speedOf(d), "normal", kind);
+    assert.ok(SPEED_PRESETS[kind].slow > SPEED_PRESETS[kind].normal && SPEED_PRESETS[kind].normal > SPEED_PRESETS[kind].fast, kind);
+  }
+  const shine = defaultAnim("shine", "s");
+  assert.equal(speedOf({ ...shine, duration: SPEED_PRESETS.shine.fast }), "fast");
+  assert.equal(speedOf({ ...shine, duration: 0.83 }), null);
+  // 間隔不算在速度裡（多選錯開的閃光，間隔是算好的）
+  assert.equal(speedOf({ ...shine, gap: 9 }), "normal");
 });

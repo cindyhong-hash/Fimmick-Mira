@@ -66,6 +66,8 @@ export type SavedLayer = {
   wrap?: boolean;
   /** 圖層動畫（輸出影片用；見 layer-animation.ts）。 */
   anims?: LayerAnim[];
+  /** 物件存在時間（這一頁的第幾秒出現／消失；沒設＝整頁都在；見 layer-lifespan.ts）。 */
+  startTime?: number; endTime?: number;
   /** true＝這個圖層只當「光澤範圍」：本身不顯示，只有閃光掃過時在它的形狀裡亮一下。 */
   shineOnly?: boolean;
 };
@@ -84,6 +86,7 @@ export function savedToLayerData(sl: SavedLayer): LayerData {
       ...(sl.skewX ? { skewX: sl.skewX } : {}), ...(sl.skewY ? { skewY: sl.skewY } : {}),
       ...(sl.wrap ? { wrap: true } : {}),
       ...(sl.anims?.length ? { anims: sl.anims } : {}),
+      ...(sl.startTime !== undefined ? { startTime: sl.startTime } : {}), ...(sl.endTime !== undefined ? { endTime: sl.endTime } : {}),
       ...(sl.shineOnly ? { shineOnly: true } : {}),
       ...(sl.isText ? { style: { text: sl.text, fontSizePx: sl.fontSize, fontWeight: sl.fontWeight, color: sl.color, align: sl.align, fontFamily: sl.fontFamily, fx: sl.fx ?? null, ...(sl.textLayout ? { layout: sl.textLayout } : {}), ...(sl.runs ? { runs: sl.runs } : {}) }, textObject: { text: sl.text } } : {}),
       ...(sl.isArt ? { isArt: true, artText: sl.text ?? "", ...(sl.artRefImage ? { artRefImage: sl.artRefImage } : {}) } : {}),

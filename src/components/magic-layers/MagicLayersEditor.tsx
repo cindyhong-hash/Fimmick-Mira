@@ -17,9 +17,10 @@ import { drawEditableText, layoutText, readTextLayout, DEFAULT_TEXT_LAYOUT, type
 import { idsInBox, selectableIds } from "@/lib/magic-layers/box-select.ts";
 import { animEnd, animFrame, animUnits, carouselLayout, carouselSlot, carouselSteps, defaultAnim, isOneShot, readAnims, shineBand, staggeredStarts, typeChar, videoDuration, REST, type AnimFrame, type AnimKind, type LayerAnim, type TypingState } from "@/lib/magic-layers/layer-animation.ts";
 import { encodeMp4, videoSize } from "@/lib/magic-layers/mp4-export.ts";
-import { AnimationTab, LayerAnimSettings, SequencePreview, type AnimTrack } from "./AnimationPanel";
+import { AnimationTab, AnimDock, LayerAnimSettings, SequencePreview, type AnimTrack, type DockMode, type LifeRow } from "./AnimationPanel";
 import { ImageLibraryPicker } from "./ImageLibraryPicker";
 import { CarouselSetup, isVerticalText, toVertical, type CarouselCardContent, type CarouselPart } from "./CarouselSetup";
+import { aliveAt, clampLifespan, lifespanOf, readLifespan } from "@/lib/magic-layers/layer-lifespan.ts";
 import { defaultTransition, hasDir, readTransition, sequenceAt, sequenceLayout, transitionPoses, TRANSITION_LABELS, type PageTransition, type Pose, type SeqLayout, type TransitionKind } from "@/lib/magic-layers/page-transition.ts";
 import { anchorShift, autoWidth, shiftRuns, caretLines, indexAt, selectionSpans, verticalMove, widestLine, wrapRanges, type CaretLine, type TextLineRange } from "@/lib/magic-layers/text-caret.ts";
 import { hexToRgb, isEditableInPsd, psdFileName, psdFontName, psdTextEffects, styleRunsFor } from "@/lib/magic-layers/psd-export.ts";
@@ -77,6 +78,8 @@ type EL = {
   wrap?: boolean;
   /** 圖層動畫（輸出 MP4 用）。 */
   anims?: LayerAnim[];
+  /** 物件存在時間（這一頁的第幾秒出現／消失；沒設＝整頁都在）。只在播放、輸出時生效，跟 visible 無關。 */
+  startTime?: number; endTime?: number;
   /** 光澤範圍：本身不顯示，只有閃光掃過時在它的形狀裡亮一下。 */
   shineOnly?: boolean;
 };
@@ -98,6 +101,33 @@ const LEFT_TABS: { id: LeftTab; label: string; Icon: typeof Wrench }[] = [
   { id: "animate", label: "動畫", Icon: Clapperboard },
 ];
 
+/** 動畫模式裡顯示的物件名稱：文字圖層直接用字（比「新文字」好認）。 */
+function layerLabel(l: EL): string {
+  return l.isText && l.text.trim() ? l.text.replace(/\s+/g, " ").slice(0, 16) : l.name;
+}
+/**
+ * 動畫分頁的「目前選取」：只顯示正在編輯哪個物件，要換就用下拉選單。
+ * 排序、顯示／隱藏、鎖定、複製、刪除這些圖層管理留在「設計」分頁。
+ */
+function CurrentLayerPicker(props: { layers: EL[]; selected: EL | null; extra: number; onPick: (id: string) => void }) {
+  const l = props.selected;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "12px 0 0", padding: "8px 10px", borderRadius: 10, border: "1.5px solid #ede9fe", background: "#faf8ff" }}>
+      <div style={{ width: 30, height: 30, flex: "0 0 auto", borderRadius: 6, background: "#fff", border: "1px solid #ebeff5", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", fontSize: 12, color: "#9ca3af" }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        {l?.thumb ? <img src={l.thumb} alt="" style={{ maxWidth: "100%", maxHeight: "100%" }} /> : l ? (l.isText ? "T" : "◇") : "–"}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 11, color: "#7c3aed", fontWeight: 700 }}>目前選取{props.extra > 0 ? `（另外還選了 ${props.extra} 個）` : ""}</div>
+        <select value={l?.id ?? ""} onChange={(e) => e.target.value && props.onPick(e.target.value)} aria-label="切換要加動畫的物件"
+          style={{ width: "100%", height: 26, marginTop: 2, border: "none", background: "transparent", fontSize: 13, fontWeight: 700, color: "#1f2937", cursor: "pointer", padding: 0, outline: "none" }}>
+          {!l && <option value="">還沒選物件</option>}
+          {props.layers.map((x) => <option key={x.id} value={x.id}>{layerLabel(x)}{x.anims?.length ? `　· ${x.anims.length} 個動畫` : ""}</option>)}
+        </select>
+      </div>
+    </div>
+  );
+}
 const TYPE_LABEL: Record<string, string> = { background: "背景", product: "產品", person: "人物", object: "物件", decoration: "裝飾", drawing: "繪製", independent_text: "文字" };
 
 /** One serialized layer in a saved 排版 (stored in LibraryImage.paramsJson). */
@@ -177,6 +207,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const view = useRef({ zoom: 1, panX: 0, panY: 0 });
   const drag = useRef<any>(null);
   const space = useRef(false);
+  // 點畫布時要停止播放：播放迴圈看到這個旗子就自己停（畫布事件裡不能直接動播放狀態）
+  const haltPlayRef = useRef(false);
   // 手形工具：開著時在畫布上直接拖＝移動畫面（游標是手）；按 H 或上方的手形按鈕切換
   const handRef = useRef(false);
   const [handMode, setHandMode] = useState(false);
@@ -319,6 +351,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           glow: (l.meta?.glow as LayerGlow | undefined) ?? null,
           shadow: (l.meta?.shadow as LayerShadow | undefined) ?? null,
           anims: readAnims(l.meta?.anims),
+          ...readLifespan(l.meta as { startTime?: unknown; endTime?: unknown } | undefined),
           shineOnly: !!l.meta?.shineOnly,
           embeddedText: l.embeddedText.map((t) => ({ text: t.text })), thumb: null,
         };
@@ -605,6 +638,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     const cv = canvasRef.current!; if (!cv) return;
     const down = (e: PointerEvent) => {
       cv.setPointerCapture(e.pointerId);
+      // 正在看動畫（播放中或停在某一格）：點一下畫布就回到編輯畫面，選取框、把手才會出來
+      if (animTimeRef.current !== null) { animTimeRef.current = null; haltPlayRef.current = true; }
       const s = evPt(e), d = s2d(s.x, s.y);
       const wantPan = e.button === 1 || space.current || handRef.current;
       // 橡皮擦模式：在圖片圖層上局部擦除（優先用選中的圖片圖層，其次點到的圖層）
@@ -1164,20 +1199,23 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   // 時間軸：同一個效果、同一個開始時間的圖層（通常是同一個物件的幾個零件）合成一列，名字用裡面的文字
   const currentTracks = useCallback(() => animTrackRows(layersRef.current), []);
   const getAnimTime = useCallback(() => animTimeRef.current, []);
-  // 播放：每一格算時間、重畫（循環播放）；只在「動畫」分頁開著時播
-  const previewing = playing && leftTab === "animate";
+  // 播放：每一格算時間、重畫（循環播放）。播放列在畫布下方，哪個分頁都能播
+  const previewing = playing;
   useEffect(() => {
     if (!previewing) return;
     let raf = 0; const t0 = performance.now() - (animTimeRef.current ?? 0) * 1000;
-    const tick = () => { animTimeRef.current = ((performance.now() - t0) / 1000) % currentDuration(); render(); raf = requestAnimationFrame(tick); };
+    const tick = () => {
+      if (haltPlayRef.current) { haltPlayRef.current = false; animTimeRef.current = null; setPlaying(false); render(); return; }
+      animTimeRef.current = ((performance.now() - t0) / 1000) % currentDuration(); render(); raf = requestAnimationFrame(tick);
+    };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [previewing, render, currentDuration]);
-  const playAnim = useCallback(() => { if (animTimeRef.current === null) animTimeRef.current = 0; setPlaying(true); setLeftTab("animate"); }, []);
+  const playAnim = useCallback(() => { haltPlayRef.current = false; if (animTimeRef.current === null) animTimeRef.current = 0; setPlaying(true); }, []);
   const stopAnim = useCallback(() => { setPlaying(false); animTimeRef.current = null; render(); }, [render]);
+  // 暫停：停在這一格（再按播放從這裡接著播）；點一下畫布才回到編輯畫面
+  const pauseAnim = useCallback(() => { setPlaying(false); render(); }, [render]);
   const seekAnim = useCallback((t: number) => { setPlaying(false); animTimeRef.current = t; render(); }, [render]);
-  // 離開「動畫」分頁就回到平常的編輯畫面（回來時如果還在播就繼續播）
-  useEffect(() => { if (leftTab !== "animate") { animTimeRef.current = null; render(); } }, [leftTab, render]);
 
   /**
    * 滑過效果按鈕時試播：暫時把選到的圖層換成只有這個效果、從頭一直重播；
@@ -1870,6 +1908,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       ...(sl.paint?.length ? { paint: sl.paint } : {}),
       ...(sl.glow ? { glow: sl.glow } : {}),
       ...(sl.anims?.length ? { anims: readAnims(sl.anims) } : {}),
+      ...readLifespan(sl),
       ...(sl.shineOnly ? { shineOnly: true } : {}),
       ...(sl.shadow ? { shadow: sl.shadow } : {}),
     };
@@ -1979,6 +2018,25 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     const seq = makeSequenceRenderer(items, vs.width, vs.height);
     setSeqPreview({ width: vs.width, height: vs.height, total: seq.layout.total, draw: seq.draw });
   }, [sequenceItems, stopAnim]);
+  /** 時間軸要列的物件（由上到下，背景不列）：存在時間、縮圖、有沒有動畫。 */
+  const lifeRows = (): LifeRow[] => {
+    const dur = currentDuration();
+    return [...layersRef.current].reverse().filter((l) => l.type !== "background").map((l) => ({
+      id: l.id, name: layerLabel(l), sub: `${TYPE_LABEL[l.type] ?? "物件"}圖層`, isText: l.isText, thumb: l.thumb,
+      ...lifespanOf(l, dur), hasAnim: !!l.anims?.length, anims: l.anims ?? [],
+    }));
+  };
+  const [dockMode, setDockMode] = useState<DockMode>("closed");
+  // 時間軸上點到的動畫片段：右側動畫卡跟著亮起來
+  const [focusAnimId, setFocusAnimId] = useState<string | null>(null);
+  /** 第 i 頁做成影片播幾秒（這頁沒有動畫＝null，頁面列就不顯示秒數）。 */
+  const pageSeconds = (i: number): number | null => {
+    // 有動畫、或有物件設了出現／消失時間的頁才標秒數
+    const timed = (els: EL[]) => els.some((l) => l.anims?.length || l.startTime !== undefined || l.endTime !== undefined);
+    if (i === pageIdxRef.current) return timed(layersRef.current) ? currentDuration() : null;
+    const p = pagesRef.current[i], els = p?.els;
+    return els && timed(els) ? pageDuration(els, p.videoLen) : null;
+  };
   /** 設定從上一頁換到第 i 頁的過場（null＝直接切換）。 */
   const setPageTransition = useCallback((i: number, tr: PageTransition | null) => {
     const p = pagesRef.current[i]; if (!p) return;
@@ -2520,7 +2578,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
             </>)}
             {leftTab === "animate" && (
               <AnimationTab
-                getDuration={currentDuration} autoDuration={!videoLen} onDuration={(d) => { setVideoLen(d); markDirty(); }}
+                getDuration={currentDuration} autoDuration={!videoLen} onDuration={(d) => { setVideoLen(d); if (d) clampPageLifespans(layersRef.current, d); markDirty(); }}
                 playing={playing} getTime={getAnimTime} onPlay={playAnim} onPause={stopAnim} onSeek={seekAnim}
                 selectionCount={selectedIds.length} onApply={applyAnimToSelection} onAddZone={addShineZone}
                 getTracks={currentTracks} selectedIds={selectedIds} onSelectLayer={(id) => { selectOnly(id); render(); }}
@@ -2659,7 +2717,24 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
             }} />
         )}
         </div>
-        <PageStrip pages={pagesView} current={pageIdx} currentThumb={curThumb}
+        {/* 漸進揭露：這頁有動畫才出現薄薄一條播放列，按「動畫時間軸 ↑」才展開完整時間軸 */}
+        {/* 漸進揭露：這頁有動畫、有設存在時間、或使用者打開了，才出現時間軸 */}
+        {(dockMode !== "closed" || panel.some((l) => l.anims?.length || l.startTime !== undefined || l.endTime !== undefined)) && (
+          <AnimDock mode={dockMode} onMode={setDockMode} getDuration={currentDuration}
+            playing={playing} getTime={getAnimTime} onPlay={playAnim} onPause={pauseAnim} onSeek={seekAnim}
+            getRows={lifeRows} selectedId={selectedId} onSelect={(id) => { selectOnly(id); render(); }}
+            onLifespan={(id, start, end) => { setLifespan(layersRef.current, id, start, end, currentDuration()); render(); refresh(); }}
+            onAnim={(layerId, animId, patch) => {
+              const l = layersRef.current.find((x) => x.id === layerId); if (!l) return;
+              patchAnimShared(layersRef.current, l, animId, patch);
+              if (patch.start !== undefined) seekAnim(patch.start);
+              render(); refresh();
+            }}
+            onFocusAnim={(layerId, animId) => { selectOnly(layerId); setFocusAnimId(animId); setPanelTab("anim"); render(); }}
+            focusAnimId={focusAnimId}
+            onCommit={() => markDirty()} />
+        )}
+        <PageStrip pages={pagesView} current={pageIdx} currentThumb={curThumb} getSeconds={pageSeconds}
           onSelect={goToPage} onAdd={() => addPage(false)} onDuplicate={() => addPage(true)} onDelete={deletePage} onMove={movePage} onRename={renamePage}
           onTransition={setPageTransition} />
         {carouselAsk && (
@@ -2680,7 +2755,18 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         <aside ref={rpanelRef} style={S.rpanel}>
           {/* 設定在上、圖層在下——跟 Photoshop 一樣，左欄就不會擠成一條。 */}
           <div style={{ flex: "1 1 0", minHeight: 0, overflowY: "auto" }}>
-          {!selEl ? (
+          {!selEl && panelTab === "anim" ? (
+            <>
+              <div style={S.rtabs}>
+                <button style={S.rtab} onClick={() => setPanelTab("design")}>設計</button>
+                <button style={{ ...S.rtab, ...S.rtabOn }}>動畫</button>
+              </div>
+              <div style={{ padding: "2px 16px 16px" }}>
+                <CurrentLayerPicker layers={panel} selected={null} extra={0} onPick={(id) => { selectLayerOrGroup(id); render(); }} />
+                <div style={{ fontSize: 12, color: "#9ca3af", lineHeight: 1.7, marginTop: 10 }}>在畫布或下方時間軸點一個物件，或從上面選，就能幫它加動畫、調時間。</div>
+              </div>
+            </>
+          ) : !selEl ? (
             <div style={{ padding: 20, fontSize: 12, color: "#9ca3af", lineHeight: 1.7 }}>
               選一個圖層來編輯它的設定。<br />
               雙擊文字可以直接在畫布上改字。
@@ -3021,7 +3107,16 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
               </div>
             ) : panelTab === "anim" ? (
               <div style={{ padding: "2px 16px 16px", overflowY: "auto" }}>
-                <LayerAnimSettings anims={selEl.anims} shineOnly={selEl.shineOnly}
+                <CurrentLayerPicker layers={panel} selected={selEl} extra={selectedIds.length - 1} onPick={(id) => { selectLayerOrGroup(id); render(); }} />
+                {/* 物件存在時間：細節在下方時間軸拖，這裡只顯示、給一個入口 */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "8px 0 0", padding: "8px 10px", borderRadius: 10, border: "1.5px solid #ebeff5", background: "#fff" }}>
+                  <span style={{ fontSize: 12, color: "#374151", fontWeight: 700 }}>出現時間</span>
+                  <span style={{ fontSize: 12, color: "#6b7280", fontVariantNumeric: "tabular-nums" }}>
+                    {selEl.startTime === undefined && selEl.endTime === undefined ? "整頁都在" : `${selEl.startTime ?? 0}s – ${selEl.endTime === undefined ? "頁尾" : `${selEl.endTime}s`}`}
+                  </span>
+                  <button onClick={() => setDockMode("selected")} style={{ marginLeft: "auto", border: "none", background: "transparent", color: "#6d28d9", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>在時間軸調整 ↓</button>
+                </div>
+                <LayerAnimSettings anims={selEl.anims} shineOnly={selEl.shineOnly} focusId={focusAnimId}
                   carouselCard={carouselCardOf(panel, selEl)} library={backgrounds ?? []} uploadFile={uploadImageFile}
                   onCardText={(id, value) => {
                     const l = layersRef.current.find((x) => x.id === id); if (!l?.isText) return;
@@ -3043,6 +3138,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           </>
           )}
           </div>
+            {/* 動畫分頁不放完整圖層列表：選物件靠畫布、時間軸和上面的「目前選取」，圖層管理在「設計」分頁 */}
+            {panelTab !== "anim" && (<>
             {/* 分隔線：往上拉一次看到更多圖層，往下拉把空間讓給上面的設定 */}
             {layersOpen
               ? <ResizeHandle label="拖曳調整圖層區高度" onPointerDown={(e) => startLayersResize(e, -1, (rpanelRef.current?.clientHeight ?? 800) - 150)} />
@@ -3088,6 +3185,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                 </div>
               ))}
             </div>
+            </>)}
         </aside>
       </div>
 
@@ -3343,6 +3441,8 @@ function buildPsdDocument(layers: EL[], doc: { w: number; h: number }) {
 /* ---------- 圖層動畫：畫出第 t 秒的樣子（預覽與輸出 MP4 共用） ---------- */
 /** 畫一個圖層；t＝null 就是平常的樣子，有數字就套上那一秒的動畫（位移、縮放、透明度、光帶）。 */
 function drawLayerAnimated(ctx: CanvasRenderingContext2D, l: EL, layers: EL[], t: number | null) {
+  // 物件存在時間外：播放／輸出時不畫（不改 visible、不刪物件；編輯中 t＝null 一律畫）
+  if (!aliveAt(l, t)) return;
   const f: AnimFrame = t === null ? REST : animFrame(l.anims, t);
   ctx.save();
   // 輪播：整張卡（好幾個圖層）一起在畫布座標裡平移、以卡片中心放大，所以要在圖層自己的變形之前做
@@ -3485,6 +3585,23 @@ function drawGroupFrame(ctx: CanvasRenderingContext2D, x0: number, y0: number, x
     ctx.beginPath(); ctx.rect(x - 5, y - 5, 10, 10); ctx.fillStyle = "#fff"; ctx.fill(); ctx.stroke();
   }
   ctx.restore();
+}
+/**
+ * 設定一個物件的存在時間。從頭開始＝不記開始、拉到頁尾＝不記結束（「一直到頁尾」），
+ * 之後頁面拉長，物件也不會提早消失；兩個都沒有＝整頁都在。
+ */
+function setLifespan(layers: EL[], id: string, start: number, end: number, duration: number) {
+  const l = layers.find((x) => x.id === id); if (!l) return;
+  l.startTime = start > 0.001 ? start : undefined;
+  l.endTime = end < duration - 0.001 ? end : undefined;
+}
+/** 頁長縮短：這一頁所有物件超出的消失時間夾回頁長。 */
+function clampPageLifespans(layers: EL[], duration: number) {
+  for (const l of layers) {
+    if (l.startTime === undefined && l.endTime === undefined) continue;
+    const c = clampLifespan(l, duration);
+    l.startTime = c.startTime; l.endTime = c.endTime;
+  }
 }
 /** 選到的、看得到又沒鎖的圖層。 */
 function movableOf(layers: EL[], ids: string[]) { return layers.filter((l) => ids.includes(l.id) && l.visible && !l.locked); }
@@ -4009,6 +4126,7 @@ function serializeEls(els: EL[]): SavedLayer[] {
     ...(l.glow ? { glow: { ...l.glow } } : {}),
     ...(l.shadow ? { shadow: { ...l.shadow } } : {}),
     ...(l.anims?.length ? { anims: l.anims.map((a) => ({ ...a })) } : {}),
+    ...(l.startTime !== undefined ? { startTime: l.startTime } : {}), ...(l.endTime !== undefined ? { endTime: l.endTime } : {}),
     ...(l.shineOnly ? { shineOnly: true } : {}),
     ...(l.isText
       ? { isText: true, ...(l.wrap ? { wrap: true } : {}), text: l.text, color: l.color, fontSize: l.fontSize * (l.w / (l.naturalW || l.w)), fontFamily: l.fontFamily, fontWeight: l.fontWeight, align: l.align, ...(l.fx ? { fx: l.fx } : {}), ...(l.textLayout ? { textLayout: { ...l.textLayout, letterSpacing: l.textLayout.letterSpacing * (l.w / (l.naturalW || l.w)) } } : {}),
@@ -4086,7 +4204,11 @@ function pageDuration(els: EL[], chosen: number | null): number {
   // 輪播能滑幾格跟卡片現在的位置有關：先照目前的排法重算一次
   for (const g of new Set(els.flatMap((l) => l.anims ?? []).filter((a) => a.kind === "carousel").map((a) => a.group))) refreshCarouselSteps(els, g);
   const anims = els.flatMap((l) => l.anims ?? []);
-  return chosen ? Math.min(30, chosen) : anims.length ? videoDuration(anims, null) : 3;
+  if (chosen) return Math.min(30, chosen);
+  // 自動長度也要包住每個物件設定的消失時間
+  const lifeEnds = els.flatMap((l) => (l.endTime !== undefined ? [l.endTime] : []));
+  if (!anims.length && !lifeEnds.length) return 3;
+  return Math.min(30, Math.max(anims.length ? videoDuration(anims, null) : 3, ...lifeEnds));
 }
 /** 把一頁的第 t 秒畫滿 W×H（尺寸跟影片不同就等比縮放置中、旁邊補白）。 */
 function drawPageAt(ctx: CanvasRenderingContext2D, item: SeqItem, W: number, H: number, t: number) {
@@ -4205,7 +4327,9 @@ function TransitionButton({ value, onChange }: { value: PageTransition | null; o
   );
 }
 
-function PageStrip({ pages, current, currentThumb, onSelect, onAdd, onDuplicate, onDelete, onMove, onRename, onTransition }: {
+function PageStrip({ pages, current, currentThumb, getSeconds, onSelect, onAdd, onDuplicate, onDelete, onMove, onRename, onTransition }: {
+  /** 有動畫的頁顯示「· 3s」。 */
+  getSeconds: (i: number) => number | null;
   pages: { id: string; name: string; thumb: string | null; w: number; h: number; transitionIn?: PageTransition | null }[]; current: number; currentThumb: string | null;
   onSelect: (i: number) => void; onAdd: () => void; onDuplicate: () => void; onDelete: (i: number) => void; onMove: (from: number, to: number) => void;
   onRename: (i: number, name: string) => void; onTransition: (i: number, tr: PageTransition | null) => void;
@@ -4255,6 +4379,7 @@ function PageStrip({ pages, current, currentThumb, onSelect, onAdd, onDuplicate,
               <span onDoubleClick={() => setEditing({ i, value: p.name })} title="雙擊改名"
                 style={{ maxWidth: 96, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, cursor: "text", color: i === current ? "#7c3aed" : "#6b7280", fontWeight: i === current ? 700 : 500 }}>
                 {p.name || `第 ${i + 1} 頁`}
+                {(() => { const sec = getSeconds(i); return sec === null ? null : <span style={{ color: "#9ca3af", fontWeight: 500 }}> · {Math.round(sec * 10) / 10}s</span>; })()}
               </span>
             )}
           </div>

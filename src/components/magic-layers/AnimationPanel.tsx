@@ -6,7 +6,7 @@
    只負責畫面與回呼；圖層怎麼改、怎麼畫、怎麼輸出都在編輯器（MagicLayersEditor）裡。
    ============================================================ */
 import { useEffect, useRef, useState } from "react";
-import { Pause, Play, Sparkles, Trash2, Film, Plus, ChevronsUp, HeartPulse, Star, Waves, Sunrise, Zap, Keyboard, GalleryHorizontal, Vibrate, Focus, ArrowDownToLine, RotateCw, type LucideIcon } from "lucide-react";
+import { Pause, Play, Sparkles, Trash2, Film, Plus, ChevronsUp, HeartPulse, Star, Waves, Sunrise, Zap, Keyboard, GalleryHorizontal, Vibrate, Focus, ArrowDownToLine, RotateCw, Clock, type LucideIcon } from "lucide-react";
 import { ImageLibraryPicker } from "./ImageLibraryPicker";
 import { ANIM_LABELS, animEnd, isOneShot, speedOf, SPEED_LABELS, SPEED_PRESETS, type AnimSpeed, TYPE_STYLES, type AnimKind, type LayerAnim, type ShineDirection, type TypeStyle } from "@/lib/magic-layers/layer-animation.ts";
 
@@ -44,10 +44,30 @@ const TYPE_STYLE_LABELS: Record<TypeStyle, string> = { type: "打字", fade: "�
 
 const btn: React.CSSProperties = { height: 34, borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", fontSize: 12, fontWeight: 600, color: "#374151", cursor: "pointer" };
 const primary: React.CSSProperties = { ...btn, border: "none", background: "#7c3aed", color: "#fff" };
-const label: React.CSSProperties = { fontSize: 11, fontWeight: 700, color: "#9ca3af", padding: "12px 2px 6px" };
 
 /** key：這一列自己的代號（同一個圖層可能出現在好幾列，id 會重複，React 列表要用 key）。 */
 export type AnimTrack = { key: string; id: string; name: string; /** 名字是使用者自己取的。 */ custom?: boolean; anims: LayerAnim[] };
+
+// 左側動畫面板的樣式（白卡片 v2：紫 #7c3aed、淺紫底 violet-50、邊框 #ebeff5）
+const BORDER = "#ebeff5";
+const on: React.CSSProperties = { border: "1.5px solid #7c3aed", background: "#f5f3ff", color: "#6d28d9" };
+const pill: React.CSSProperties = { height: 34, borderRadius: 10, border: `1.5px solid ${BORDER}`, background: "#fff", fontSize: 13, fontWeight: 700, color: "#374151", cursor: "pointer" };
+const divider = <div style={{ height: 1, background: BORDER, margin: "16px -2px" }} />;
+
+/** 區塊標題：紫色小圖示＋粗體標題（右邊可以放按鈕），下面一行灰色說明。 */
+function SectionHead(props: { icon: LucideIcon; title: React.ReactNode; hint?: string; right?: React.ReactNode }) {
+  const Icon = props.icon;
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+        <Icon size={17} color="#7c3aed" style={{ flex: "0 0 auto" }} />
+        <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 700, color: "#111827" }}>{props.title}</span>
+        {props.right}
+      </div>
+      {props.hint && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 3, paddingLeft: 24 }}>{props.hint}</div>}
+    </div>
+  );
+}
 
 export function AnimationTab(props: {
   getDuration: () => number; autoDuration: boolean; onDuration: (d: number | null) => void;
@@ -56,9 +76,13 @@ export function AnimationTab(props: {
   /** 滑鼠移到效果按鈕上：先在畫布上試播（null＝移開了）。 */
   onTry: (kind: AnimKind | null) => void;
   onClearAll: () => void;
+  /** 選到的圖層已經有哪些效果（按鈕亮起來）。 */
+  activeKinds: AnimKind[];
   getTracks: () => AnimTrack[]; selectedIds: string[]; onSelectLayer: (id: string) => void;
   onMoveStart: (layerId: string, animId: string, start: number) => void; onCommitMove: () => void;
   onRenameTrack: (layerId: string, animId: string, name: string) => void;
+  onResizeTrack: (layerId: string, animId: string, duration: number) => void;
+  onRemoveTrack: (layerId: string, animId: string) => void;
   /** 有幾頁：兩頁以上可以預覽／輸出整份影片（頁跟頁之間有過場）。 */
   pageCount: number; onPreviewAll: () => void;
   onExport: (allPages: boolean) => void; exporting: boolean; progress: number;
@@ -78,95 +102,113 @@ export function AnimationTab(props: {
     return () => cancelAnimationFrame(raf);
   }, [playing, getTime]);
   const shownTime = playing ? time : (getTime() ?? time);
+  const secRef = useRef<HTMLInputElement>(null);
+  const preset = !props.autoDuration && [3, 6, 10].includes(duration) ? duration : null;
+  const customOn = !props.autoDuration && preset === null;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column" }}>
-      <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.6, padding: "0 2px 4px" }}>
-        先在畫布上選圖層（可以拉框選好幾個），滑鼠移到效果上會先試播，點下去才套用；細節在右側面板調。
+    // 捲動面板時滑鼠底下的按鈕會換掉，但不會觸發「移開」：一捲動就先結束試播
+    <div onWheel={() => props.onTry(null)} style={{ display: "flex", flexDirection: "column", paddingBottom: 8 }}>
+      <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.7, marginBottom: 14 }}>
+        先在畫布上選圖層（可以拉框選好幾個），滑鼠移到效果上會先試播，點下去才套用；細節在右側面板調整。
       </div>
 
-      <div style={label}>{multi ? "這一頁播多久" : "影片長度"}</div>
-      <div style={{ display: "flex", gap: 6 }}>
+      {/* ── 頁面時長 ── */}
+      <SectionHead icon={Clock} title={multi ? "這一頁時長" : "頁面時長"} />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
         {[3, 6, 10].map((d) => (
-          <button key={d} onClick={() => props.onDuration(d)}
-            style={{ ...btn, flex: 1, ...(!props.autoDuration && duration === d ? { border: "1px solid #7c3aed", color: "#6d28d9", background: "#f5f3ff" } : {}) }}>{d} 秒</button>
+          <button key={d} onClick={() => props.onDuration(d)} style={{ ...pill, ...(preset === d ? on : {}) }}>{d} 秒</button>
         ))}
-        <button onClick={() => props.onDuration(null)} title="照動畫自動決定"
-          style={{ ...btn, flex: 1, ...(props.autoDuration ? { border: "1px solid #7c3aed", color: "#6d28d9", background: "#f5f3ff" } : {}) }}>自動</button>
+        <button onClick={() => { if (props.autoDuration) props.onDuration(duration); secRef.current?.focus(); secRef.current?.select(); }}
+          title="自己填秒數" style={{ ...pill, ...(customOn ? on : {}) }}>自訂</button>
       </div>
-      {/* 也可以直接打秒數（0.5–30）；自動時顯示目前算出來的長度 */}
-      <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, fontSize: 11, color: "#6b7280" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 12, color: "#6b7280" }}>
         自己設定
-        <input type="number" min={0.5} max={30} step={0.5} value={Math.round(duration * 10) / 10} aria-label={multi ? "這一頁播幾秒" : "影片幾秒"}
+        <input ref={secRef} type="number" min={0.5} max={30} step={0.5} value={Math.round(duration * 10) / 10} aria-label={multi ? "這一頁播幾秒" : "影片幾秒"}
           onChange={(e) => { const v = Number(e.target.value); if (Number.isFinite(v) && v > 0) props.onDuration(Math.min(30, Math.max(0.5, v))); }}
-          style={{ width: 72, height: 28, border: `1px solid ${props.autoDuration ? "#e5e7eb" : "#7c3aed"}`, borderRadius: 8, padding: "0 8px", fontSize: 12, color: "#374151" }} />
+          style={{ width: 80, height: 32, border: `1.5px solid ${customOn ? "#c4b5fd" : BORDER}`, borderRadius: 8, padding: "0 10px", fontSize: 13, color: "#111827" }} />
         秒
-      </label>
-
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
-        <button onClick={playing ? props.onPause : props.onPlay} style={{ ...primary, width: 76, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
-          {playing ? <Pause size={14} /> : <Play size={14} />}{playing ? "暫停" : "播放"}
+        <button onClick={() => props.onDuration(null)} disabled={props.autoDuration} title="照動畫自動決定長度"
+          style={{ marginLeft: "auto", border: "none", background: "transparent", padding: 0, fontSize: 11, cursor: props.autoDuration ? "default" : "pointer", color: props.autoDuration ? "#7c3aed" : "#9ca3af", fontWeight: props.autoDuration ? 700 : 500 }}>
+          {props.autoDuration ? "✓ 自動" : "改回自動"}
+        </button>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12 }}>
+        <button onClick={playing ? props.onPause : props.onPlay}
+          style={{ height: 40, minWidth: 84, borderRadius: 10, border: "none", background: "#7c3aed", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+          {playing ? <Pause size={15} fill="#fff" /> : <Play size={15} fill="#fff" />}{playing ? "暫停" : "播放"}
         </button>
         <input type="range" min={0} max={duration} step={0.05} value={Math.min(duration, shownTime)}
           onChange={(e) => { const t = Number(e.target.value); setTime(t); props.onSeek(t); }}
-          style={{ flex: 1, accentColor: "#7c3aed" }} aria-label="預覽時間" />
-        <span style={{ width: 54, fontSize: 11, color: "#6b7280", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{shownTime.toFixed(1)} / {duration}s</span>
+          style={{ flex: 1, minWidth: 0, accentColor: "#7c3aed" }} aria-label="預覽時間" />
+        <span style={{ fontSize: 12, color: "#6b7280", textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{shownTime.toFixed(1)} / {duration}s</span>
       </div>
 
-      <div style={label}>套用效果{props.selectionCount ? `（${props.selectionCount} 個圖層）` : ""}</div>
+      {divider}
+
+      {/* ── 套用效果 ── */}
+      <SectionHead icon={Sparkles} title={`套用效果${props.selectionCount ? `（${props.selectionCount} 個圖層）` : ""}`}
+        hint={props.selectionCount ? undefined : "先在畫布上選一個圖層"} />
       {KIND_GROUPS.map((g) => (
-        <div key={g.title} style={{ marginBottom: 8 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", margin: "2px 2px 5px" }}>
-            {g.title}{g.note && <span style={{ fontWeight: 500, color: "#9ca3af", marginLeft: 6 }}>{g.note}</span>}
+        <div key={g.title} style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#111827", marginBottom: 7 }}>
+            {g.title}{g.note && <span style={{ fontWeight: 500, fontSize: 11, color: "#9ca3af", marginLeft: 6 }}>{g.note}</span>}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
             {g.kinds.map((kind) => {
-              const Icon = ANIM_ICONS[kind];
+              const Icon = ANIM_ICONS[kind], active = props.activeKinds.includes(kind);
               return (
                 <button key={kind} onClick={() => props.onApply(kind)} disabled={!props.selectionCount}
                   onMouseEnter={() => { if (props.selectionCount) props.onTry(kind); }} onMouseLeave={() => props.onTry(null)}
                   title={props.selectionCount ? `${hintOf(kind)}${kind === "carousel" ? "" : "（滑鼠移上來會先試播，點下去才套用）"}` : "先在畫布上選一個圖層"}
-                  style={{ ...btn, display: "inline-flex", alignItems: "center", justifyContent: "flex-start", gap: 7, padding: "0 10px", ...(props.selectionCount ? {} : { opacity: 0.45, cursor: "not-allowed" }) }}>
-                  <Icon size={15} color={ANIM_COLORS[kind]} style={{ flex: "0 0 auto" }} />{ANIM_LABELS[kind]}
+                  style={{ ...pill, height: 38, fontSize: 12, display: "inline-flex", alignItems: "center", justifyContent: "flex-start", gap: 5, padding: "0 7px", whiteSpace: "nowrap", overflow: "hidden",
+                    ...(active ? on : {}), ...(props.selectionCount ? {} : { opacity: 0.45, cursor: "not-allowed" }) }}>
+                  <Icon size={15} color={ANIM_COLORS[kind]} style={{ flex: "0 0 auto" }} />
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{ANIM_LABELS[kind]}</span>
                 </button>
               );
             })}
           </div>
         </div>
       ))}
-      <button onClick={props.onAddZone} style={{ ...btn, marginTop: 8, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-        title="加一塊看不見的範圍，只有閃光掃過時在裡面亮一下（例如只想讓照片的某一塊發亮）">
-        <Sparkles size={14} color="#7c3aed" />加一塊光澤範圍
+      <button onClick={props.onAddZone}
+        title="加一塊看不見的範圍，只有閃光掃過時在裡面亮一下（例如只想讓照片的某一塊發亮）"
+        style={{ height: 42, borderRadius: 10, border: "1.5px solid #ebe4f9", background: "#f9f6ff", color: "#4c1d95", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+        <Sparkles size={16} color="#7c3aed" />加一塊光澤範圍
       </button>
 
-      <div style={{ ...label, display: "flex", alignItems: "center", gap: 6 }}>
-        <span style={{ flex: 1, minWidth: 0 }}>時間軸（拖曳色條調整開始時間；雙擊名稱可以改名）</span>
-        {tracks.length > 0 && (
+      {divider}
+
+      {/* ── 時間軸 ── */}
+      <SectionHead icon={Clock} title="時間軸" hint="拖曳色條調整開始時間；雙擊名稱可以改名"
+        right={tracks.length > 0 ? (
           <button onClick={props.onClearAll} title="拿掉這一頁所有圖層的動畫（可以 ⌘Z 復原）"
-            style={{ flex: "0 0 auto", height: 24, padding: "0 8px", borderRadius: 6, border: "1px solid #fecaca", background: "#fff", color: "#dc2626", fontSize: 11, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 3 }}>
-            <Trash2 size={11} />清除全部
+            style={{ flex: "0 0 auto", height: 30, padding: "0 10px", borderRadius: 8, border: "1.5px solid #fecaca", background: "#fff", color: "#dc2626", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <Trash2 size={13} />清除全部
+          </button>
+        ) : undefined} />
+      <Timeline duration={duration} tracks={tracks} selectedIds={props.selectedIds} onSelectLayer={props.onSelectLayer}
+        onMoveStart={props.onMoveStart} onCommitMove={props.onCommitMove} onRename={props.onRenameTrack}
+        onResize={props.onResizeTrack} onRemove={props.onRemoveTrack} />
+
+      {/* ── 輸出 ── */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 16 }}>
+        {multi && (
+          <button onClick={props.onPreviewAll} disabled={props.exporting}
+            style={{ ...pill, height: 44, fontSize: 14, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+            <Play size={15} color="#7c3aed" fill="#7c3aed" />預覽整份影片（{props.pageCount} 頁）
           </button>
         )}
-      </div>
-      <Timeline duration={duration} tracks={tracks} selectedIds={props.selectedIds} onSelectLayer={props.onSelectLayer}
-        onMoveStart={props.onMoveStart} onCommitMove={props.onCommitMove} onRename={props.onRenameTrack} />
-
-
-      {multi && (
-        <button onClick={props.onPreviewAll} disabled={props.exporting}
-          style={{ ...btn, marginTop: 14, height: 36, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-          <Play size={14} color="#7c3aed" />預覽整份影片（{props.pageCount} 頁）
+        <button onClick={() => props.onExport(multi)} disabled={props.exporting}
+          style={{ height: 46, borderRadius: 10, border: "none", background: "#7c3aed", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7, opacity: props.exporting ? 0.7 : 1 }}>
+          <Film size={17} />{props.exporting ? `輸出中… ${Math.round(props.progress * 100)}%` : multi ? `下載 MP4（全部 ${props.pageCount} 頁）` : "下載 MP4 影片"}
         </button>
-      )}
-      <button onClick={() => props.onExport(multi)} disabled={props.exporting}
-        style={{ ...primary, marginTop: multi ? 8 : 14, height: 40, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: props.exporting ? 0.7 : 1 }}>
-        <Film size={15} />{props.exporting ? `輸出中… ${Math.round(props.progress * 100)}%` : multi ? `下載 MP4（全部 ${props.pageCount} 頁）` : "下載 MP4 影片"}
-      </button>
-      {multi && !props.exporting && (
-        <button onClick={() => props.onExport(false)} style={{ marginTop: 6, border: "none", background: "transparent", color: "#6d28d9", fontSize: 12, fontWeight: 600, cursor: "pointer", textDecoration: "underline" }}>只下載這一頁</button>
-      )}
-      <div style={{ fontSize: 11, color: "#9ca3af", lineHeight: 1.6, padding: "6px 2px 0" }}>
-        {multi ? "在瀏覽器裡直接輸出，臉書、IG 都能上傳。頁跟頁之間的過場在下方頁面列兩頁中間的小按鈕設定。" : "在瀏覽器裡直接輸出，臉書、IG 都能上傳；只會輸出目前這一頁。"}
+        {multi && !props.exporting && (
+          <button onClick={() => props.onExport(false)} style={{ border: "none", background: "transparent", color: "#6d28d9", fontSize: 13, fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}>只下載這一頁</button>
+        )}
+        <div style={{ fontSize: 11, color: "#9ca3af", lineHeight: 1.7 }}>
+          {multi ? "在瀏覽器裡直接輸出，臉書、IG 都能上傳。頁跟頁之間的過場在下方頁面列兩頁中間的小按鈕設定。" : "在瀏覽器裡直接輸出，臉書、IG 都能上傳；只會輸出目前這一頁。"}
+        </div>
       </div>
     </div>
   );
@@ -175,58 +217,83 @@ export function AnimationTab(props: {
 const ANIM_COLORS: Record<AnimKind, string> = { shine: "#f59e0b", bounce: "#ec4899", pulse: "#8b5cf6", twinkle: "#06b6d4", float: "#10b981", fadeIn: "#6b7280", popIn: "#f97316", typeIn: "#3b82f6", carousel: "#14b8a6",
   wiggle: "#e11d48", blurIn: "#64748b", stomp: "#b45309", spin: "#0ea5e9" };
 
-/** 每個有動畫的圖層一列，色條是動畫的時間（循環的後面接淡淡的重複）。拖色條改開始時間。 */
+/**
+ * 時間軸：每一列是一張小卡（色點、名稱、色條、⋮ 選單）。
+ * 色條：拖中間＝移動開始時間；拖右邊把手＝調整一輪多長；循環的重複部分是淡淡的底。
+ */
 function Timeline(props: {
   duration: number; tracks: AnimTrack[]; selectedIds: string[]; onSelectLayer: (id: string) => void;
   onMoveStart: (layerId: string, animId: string, start: number) => void; onCommitMove: () => void;
   onRename: (layerId: string, animId: string, name: string) => void;
+  onResize: (layerId: string, animId: string, duration: number) => void;
+  onRemove: (layerId: string, animId: string) => void;
 }) {
-  const barRef = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState<{ key: string; value: string } | null>(null);
-  const drag = useRef<{ layerId: string; animId: string; x0: number; s0: number } | null>(null);
+  const [menu, setMenu] = useState<string | null>(null);
+  const drag = useRef<{ mode: "move" | "resize"; layerId: string; animId: string; x0: number; v0: number; w: number } | null>(null);
   const { duration, tracks } = props;
-  if (!tracks.length) return <div style={{ fontSize: 11, color: "#9ca3af", padding: "4px 2px 2px" }}>還沒有圖層有動畫。</div>;
+  if (!tracks.length) return <div style={{ fontSize: 12, color: "#9ca3af", padding: "10px 12px", border: `1.5px dashed ${BORDER}`, borderRadius: 10, textAlign: "center" }}>還沒有圖層有動畫</div>;
   const pct = (t: number) => `${Math.max(0, Math.min(100, (t / duration) * 100))}%`;
   const onMove = (e: React.PointerEvent) => {
-    const d = drag.current, w = barRef.current?.clientWidth ?? 1;
+    const d = drag.current;
     if (!d) return;
-    const start = Math.max(0, Math.min(duration - 0.1, Math.round((d.s0 + ((e.clientX - d.x0) / w) * duration) * 10) / 10));
-    props.onMoveStart(d.layerId, d.animId, start);
+    const dt = ((e.clientX - d.x0) / Math.max(1, d.w)) * duration;
+    if (d.mode === "move") props.onMoveStart(d.layerId, d.animId, Math.max(0, Math.min(duration - 0.1, Math.round((d.v0 + dt) * 10) / 10)));
+    else props.onResize(d.layerId, d.animId, Math.max(0.1, Math.min(10, Math.round((d.v0 + dt) * 20) / 20)));
   };
+  const endDrag = () => { if (drag.current) { drag.current = null; props.onCommitMove(); } };
+  const beginDrag = (e: React.PointerEvent, mode: "move" | "resize", layerId: string, a: LayerAnim) => {
+    e.stopPropagation();
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* 抓不到游標也照樣拖（外層會收移動事件） */ }
+    const bar = (e.currentTarget as HTMLElement).closest("[data-bar]") as HTMLElement | null;
+    drag.current = { mode, layerId, animId: a.id, x0: e.clientX, v0: mode === "move" ? a.start : a.duration, w: bar?.clientWidth ?? 1 };
+  };
+  const handle: React.CSSProperties = { position: "absolute", top: "50%", width: 14, height: 14, marginTop: -7, borderRadius: 7, background: "#fff", border: "1.5px solid #9ca3af", boxShadow: "0 1px 2px rgba(0,0,0,.12)", boxSizing: "border-box" };
   return (
-    <div ref={barRef} onPointerMove={onMove} onPointerUp={() => { if (drag.current) { drag.current = null; props.onCommitMove(); } }}
-      style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      {tracks.map((tr) => (
-        <div key={tr.key}>
-          {editing?.key === tr.key ? (
-            <input autoFocus onFocus={(e) => e.currentTarget.select()} value={editing.value} maxLength={30} placeholder="清空＝自動取名" aria-label="時間軸列名"
-              onChange={(e) => setEditing({ key: tr.key, value: e.target.value })}
-              onBlur={() => { props.onRename(tr.id, tr.anims[0].id, editing.value); setEditing(null); }}
-              onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") { props.onRename(tr.id, tr.anims[0].id, editing.value); setEditing(null); } if (e.key === "Escape") setEditing(null); }}
-              style={{ display: "block", width: "100%", boxSizing: "border-box", height: 22, margin: "1px 0", fontSize: 11, border: "1px solid #c4b5fd", borderRadius: 5, outline: "none", padding: "0 6px" }} />
-          ) : (
-            <button onClick={() => props.onSelectLayer(tr.id)} onDoubleClick={() => setEditing({ key: tr.key, value: tr.custom ? tr.name : "" })} title="點一下選取；雙擊改名"
-              style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", padding: "2px 0", fontSize: 11, cursor: "pointer",
-                color: props.selectedIds.includes(tr.id) ? "#6d28d9" : "#4b5563", fontWeight: props.selectedIds.includes(tr.id) ? 700 : 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tr.name}</button>
-          )}
-          {tr.anims.map((a) => {
-            const end = Math.min(duration, animEnd(a));
-            const firstEnd = Math.min(duration, a.start + a.duration);
-            return (
-              <div key={a.id} style={{ position: "relative", height: 14, background: "#f3f4f6", borderRadius: 4, marginBottom: 2 }}>
-                {/* 循環的重複部分：淡淡的底 */}
-                <div style={{ position: "absolute", left: pct(a.start), width: `calc(${pct(end)} - ${pct(a.start)})`, top: 3, bottom: 3, background: ANIM_COLORS[a.kind], opacity: 0.25, borderRadius: 3 }} />
-                <div title={`${ANIM_LABELS[a.kind]}：第 ${a.start} 秒開始（拖曳調整）`}
-                  onPointerDown={(e) => { barRef.current?.setPointerCapture(e.pointerId); drag.current = { layerId: tr.id, animId: a.id, x0: e.clientX, s0: a.start }; }}
-                  style={{ position: "absolute", left: pct(a.start), width: `max(8px, calc(${pct(firstEnd)} - ${pct(a.start)}))`, top: 0, bottom: 0, background: ANIM_COLORS[a.kind], borderRadius: 4, cursor: "ew-resize" }} />
+    <div onPointerMove={onMove} onPointerUp={endDrag} onPointerCancel={endDrag} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {tracks.map((tr) => {
+        const a = tr.anims[0], selected = props.selectedIds.includes(tr.id);
+        const end = Math.min(duration, animEnd(a)), firstEnd = Math.min(duration, a.start + a.duration);
+        return (
+          <div key={tr.key} style={{ position: "relative", display: "flex", alignItems: "center", gap: 8, height: 40, padding: "0 4px 0 10px", borderRadius: 10, border: `1.5px solid ${selected ? "#c4b5fd" : BORDER}`, background: selected ? "#faf8ff" : "#fff" }}>
+            <span style={{ width: 10, height: 10, borderRadius: 5, background: ANIM_COLORS[a.kind], flex: "0 0 auto" }} title={ANIM_LABELS[a.kind]} />
+            {editing?.key === tr.key ? (
+              <input autoFocus onFocus={(e) => e.currentTarget.select()} value={editing.value} maxLength={30} placeholder="清空＝自動取名" aria-label="時間軸列名"
+                onChange={(e) => setEditing({ key: tr.key, value: e.target.value })}
+                onBlur={() => { props.onRename(tr.id, a.id, editing.value); setEditing(null); }}
+                onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") { props.onRename(tr.id, a.id, editing.value); setEditing(null); } if (e.key === "Escape") setEditing(null); }}
+                style={{ width: 64, flex: "0 0 auto", height: 24, fontSize: 12, border: "1px solid #c4b5fd", borderRadius: 6, outline: "none", padding: "0 6px" }} />
+            ) : (
+              <button onClick={() => props.onSelectLayer(tr.id)} onDoubleClick={() => setEditing({ key: tr.key, value: tr.custom ? tr.name : "" })} title={`${tr.name}（點一下選取；雙擊改名）`}
+                style={{ width: 64, flex: "0 0 auto", textAlign: "left", border: "none", background: "transparent", padding: 0, fontSize: 12, cursor: "pointer",
+                  color: selected ? "#6d28d9" : "#374151", fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tr.name}</button>
+            )}
+            <div data-bar style={{ position: "relative", flex: 1, minWidth: 0, height: 22 }}>
+              <div style={{ position: "absolute", left: 0, right: 0, top: 8, height: 6, borderRadius: 3, background: "#eef0f4" }} />
+              {/* 循環的重複部分：淡淡的底 */}
+              <div style={{ position: "absolute", left: pct(a.start), width: `calc(${pct(end)} - ${pct(a.start)})`, top: 8, height: 6, borderRadius: 3, background: ANIM_COLORS[a.kind], opacity: 0.25 }} />
+              <div title={`${ANIM_LABELS[a.kind]}：第 ${a.start} 秒開始（拖曳調整）`} onPointerDown={(e) => beginDrag(e, "move", tr.id, a)}
+                style={{ position: "absolute", left: pct(a.start), width: `max(10px, calc(${pct(firstEnd)} - ${pct(a.start)}))`, top: 8, height: 6, borderRadius: 3, background: ANIM_COLORS[a.kind], cursor: "grab", touchAction: "none" }} />
+              <div onPointerDown={(e) => beginDrag(e, "move", tr.id, a)} title="拖曳調整開始時間" style={{ ...handle, left: `calc(${pct(a.start)} - 7px)`, cursor: "grab", touchAction: "none" }} />
+              <div onPointerDown={(e) => beginDrag(e, "resize", tr.id, a)} title={`拖曳調整${a.kind === "typeIn" ? "整段跑完" : "一輪"}多久（現在 ${a.duration} 秒）`} style={{ ...handle, left: `calc(${pct(firstEnd)} - 7px)`, cursor: "ew-resize", touchAction: "none" }} />
+            </div>
+            <button onClick={() => setMenu(menu === tr.key ? null : tr.key)} aria-label="這一列的選項" title="更多"
+              style={{ width: 24, height: 28, flex: "0 0 auto", border: "none", background: "transparent", color: "#6b7280", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: 0 }}>⋮</button>
+            {menu === tr.key && (<>
+              <div onClick={() => setMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 50 }} />
+              <div style={{ position: "absolute", right: 4, top: 36, zIndex: 51, minWidth: 120, background: "#fff", border: `1px solid ${BORDER}`, borderRadius: 10, boxShadow: "0 8px 24px rgba(17,24,39,.14)", padding: 4 }}>
+                <button onClick={() => { setMenu(null); setEditing({ key: tr.key, value: tr.custom ? tr.name : "" }); }} style={menuItem}>改名</button>
+                <button onClick={() => { setMenu(null); props.onSelectLayer(tr.id); }} style={menuItem}>選取這個圖層</button>
+                <button onClick={() => { setMenu(null); props.onRemove(tr.id, a.id); }} style={{ ...menuItem, color: "#dc2626" }}>刪除這列動畫</button>
               </div>
-            );
-          })}
-        </div>
-      ))}
+            </>)}
+          </div>
+        );
+      })}
     </div>
   );
 }
+const menuItem: React.CSSProperties = { display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", padding: "7px 10px", borderRadius: 6, fontSize: 12, color: "#374151", cursor: "pointer" };
 
 const num: React.CSSProperties = { width: "100%", boxSizing: "border-box", height: 30, border: "1px solid #e5e7eb", borderRadius: 6, padding: "0 6px", fontSize: 12 };
 

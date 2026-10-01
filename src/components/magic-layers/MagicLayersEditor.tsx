@@ -2344,8 +2344,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
             );
           })}
         </nav>
+        {/* 動畫分頁的效果按鈕排三欄，面板寬一點才放得下四個字的效果名稱 */}
         {leftTab && (
-        <aside style={S.panel} aria-label={LEFT_TABS.find((t) => t.id === leftTab)?.label}>
+        <aside style={{ ...S.panel, ...(leftTab === "animate" ? { width: 330 } : {}) }} aria-label={LEFT_TABS.find((t) => t.id === leftTab)?.label}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "14px 14px 10px", borderBottom: "1px solid #f3f4f6", flex: "0 0 auto" }}>
             <span style={{ fontSize: 15, fontWeight: 800, color: "#111827", marginRight: "auto" }}>{LEFT_TABS.find((t) => t.id === leftTab)?.label}</span>
             {leftTab === "templates" && templates.length > 0 && <span style={{ fontSize: 11, color: "#9ca3af" }}>{templates.length} 個・點擊套用</span>}
@@ -2498,6 +2499,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                 onMoveStart={(layerId, animId, start) => { moveAnimGroup(layersRef.current, layerId, animId, start); seekAnim(start); refresh(); }}
                 onCommitMove={() => markDirty()}
                 onRenameTrack={(layerId, animId, name) => { renameAnimGroup(layersRef.current, layerId, animId, name); markDirty(); refresh(); }}
+                onResizeTrack={(layerId, animId, duration) => { resizeAnimGroup(layersRef.current, layerId, animId, duration); refresh(); render(); }}
+                onRemoveTrack={(layerId, animId) => { removeAnimGroup(layersRef.current, layerId, animId); markDirty(); refresh(); render(); }}
+                activeKinds={[...new Set(selEl?.anims?.map((a) => a.kind) ?? [])]}
                 onTry={tryAnim} onClearAll={clearPageAnims}
                 pageCount={pagesView.length || 1} onPreviewAll={() => void openSequencePreview()}
                 onExport={(all) => void (all ? exportWholeMp4() : exportMp4())} exporting={mp4Busy !== null} progress={mp4Busy ?? 0} />
@@ -3576,6 +3580,24 @@ function moveAnimGroup(layers: EL[], layerId: string, animId: string, start: num
   if (!src) return;
   const kind = src.kind, old = src.start;
   for (const l of layers) l.anims = l.anims?.map((a) => (a.kind === kind && a.start === old ? { ...a, start } : a));
+}
+/** 時間軸拖右邊把手：同一列（同一個效果、同一個開始時間）的動畫一起改一輪多長。 */
+function resizeAnimGroup(layers: EL[], layerId: string, animId: string, duration: number) {
+  const src = layers.find((l) => l.id === layerId)?.anims?.find((a) => a.id === animId);
+  if (!src) return;
+  const kind = src.kind, start = src.start;
+  for (const l of layers) l.anims = l.anims?.map((a) => (a.kind === kind && a.start === start ? { ...a, duration } : a));
+}
+/** 時間軸「刪除這列」：同一列的動畫都拿掉（輪播整組拿掉）。 */
+function removeAnimGroup(layers: EL[], layerId: string, animId: string) {
+  const owner = layers.find((l) => l.id === layerId);
+  const src = owner?.anims?.find((a) => a.id === animId);
+  if (!owner || !src) return;
+  if (src.kind === "carousel") { removeAnimShared(layers, owner, animId); return; }
+  for (const l of layers) {
+    const keep = (l.anims ?? []).filter((a) => !(a.kind === src.kind && a.start === src.start));
+    l.anims = keep.length ? keep : undefined;
+  }
 }
 /** 時間軸列改名：同一列（同一個效果、同一個開始時間）的動畫都記上這個名字；空的＝回到自動取名。 */
 function renameAnimGroup(layers: EL[], layerId: string, animId: string, name: string) {

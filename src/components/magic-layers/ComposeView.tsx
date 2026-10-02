@@ -16,6 +16,7 @@
 
    Renders INSIDE the app shell (<main>), so the brand sidebar stays visible.
    ============================================================ */
+import { EditorIntroHint } from "@/components/intro/MagicLayersIntro";
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { MagicLayersEditor, type SavedLayer, type SavedPage } from "@/components/magic-layers/MagicLayersEditor.tsx";
@@ -213,6 +214,8 @@ export function ComposeView({ clientId: clientIdProp }: { clientId?: string }) {
         <MagicLayersEditor image={img} layers={layers} backgrounds={availableBackgrounds} logos={logos}
           name={docName ?? title} clientId={clientId} onRename={setDocName}
           onBack={() => router.back()} onSave={handleSave} extraPages={extraPages} firstPageName={firstPageName} animDuration={animDuration} />
+        {/* 第一次打開編輯器：角落小提示「看 38 秒介紹」，點了才播 */}
+        <EditorIntroHint />
       </div>
     );
   }

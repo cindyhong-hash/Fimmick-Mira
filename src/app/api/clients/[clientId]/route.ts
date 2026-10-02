@@ -30,7 +30,16 @@ export async function GET(_req: Request, { params }: { params: Promise<{ clientI
     },
   });
   if (!client) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json(parseClient(client as unknown as Record<string, unknown>));
+  // 自由排版有沒有做動畫：列表要標「動畫」。排版 JSON 很大，只在伺服器這邊看一眼、回傳 true/false，不整包丟給列表。
+  // 存檔時只有真的有動畫的圖層才會寫 anims（空的不寫），所以找得到 "anims":[{ 就是有動畫。
+  const designIds = client.activities.filter((a) => a.layoutId === "magic-layers").map((a) => a.id);
+  const animated = new Set<string>();
+  if (designIds.length) {
+    const rows = await db.generatedLayout.findMany({ where: { activityId: { in: designIds } }, select: { activityId: true, textLayerJson: true } });
+    for (const r of rows) if (r.textLayerJson.includes('"anims":[{')) animated.add(r.activityId);
+  }
+  const withFlags = { ...client, activities: client.activities.map((a) => (animated.has(a.id) ? { ...a, hasAnimation: true } : a)) };
+  return NextResponse.json(parseClient(withFlags as unknown as Record<string, unknown>));
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ clientId: string }> }) {

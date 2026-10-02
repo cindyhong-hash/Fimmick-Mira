@@ -1,5 +1,8 @@
-import { Image as ImageIcon, ArrowRight, Check } from "lucide-react";
+"use client";
+import { useState } from "react";
+import { Image as ImageIcon, ArrowRight, Check, Play } from "lucide-react";
 import { FreeLayoutIcon } from "@/components/icons/FreeLayoutIcon";
+import { IntroVideoModal } from "@/components/intro/MagicLayersIntro";
 
 // 三張創作卡：整張卡可點＋hover 有反應（跟首頁 QuickStartCards 一致），
 // 內層 CTA 只作視覺提示（pointer-events-none），實際點擊交給整張卡。
@@ -22,6 +25,7 @@ export function CreationCards({
     "pointer-events-none mt-auto inline-flex self-start items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-medium";
   const feat = "flex items-center gap-1.5 text-xs text-gray-500";
   const check = "h-3.5 w-3.5 shrink-0 text-violet-500";
+  const [intro, setIntro] = useState(false);
 
   return (
     <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -71,28 +75,44 @@ export function CreationCards({
         </div>
       </button>
 
-      {/* 卡3 自由設計 → 建立精靈（空白/從素材/AI底圖 → 選尺寸 → Magic Layers 編輯器）（淡粉／杏底） */}
-      <button
-        type="button"
+      {/* 卡3 自由設計 → 建立精靈（空白/從素材/AI底圖 → 選尺寸 → Magic Layers 編輯器）（淡粉／杏底）
+          這張卡用 div＋role=button：右上角的「看介紹」是另一顆按鈕，按鈕裡不能再放按鈕 */}
+      <div
+        role="button"
+        tabIndex={0}
         onClick={onFreeLayout}
-        className={`${cardBase} border-[#fbe4ea] bg-[#fff5f7] hover:border-violet-300 hover:shadow-md`}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onFreeLayout(); } }}
+        className={`${cardBase} border-[#fbe4ea] bg-[#fff5f7] hover:border-violet-300 hover:shadow-md focus-visible:outline-2 focus-visible:outline-violet-500`}
       >
         <div className={leftCol}>
-          <span className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-pink-100 text-pink-500"><FreeLayoutIcon className="h-5 w-5" /></span>
+          {/* NEW 標籤放在圖示旁邊（放標題旁邊，卡片窄的時候「自由設計」會被擠成兩行）；動畫上線一兩個月後拿掉 */}
+          <div className="mb-3 flex items-center gap-2">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-pink-100 text-pink-500"><FreeLayoutIcon className="h-5 w-5" /></span>
+            <span className="whitespace-nowrap rounded-full bg-violet-600 px-2 py-1 text-[10px] font-bold leading-none tracking-wide text-white">NEW 動畫</span>
+          </div>
           <div className="text-lg font-semibold text-gray-900">自由設計</div>
-          <p className="mt-1 text-sm leading-relaxed text-gray-500">自由加入圖片、文字與素材，打造專屬設計。</p>
+          <p className="mt-1 text-sm leading-relaxed text-gray-500">自由排版圖文與素材，還能讓每個元素動起來。</p>
           <ul className="mt-3 mb-5 space-y-1.5">
-            <li className={feat}><Check className={check} />自由拖曳排版</li>
-            <li className={feat}><Check className={check} />加入文字、貼圖、素材</li>
-            <li className={feat}><Check className={check} />自由調整版面</li>
+            <li className={feat}><Check className={check} />拖曳排版、加文字素材</li>
+            <li className={`${feat} font-medium text-violet-700`}><Check className={check} />每個元素都能加動畫</li>
+            <li className={feat}><Check className={check} />下載圖片或 MP4</li>
           </ul>
-          <span className={`${cta} border border-[#ebeff5] bg-white text-gray-600 group-hover:border-violet-300 group-hover:text-violet-600`}>開啟編輯器 <ArrowRight className="h-4 w-4" /></span>
+          <span className={`${cta} whitespace-nowrap border border-[#ebeff5] bg-white text-gray-600 group-hover:border-violet-300 group-hover:text-violet-600`}>開啟編輯器 <ArrowRight className="h-4 w-4" /></span>
         </div>
         <div className={rightCol}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/creation/freelayout.png" alt="自由設計示意" loading="lazy" className={img} />
         </div>
-      </button>
+        {/* 右上角「看介紹」：點它只開影片，不觸發整張卡 */}
+        <button type="button" onClick={(e) => { e.stopPropagation(); setIntro(true); }}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") e.stopPropagation(); /* 只擋會觸發卡片的鍵，Esc 要讓影片視窗收到 */ }}
+          title="看 38 秒介紹影片：一張圖，設計到動畫"
+          className="absolute right-3 top-3 z-10 inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-[#fbd5df] bg-white/90 py-1 pl-1 pr-2.5 text-xs font-medium text-gray-700 shadow-sm backdrop-blur hover:border-violet-300 hover:text-violet-700">
+          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-violet-600 text-white"><Play className="ml-px h-2.5 w-2.5" fill="currentColor" /></span>
+          看介紹（38 秒）
+        </button>
+      </div>
+      <IntroVideoModal open={intro} onClose={() => setIntro(false)} onTry={onFreeLayout} tryLabel="開啟編輯器" />
     </div>
   );
 }

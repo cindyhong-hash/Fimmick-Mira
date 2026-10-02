@@ -91,7 +91,6 @@ export function AnimationTab(props: {
   const multi = props.pageCount > 1;
   // 圖層在編輯器的 ref 裡：每次這個面板重新 render 時讀一次（編輯器改圖層後會 refresh）
   const duration = props.getDuration();
-  const secRef = useRef<HTMLInputElement>(null);
   const preset = !props.autoDuration && [3, 6, 10].includes(duration) ? duration : null;
   const customOn = !props.autoDuration && preset === null;
 
@@ -104,24 +103,19 @@ export function AnimationTab(props: {
 
       {/* ── 頁面時長 ── */}
       <SectionHead icon={Clock} title={multi ? "這一頁時長" : "頁面時長"} />
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
+      {/* 一排搞定：自動／常用秒數／直接打秒數（打了就是自訂） */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr) 78px", gap: 6 }}>
+        <button onClick={() => props.onDuration(null)} title="照動畫自動決定長度" style={{ ...pill, ...(props.autoDuration ? on : {}) }}>自動</button>
         {[3, 6, 10].map((d) => (
           <button key={d} onClick={() => props.onDuration(d)} style={{ ...pill, ...(preset === d ? on : {}) }}>{d} 秒</button>
         ))}
-        <button onClick={() => { if (props.autoDuration) props.onDuration(duration); secRef.current?.focus(); secRef.current?.select(); }}
-          title="自己填秒數" style={{ ...pill, ...(customOn ? on : {}) }}>自訂</button>
+        <label title="自己填秒數" style={{ ...pill, ...(customOn ? on : {}), display: "flex", alignItems: "center", gap: 2, padding: "0 8px", cursor: "text" }}>
+          <SecondsInput value={Math.round(duration * 10) / 10} label={multi ? "這一頁播幾秒" : "影片幾秒"}
+            onCommit={(v) => props.onDuration(Math.min(30, Math.max(0.5, v)))} />
+          <span style={{ fontSize: 12, flex: "0 0 auto" }}>秒</span>
+        </label>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 12, color: "#6b7280" }}>
-        自己設定
-        <input ref={secRef} type="number" min={0.5} max={30} step={0.5} value={Math.round(duration * 10) / 10} aria-label={multi ? "這一頁播幾秒" : "影片幾秒"}
-          onChange={(e) => { const v = Number(e.target.value); if (Number.isFinite(v) && v > 0) props.onDuration(Math.min(30, Math.max(0.5, v))); }}
-          style={{ width: 80, height: 32, border: `1.5px solid ${customOn ? "#c4b5fd" : BORDER}`, borderRadius: 8, padding: "0 10px", fontSize: 13, color: "#111827" }} />
-        秒
-        <button onClick={() => props.onDuration(null)} disabled={props.autoDuration} title="照動畫自動決定長度"
-          style={{ marginLeft: "auto", border: "none", background: "transparent", padding: 0, fontSize: 11, cursor: props.autoDuration ? "default" : "pointer", color: props.autoDuration ? "#7c3aed" : "#9ca3af", fontWeight: props.autoDuration ? 700 : 500 }}>
-          {props.autoDuration ? "✓ 自動" : "改回自動"}
-        </button>
-      </div>
+      {props.autoDuration && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 6 }}>自動：照動畫算出來是 {Math.round(duration * 10) / 10} 秒；點秒數或直接改右邊的數字就能固定。</div>}
       <div style={{ fontSize: 11, color: "#9ca3af", lineHeight: 1.6, marginTop: 8 }}>播放和時間軸在畫布下方：按「時間軸 ↑」可以調每個物件什麼時候出現、消失；動畫的開始、速度在右側面板調。</div>
 
       {divider}
@@ -479,7 +473,14 @@ export function SequencePreview(props: {
 const clock = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, "0")}`;
 
 /** 時間軸一列要的資料（從編輯器的圖層快照來，不另外存一份）。 */
-export type LifeRow = { id: string; name: string; sub: string; isText: boolean; thumb: string | null; start: number; end: number; hasAnim: boolean; anims: LayerAnim[] };
+/** timed＝有動畫或改過出現／消失時間（「有動畫的」篩選只列這些）。 */
+export type LifeRow = { id: string; name: string; sub: string; isText: boolean; thumb: string | null; start: number; end: number; hasAnim: boolean; timed: boolean; anims: LayerAnim[] };
+
+type RowFilter = "timed" | "all";
+const FILTER_KEY = "mira.timeline.rowFilter";
+const readFilter = (): RowFilter => {
+  try { return typeof window !== "undefined" && window.localStorage.getItem(FILTER_KEY) === "all" ? "all" : "timed"; } catch { return "timed"; }
+};
 
 /** 動畫片段分車道：時間不重疊的放同一條（像參考圖淡入、漂浮排在同一排），重疊的往下排。 */
 export function animLanes(anims: LayerAnim[], duration: number, minLen: (a: LayerAnim) => number = () => duration * 0.08): { anim: LayerAnim; lane: number }[] {
@@ -491,6 +492,28 @@ export function animLanes(anims: LayerAnim[], duration: number, minLen: (a: Laye
     return { anim, lane };
   });
 }
+/**
+ * 秒數輸入：打字時先存草稿，按 Enter 或離開才套用。
+ * 每打一個字就套用的話，「6」改成「4.5」會先變成「64.5」再被夾成 30 秒。
+ */
+function SecondsInput(props: { value: number; label: string; onCommit: (v: number) => void}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = () => {
+    if (draft === null) return;
+    const v = Number(draft.trim());
+    if (Number.isFinite(v) && v > 0) props.onCommit(v);
+    setDraft(null);
+  };
+  return (
+    <input type="text" inputMode="decimal" aria-label={props.label} value={draft ?? String(props.value)}
+      onFocus={(e) => { setDraft(String(props.value)); e.target.select(); }}
+      onChange={(e) => setDraft(e.target.value.replace(/[^\d.]/g, ""))}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") { setDraft(null); (e.target as HTMLInputElement).blur(); } }}
+      style={{ width: "100%", minWidth: 0, border: "none", outline: "none", background: "transparent", fontSize: 13, fontWeight: 700, color: "inherit", textAlign: "right", padding: 0 }} />
+  );
+}
+
 export type DockMode = "closed" | "selected" | "all";
 
 /**
@@ -507,6 +530,8 @@ export function AnimDock(props: {
   playing: boolean; getTime: () => number | null; onPlay: () => void; onPause: () => void; onSeek: (t: number) => void;
   /** 這一頁的物件（由上到下）；編輯器每次重畫面板時才讀，不在這裡另存一份。 */
   getRows: () => LifeRow[]; selectedId: string | null; onSelect: (id: string) => void;
+  /** 同時選了好幾個：時間軸把每一個都列出來、都標紫色。 */
+  selectedIds: string[];
   onLifespan: (id: string, start: number, end: number) => void; onCommit: () => void;
   /** 拖時間軸上的動畫片段：改開始時間或一輪多久（跟右側動畫設定是同一份資料）。 */
   onAnim: (layerId: string, animId: string, patch: Partial<LayerAnim>) => void;
@@ -515,6 +540,9 @@ export function AnimDock(props: {
   focusAnimId: string | null;
 }) {
   const [zoom, setZoom] = useState(1);   // 1＝整頁剛好放滿
+  // 「全部」模式要列哪些：預設只列有動畫的，記在這台瀏覽器
+  const [rowFilter, setRowFilterState] = useState<RowFilter>(readFilter);
+  const setRowFilter = (f: RowFilter) => { setRowFilterState(f); try { window.localStorage.setItem(FILTER_KEY, f); } catch { /* 私密模式存不了就算了 */ } };
   const [time, setTime] = useState(0);
   const drag = useRef<{ mode: "move" | "start" | "end" | "seek" | "animMove" | "animLen"; id: string; animId?: string; x0: number; s0: number; e0: number; w: number } | null>(null);
   const { playing, getTime, mode } = props;
@@ -582,20 +610,30 @@ export function AnimDock(props: {
     );
   }
 
-  const NAME_W = mode === "selected" ? 168 : 150;
   const allRows = props.getRows();
-  const rows = mode === "all" ? allRows : allRows.filter((r) => r.id === props.selectedId);
-  const ticks = Array.from({ length: Math.floor(duration) + 1 }, (_, i) => i);
-  const BAR_H = mode === "selected" ? 20 : 14, CHIP_H = 22, LANE_H = 28;
+  const selSet = new Set(props.selectedIds.length ? props.selectedIds : props.selectedId ? [props.selectedId] : []);
+  const timedCount = allRows.filter((r) => r.timed).length;
+  // 整頁都沒動畫時「有動畫的」會是空的：直接列全部
+  const showAll = rowFilter === "all" || timedCount === 0;
+  // 選到的物件一定列出來（沒動畫的排最上面），不然在畫布點了它、時間軸卻找不到
+  const rows = mode === "selected" ? allRows.filter((r) => selSet.has(r.id))
+    : showAll ? allRows : [...allRows.filter((r) => selSet.has(r.id) && !r.timed), ...allRows.filter((r) => r.timed)];
+  // 只選一個：大縮圖＋類型小字；選好幾個就排成精簡的一列一列
+  const big = mode === "selected" && rows.length === 1;
+  const NAME_W = big ? 168 : 150;
+  // 刻度間隔跟著總長和縮放變：30 秒的頁不會擠成一團
+  const tickStep = [1, 2, 5, 10].find((st) => (duration / st) / zoom <= 8) ?? 10;
+  const ticks = Array.from({ length: Math.floor(duration / tickStep) + 1 }, (_, i) => i * tickStep);
+  const BAR_H = big ? 20 : 14, CHIP_H = 22, LANE_H = 28;
   // 片段至少要寬到看得到名字；換成秒數拿來分車道（軌道寬抓大約值就好）
   const chipPx = (a: LayerAnim) => ANIM_LABELS[a.kind].length * 12 + 64;
   const trackPx = 640 * zoom;
   const lanesOf = (r: LifeRow) => animLanes(r.anims, duration, (a) => (chipPx(a) / trackPx) * duration);
   const laneCount = (r: LifeRow) => (r.anims.length ? Math.max(...lanesOf(r).map((x) => x.lane)) + 1 : 0);
-  const rowH = (r: LifeRow) => (mode === "selected" ? 34 : 26) + laneCount(r) * LANE_H;
+  const rowH = (r: LifeRow) => (big ? 34 : 26) + laneCount(r) * LANE_H;
   const bar = (r: LifeRow) => {
-    const sel = r.id === props.selectedId;
-    const barTop = mode === "selected" ? 8 : 6;
+    const sel = selSet.has(r.id);
+    const barTop = big ? 8 : 6;
     const edge: React.CSSProperties = { position: "absolute", top: 0, bottom: 0, width: 12, cursor: "ew-resize", touchAction: "none", display: "flex", alignItems: "center", justifyContent: "center" };
     const grip = <div style={{ width: 3, height: BAR_H - 8, borderRadius: 2, background: sel ? "rgba(255,255,255,.95)" : "#c4b5fd" }} />;
     return (
@@ -665,7 +703,20 @@ export function AnimDock(props: {
         <div style={{ position: "relative", width: `${zoom * 100}%`, minWidth: "100%" }}>
           {/* 秒數刻度：點一下或拖曳＝跳到那個時間 */}
           <div style={{ display: "flex", alignItems: "flex-end" }}>
-            <div style={{ width: NAME_W, flex: "0 0 auto", fontSize: 12, fontWeight: 800, color: PURPLE, paddingBottom: 4 }}>{mode === "selected" ? "目前選取" : "全部物件"}</div>
+            <div style={{ width: NAME_W, flex: "0 0 auto", fontSize: 12, fontWeight: 800, color: PURPLE, paddingBottom: 4 }}>
+              {mode === "selected" ? `目前選取${rows.length > 1 ? `（${rows.length}）` : ""}` : (
+                <div role="group" aria-label="要列哪些物件" style={{ display: "inline-flex", padding: 2, borderRadius: 8, background: "#f4f2fa", gap: 2 }}>
+                  {([["timed", `有動畫的 ${timedCount}`], ["all", `全部 ${allRows.length}`]] as const).map(([f, label]) => {
+                    const onF = (f === "all") === showAll, off = f === "timed" && timedCount === 0;
+                    return (
+                      <button key={f} onClick={() => setRowFilter(f)} disabled={off} aria-pressed={onF} title={off ? "這一頁還沒有動畫" : undefined}
+                        style={{ height: 22, padding: "0 8px", border: "none", borderRadius: 6, fontSize: 11, fontWeight: 700, whiteSpace: "nowrap", cursor: off ? "default" : "pointer",
+                          background: onF ? "#fff" : "transparent", color: off ? "#c4c4cc" : onF ? "#6d28d9" : "#6b7280", boxShadow: onF ? "0 1px 2px rgba(17,24,39,.08)" : "none" }}>{label}</button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
             <div data-track onPointerDown={scrubFromTrack} title="點一下或拖曳，跳到那個時間"
               style={{ position: "relative", flex: 1, height: 26, cursor: "pointer", touchAction: "none" }}>
               {ticks.map((s) => (
@@ -675,22 +726,25 @@ export function AnimDock(props: {
               ))}
             </div>
           </div>
+          {mode === "all" && timedCount === 0 && allRows.length > 0 && (
+            <div style={{ fontSize: 11, color: "#9ca3af", padding: "6px 0 0", paddingLeft: NAME_W }}>這一頁還沒有動畫，在畫布選物件後從左側套用效果。</div>
+          )}
           {rows.length === 0 && (
             <div style={{ fontSize: 12, color: "#9ca3af", padding: "12px 0 6px", paddingLeft: NAME_W }}>
               {mode === "all" ? "這一頁沒有物件。" : "在畫布或右側點一個物件，就能調它什麼時候出現、消失，和動畫的時間。"}
             </div>
           )}
-          <div style={{ maxHeight: mode === "all" ? 196 : undefined, overflowY: mode === "all" ? "auto" : undefined, overflowX: "hidden" }}>
+          <div style={{ maxHeight: big ? undefined : 196, overflowY: big ? undefined : "auto", overflowX: "hidden" }}>
             {rows.map((r) => {
-              const sel = r.id === props.selectedId;
+              const sel = selSet.has(r.id), primary = r.id === props.selectedId;
               return (
-                <div key={r.id} style={{ display: "flex", alignItems: "flex-start", paddingTop: mode === "selected" ? 8 : 4, borderRadius: 10 }}>
+                <div key={r.id} style={{ display: "flex", alignItems: "flex-start", paddingTop: big ? 8 : 4, borderRadius: 10 }}>
                   <button onClick={() => props.onSelect(r.id)} title={r.name}
-                    style={{ width: NAME_W, flex: "0 0 auto", height: mode === "selected" ? 44 : 26, display: "flex", alignItems: "center", gap: 8, border: "none", background: "transparent", padding: "0 10px 0 0", cursor: "pointer", textAlign: "left" }}>
-                    {mode === "selected" ? thumb(r, 42) : thumb(r, 24)}
+                    style={{ width: NAME_W, flex: "0 0 auto", height: big ? 44 : 26, display: "flex", alignItems: "center", gap: 8, border: "none", background: "transparent", padding: "0 10px 0 0", cursor: "pointer", textAlign: "left" }}>
+                    {big ? thumb(r, 42) : thumb(r, 24)}
                     <span style={{ minWidth: 0, display: "flex", flexDirection: "column" }}>
-                      <span style={{ fontSize: mode === "selected" ? 13 : 12, fontWeight: sel ? 800 : 600, color: sel ? "#1f2937" : "#4b5563", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</span>
-                      {mode === "selected" && <span style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>{r.sub}</span>}
+                      <span style={{ fontSize: big ? 13 : 12, fontWeight: primary ? 800 : sel ? 700 : 600, color: sel ? (primary ? "#1f2937" : "#6d28d9") : "#4b5563", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</span>
+                      {big && <span style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>{r.sub}</span>}
                     </span>
                   </button>
                   {bar(r)}

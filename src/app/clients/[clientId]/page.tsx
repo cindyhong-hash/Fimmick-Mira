@@ -5,6 +5,7 @@ import { setLastClientId } from "@/lib/lastClient";
 import { ACTIVITY_REF_KEY, ACTIVITY_BASE_KEY, ACTIVITY_IMAGE_PROMPT_KEY, ACTIVITY_HANDOFF_KEY, ACTIVITY_UPDATE_FLAGS_KEY } from "@/components/activities/RolePickerModal";
 import { detectUpdateFlags } from "@/lib/updateFlags";
 import { HomeHero } from "@/components/home/HomeHero";
+import { IntroAnnouncement, OPEN_FREE_WIZARD_KEY } from "@/components/intro/MagicLayersIntro";
 import { QuickStartCards } from "@/components/home/QuickStartCards";
 import { RecentWorks } from "@/components/home/RecentWorks";
 import { BrandMemoryPanel } from "@/components/home/BrandMemoryPanel";
@@ -206,6 +207,11 @@ export default function DashboardPage({ params }: { params: Promise<{ clientId: 
     <div className="flex flex-col gap-6 lg:flex-row">
       <div className="min-w-0 flex-1 space-y-8">
         <HomeHero submitting={quickCreating} onQuickCreate={handleQuickCreate} onOpenFullSettings={openFullSettings} />
+        {/* 新功能公告：每個人第一次進首頁跳一次介紹影片，「立即試試」直接開自由設計 */}
+        <IntroAnnouncement clientId={client.id} onTry={() => {
+          try { sessionStorage.setItem(OPEN_FREE_WIZARD_KEY, "1"); } catch { /* 存不了就只是換頁，不自動開精靈 */ }
+          router.push(`/clients/${client.id}/activities`);
+        }} />
         <QuickStartCards clientId={client.id} />
         <RecentWorks clientId={client.id} activities={client.activities ?? []} />
       </div>

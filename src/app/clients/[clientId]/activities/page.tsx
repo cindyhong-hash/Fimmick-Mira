@@ -1,10 +1,11 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Trash2, Search, CheckCircle2, Circle, X, Image as ImageIcon } from "lucide-react";
+import { Trash2, Search, CheckCircle2, Circle, X, Film, Image as ImageIcon } from "lucide-react";
 import { AdCreationHeader } from "@/components/adcreation/AdCreationHeader";
 import { BrandMemoryBar } from "@/components/adcreation/BrandMemoryBar";
 import { CreationCards } from "@/components/adcreation/CreationCards";
+import { OPEN_FREE_WIZARD_KEY } from "@/components/intro/MagicLayersIntro";
 import { FreeLayoutWizard } from "@/components/adcreation/FreeLayoutWizard";
 import { MultiLayoutPicker } from "@/components/activities/MultiLayoutPicker";
 import { LibraryImagePickerModal } from "@/components/activities/LibraryImagePickerModal";
@@ -12,7 +13,7 @@ import { ACTIVITY_REF_KEY, ACTIVITY_BASE_KEY, ACTIVITY_IMAGE_PROMPT_KEY } from "
 import { getMultiLayout } from "@/types/multiLayout";
 import { setLastClientTab } from "@/lib/lastClientTab";
 
-type Activity = { id: string; theme: string; focusPoint: string; status: string; createdAt: string; imageRatio?: string; customW?: number; customH?: number; layoutId?: string; generatedLayouts?: { imageUrl: string; isSelected?: boolean }[] };
+type Activity = { id: string; theme: string; focusPoint: string; status: string; createdAt: string; imageRatio?: string; customW?: number; customH?: number; layoutId?: string; hasAnimation?: boolean; generatedLayouts?: { imageUrl: string; isSelected?: boolean }[] };
 type Client = {
   id: string; name: string; activities: Activity[];
   // 品牌記憶卡用（/api/clients/[id] 已一併返）
@@ -97,9 +98,18 @@ function ActivityRow({
             {new Date(act.createdAt).toLocaleDateString("zh-TW")}
           </span>
           {act.layoutId === "magic-layers" ? (
-            <span className="text-[11px] font-medium text-gray-600 bg-gray-100 border border-gray-200 rounded px-1.5 py-0.5">
-              自由排版
-            </span>
+            <>
+              <span className="text-[11px] font-medium text-gray-600 bg-gray-100 border border-gray-200 rounded px-1.5 py-0.5">
+                自由排版
+              </span>
+              {/* 有做圖層動畫的設計：可以下載成 MP4 */}
+              {act.hasAnimation && (
+                <span title="這份設計有動畫，可以下載成 MP4 影片"
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">
+                  <Film className="h-3 w-3" />動畫
+                </span>
+              )}
+            </>
           ) : act.layoutId && act.layoutId !== "single" ? (
             <span className="text-[11px] font-medium text-gray-600 bg-gray-100 border border-gray-200 rounded px-1.5 py-0.5">
               多圖・{getMultiLayout(act.layoutId)?.label ?? act.layoutId}
@@ -152,6 +162,13 @@ export default function ClientFolderPage({ params }: { params: Promise<{ clientI
   const [showTypeModal, setShowTypeModal] = useState(false);
   const [showBasePicker, setShowBasePicker] = useState(false); // 套用素材底圖：從素材庫揀底圖
   const [showFreeWizard, setShowFreeWizard] = useState(false); // 自由排版建立精靈
+  // 從首頁介紹影片按「立即試試」過來：直接打開自由設計精靈（旗標用一次就清掉）
+  useEffect(() => {
+    let go = false;
+    try { go = sessionStorage.getItem(OPEN_FREE_WIZARD_KEY) === "1"; sessionStorage.removeItem(OPEN_FREE_WIZARD_KEY); } catch { /* 讀不到就不開 */ }
+    // 旗標讀一次就清掉；開發模式會把這段跑兩次（第一次的清理會取消計時），所以這裡不取消計時
+    if (go) window.setTimeout(() => setShowFreeWizard(true), 0);
+  }, []);
 
   // 全新生成 → 直接選版型：單張→單圖表單；其餘→多圖表單(帶 layout)
   const handleLayout = (id: string) => {

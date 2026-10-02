@@ -128,6 +128,9 @@ function CurrentLayerPicker(props: { layers: EL[]; selected: EL | null; extra: n
     </div>
   );
 }
+/** 上方「畫布比例」選單：[名稱, 寬比, 高比]。 */
+const CANVAS_RATIOS: [string, number, number][] = [["1:1", 1, 1], ["4:5", 4, 5], ["5:4", 5, 4], ["9:16", 9, 16], ["16:9", 16, 9]];
+const FONT_WEIGHTS: [number, string][] = [[300, "Light 細"], [400, "Regular"], [500, "Medium"], [600, "Semibold"], [700, "Bold"], [800, "Extra Bold"], [900, "Black 特粗"]];
 const TYPE_LABEL: Record<string, string> = { background: "背景", product: "產品", person: "人物", object: "物件", decoration: "裝飾", drawing: "繪製", independent_text: "文字" };
 
 /** One serialized layer in a saved 排版 (stored in LibraryImage.paramsJson). */
@@ -175,6 +178,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const [tplPreview, setTplPreview] = useState<number | null>(null);
   const [matPreview, setMatPreview] = useState<number | null>(null);   // 素材放大預覽
   const [tplSaving, setTplSaving] = useState(false);
+  // 套用範本要下載整組圖片，可能要好幾秒：期間蓋一層「套用中」，也擋掉重複點
+  const [tplApplying, setTplApplying] = useState(false);
+  const tplApplyingRef = useRef(false);
   const [layersOpen, setLayersOpen] = useState(true);         // 右下「圖層」可收合
   // 可拖曳調整的高度，記在這台瀏覽器（圖層區含標題列；範本庫、素材庫是縮圖格的高度）
   const [layersH, startLayersResize] = useStoredHeight(LAYERS_H_KEY, 340, 150);
@@ -528,6 +534,13 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       const grp = editId ? null : unionBox(movableOf(layersRef.current, selectedIds));
       for (const id of selectedIds) { if (id === editId) continue; const s = layersRef.current.find((l) => l.id === id); if (s?.visible) drawSelection(ctx, s, !grp && id === selectedId); }
       if (grp) { const v = view.current; drawGroupFrame(ctx, grp.x0 * v.zoom + v.panX, grp.y0 * v.zoom + v.panY, grp.x1 * v.zoom + v.panX, grp.y1 * v.zoom + v.panY); }
+    }
+    // 播放或停在某一格時：把手收起來，但留一圈淡淡的虛線，看得出右側正在調哪個物件
+    if (toolRef.current === "select" && animTimeRef.current !== null) {
+      for (const id of selectedIds) {
+        const s = layersRef.current.find((l) => l.id === id);
+        if (s?.visible) drawGhostFrame(ctx, corners(s).map((p) => d2s(p.x, p.y)));
+      }
     }
     // 看不見的 textarea 跟著文字框走：輸入法的選字視窗才會出現在字旁邊
     if (editEl && ta) placeTextArea(ta, editEl, view.current);
@@ -1093,10 +1106,10 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   };
   const ungroupSelected = () => { const groups = new Set(layersRef.current.filter((l) => selectedIdsRef.current.includes(l.id)).map((l) => l.groupId).filter(Boolean)); if (!groups.size) return; layersRef.current.forEach((l) => { if (l.groupId && groups.has(l.groupId)) l.groupId = null; }); markDirty(); refresh(); render(); };
   const commitLayerRename = () => { const l = layersRef.current.find((x) => x.id === renamingLayerId); if (l && renamingLayerValue.trim()) { l.name = renamingLayerValue.trim(); markDirty(); refresh(); } setRenamingLayerId(null); };
-  const canvasRatio = (() => { const r = doc.w / doc.h; return Math.abs(r - 1) < .01 ? "1:1" : Math.abs(r - .8) < .01 ? "4:5" : Math.abs(r - 9 / 16) < .01 ? "9:16" : Math.abs(r - 16 / 9) < .01 ? "16:9" : "custom"; })();
+  const canvasRatio = CANVAS_RATIOS.find(([, rw, rh]) => Math.abs(doc.w / doc.h - rw / rh) < .01)?.[0] ?? "custom";
   const resizeCanvasToRatio = (ratio: string) => {
-    const map: Record<string, [number, number]> = { "1:1": [1, 1], "4:5": [4, 5], "9:16": [9, 16], "16:9": [16, 9] };
-    const pair = map[ratio]; if (!pair) return; const [rw, rh] = pair, long = Math.max(doc.w, doc.h);
+    const hit = CANVAS_RATIOS.find(([k]) => k === ratio); if (!hit) return;
+    const pair = [hit[1], hit[2]]; const [rw, rh] = pair, long = Math.max(doc.w, doc.h);
     const nextW = rw >= rh ? long : Math.round(long * rw / rh), nextH = rh >= rw ? long : Math.round(long * rh / rw);
     const dx = (nextW - doc.w) / 2, dy = (nextH - doc.h) / 2;
     layersRef.current.forEach((l) => { l.cx += dx; l.cy += dy; }); setDoc({ w: nextW, h: nextH }); markDirty(); refresh();
@@ -2024,6 +2037,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     return [...layersRef.current].reverse().filter((l) => l.type !== "background").map((l) => ({
       id: l.id, name: layerLabel(l), sub: `${TYPE_LABEL[l.type] ?? "物件"}圖層`, isText: l.isText, thumb: l.thumb,
       ...lifespanOf(l, dur), hasAnim: !!l.anims?.length, anims: l.anims ?? [],
+      timed: !!l.anims?.length || l.startTime !== undefined || l.endTime !== undefined,
     }));
   };
   const [dockMode, setDockMode] = useState<DockMode>("closed");
@@ -2125,6 +2139,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
 
   /** 套用範本：換掉整個畫布內容（可以用復原還原）。 */
   const applyTemplate = useCallback(async (id: string) => {
+    if (tplApplyingRef.current) return;
+    tplApplyingRef.current = true; setTplApplying(true);
     try {
       const r = await fetch(`/api/magic-layers/templates/${id}`);
       const d = await r.json();
@@ -2138,6 +2154,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       setDoc({ w: tpl.docW, h: tpl.docH });
       applySelection([]); markDirty(); refresh(); render();
     } catch (e) { alert("套用範本失敗：" + (e instanceof Error ? e.message : String(e))); }
+    finally { tplApplyingRef.current = false; setTplApplying(false); }
   }, [elFromSavedLayer, markDirty, refresh, render]);
 
   /** 把目前畫布存成共用範本，連同一張縮圖。 */
@@ -2350,6 +2367,11 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
 
   /* ---------- panel (top layer first) ---------- */
   const panel = [...layersRef.current].reverse();
+  // 下方時間軸：開著左側「動畫」、這頁有動畫或存在時間、或使用者打開了，才出現
+  const dockShown = leftTab === "animate" || dockMode !== "closed" || panel.some((l) => l.anims?.length || l.startTime !== undefined || l.endTime !== undefined);
+  // 時間軸出現／展開、左側面板變寬時畫布區變小：重新縮放，畫布才不會被時間軸蓋住、被右欄切掉
+  const stageLayout = `${leftTab === "animate"}|${dockShown ? dockMode : "none"}`;
+  useEffect(() => { const id = requestAnimationFrame(() => fitRef.current()); return () => cancelAnimationFrame(id); }, [stageLayout]);
 
   return (
     <div style={S.root}>
@@ -2383,7 +2405,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         <button style={S.tbtn} onClick={() => setZoom(view.current.zoom * 1.2)}>＋</button>
         <select aria-label="畫布比例" title="改尺寸畫布" value={canvasRatio} onChange={(e) => resizeCanvasToRatio(e.target.value)} style={{ ...S.tbtn, appearance: "auto", minWidth: 70, paddingInline: 9 }}>
           {canvasRatio === "custom" && <option value="custom" disabled>自訂比例</option>}
-          <option value="1:1">1:1</option><option value="4:5">4:5</option><option value="9:16">9:16</option><option value="16:9">16:9</option>
+          {CANVAS_RATIOS.map(([k]) => <option key={k} value={k}>{k}</option>)}
         </select>
         <span style={S.divider} />
         {selectedIds.length >= 2 && !selectedIds.some((id) => !!layersRef.current.find((l) => l.id === id)?.groupId) && <button style={S.tbtn} onClick={groupSelected} title="將選取的物件設為一組（⌘G）">群組</button>}
@@ -2626,6 +2648,15 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
             pushImageLayer(url, "背景圖", "object", { cx: d.x, cy: d.y });
           }}>
           <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, touchAction: "none" }} />
+          {tplApplying && (
+            <div style={{ position: "absolute", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(248,249,252,.72)", backdropFilter: "blur(2px)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 18px", borderRadius: 12, background: "#fff", border: "1px solid #ebeff5", boxShadow: "0 6px 20px rgba(17,24,39,.08)", fontSize: 13, fontWeight: 700, color: "#374151" }}>
+                <span style={{ width: 16, height: 16, borderRadius: "50%", border: "2px solid #ddd6fe", borderTopColor: "#7c3aed", animation: "tpl-spin .8s linear infinite" }} />
+                套用範本中，正在載入圖片…
+              </div>
+              <style>{"@keyframes tpl-spin{to{transform:rotate(360deg)}}"}</style>
+            </div>
+          )}
         {/* 選起某幾個字之後才出現的分段樣式工具列。
             按鈕帶 data-run-tool，textarea 的 onBlur 會據此判斷不要收起編輯框，
             否則點按鈕的當下選取範圍就沒了。 */}
@@ -2719,10 +2750,10 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         </div>
         {/* 漸進揭露：這頁有動畫才出現薄薄一條播放列，按「動畫時間軸 ↑」才展開完整時間軸 */}
         {/* 漸進揭露：這頁有動畫、有設存在時間、或使用者打開了，才出現時間軸 */}
-        {(dockMode !== "closed" || panel.some((l) => l.anims?.length || l.startTime !== undefined || l.endTime !== undefined)) && (
+        {dockShown && (
           <AnimDock mode={dockMode} onMode={setDockMode} getDuration={currentDuration}
             playing={playing} getTime={getAnimTime} onPlay={playAnim} onPause={pauseAnim} onSeek={seekAnim}
-            getRows={lifeRows} selectedId={selectedId} onSelect={(id) => { selectOnly(id); render(); }}
+            getRows={lifeRows} selectedId={selectedId} selectedIds={selectedIds} onSelect={(id) => { selectOnly(id); render(); }}
             onLifespan={(id, start, end) => { setLifespan(layersRef.current, id, start, end, currentDuration()); render(); refresh(); }}
             onAnim={(layerId, animId, patch) => {
               const l = layersRef.current.find((x) => x.id === layerId); if (!l) return;
@@ -2860,7 +2891,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                         <input type="number" value={Math.round(selEl.fontSize)} onChange={(e) => updateText({ fontSize: Math.max(8, Number(e.target.value) || 8) })} style={S.rinput} /></div>
                       <div style={{ flex: 1 }}><label style={S.rlabel}>字重</label>
                         <select value={selEl.fontWeight} onChange={(e) => updateText({ fontWeight: Number(e.target.value) })} style={S.rinput}>
-                          <option value={400}>Regular</option><option value={600}>Medium</option><option value={700}>Bold</option><option value={800}>Black</option>
+                          {/* 範本常用 300 細體、900 特粗：選單沒有的字重會被誤顯示成第一個選項 */}
+                          {FONT_WEIGHTS.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+                          {!FONT_WEIGHTS.some(([v]) => v === selEl.fontWeight) && <option value={selEl.fontWeight}>{selEl.fontWeight}</option>}
                         </select></div>
                     </div>
                     {/* 字距／行高：drawTextEl 早就會讀 textLayout 來排版，但一直沒有 UI，
@@ -3577,6 +3610,13 @@ function shiftAnims(layers: EL[], by: number) {
   for (const l of layers) l.anims = l.anims?.map((a) => ({ ...a, start: Math.max(0, Math.round((a.start + by) * 100) / 100) }));
 }
 /** 多選的總外框：紫色虛線＋四角方形把手（螢幕座標）。 */
+/** 播放中的選取提示：淡紫虛線、沒有把手（不能拖，只是標出是哪一個）。 */
+function drawGhostFrame(ctx: CanvasRenderingContext2D, pts: { x: number; y: number }[]) {
+  ctx.save();
+  ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.closePath();
+  ctx.setLineDash([6, 4]); ctx.lineWidth = 2; ctx.strokeStyle = "rgba(124,58,237,.7)"; ctx.stroke();
+  ctx.restore();
+}
 function drawGroupFrame(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number) {
   ctx.save(); ctx.lineWidth = 1.5; ctx.strokeStyle = "#7c3aed"; ctx.setLineDash([6, 4]);
   ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);

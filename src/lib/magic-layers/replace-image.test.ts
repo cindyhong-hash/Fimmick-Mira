@@ -52,3 +52,17 @@ test("edit prompt puts the detailed instruction first and keeps the user's words
   assert.match(p, /^Edit this image\. Make the lipstick a soft nude/);
   assert.match(p, /"妝容再淡一點"/);
 });
+
+test("有參考圖：改這張要講清楚第 1 張是原圖、第 2 張是參考；全新生成照參考圖重畫", () => {
+  const e = buildReplacePrompt("edit", "髮型改成參考圖這樣", false, undefined, true);
+  assert.match(e, /Edit the FIRST image/);
+  assert.match(e, /SECOND image only as a visual reference/);
+  assert.match(e, /髮型改成參考圖這樣/);
+  assert.match(e, /Do not copy any text or logos/);
+  // 沒打字也可以：照參考圖改最相關的地方
+  assert.match(buildReplacePrompt("edit", "", false, undefined, true), /look like the second image/);
+  const n = buildReplacePrompt("new", "", true, undefined, true);
+  assert.match(n, /Create a NEW image/);
+  assert.match(n, /not a copy of the reference/);
+  assert.match(n, /plain seamless white background/);
+});

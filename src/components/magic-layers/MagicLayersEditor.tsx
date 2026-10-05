@@ -37,6 +37,7 @@ import type { LayerData, FragmentationReport } from "@/lib/magic-layers/types.ts
 import { extractLayer } from "@/lib/magic-layers/extract-browser.ts";
 import { alphaHit } from "@/lib/magic-layers/alpha-hit-test.ts";
 import { useUnsavedGuard } from "@/components/common/UnsavedGuard";
+import { planPsdImport, PSD_MAX_BYTES, type ImportImage, type ImportNote, type PsdLike } from "@/lib/magic-layers/psd-import.ts";
 
 /** Vector layer (形狀 / 圖標 / 線條) — drawn on canvas, recolourable (not baked to bitmap). */
 /** 文字特效（設計感）— 全部在 canvas 即時渲染，文字保持可編輯／可拖曳／可存。
@@ -172,6 +173,13 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   const [aiMsg, setAiMsg] = useState<string | null>(null);
   const bgRefInput = useRef<HTMLInputElement>(null);
   const rebuildInput = useRef<HTMLInputElement>(null);
+  const psdInput = useRef<HTMLInputElement>(null);
+  // 生成式填色的參考圖（選填）
+  const [genFillRef, setGenFillRef] = useState<string | null>(null);
+  const [genFillPicking, setGenFillPicking] = useState(false);
+  // 匯入 PSD：進行中的說明（蓋在畫布上）、做完的報告（哪些圖層略過、哪些效果被簡化）
+  const [psdImporting, setPsdImporting] = useState<string | null>(null);
+  const [psdReport, setPsdReport] = useState<{ pages: number; layers: number; skipped: ImportNote[]; approximated: ImportNote[] } | null>(null);
   // 範本庫（共用，全品牌看得到；目前只做 1:1）
   const [templates, setTemplates] = useState<{ id: string; name: string; previewUrl: string | null; builtin?: boolean; docW?: number; docH?: number }[]>([]);
   // 範本放大預覽（第幾個；null＝沒開）。點縮圖先預覽，確定了才套用——套用會換掉整個畫布
@@ -1840,16 +1848,19 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
       const scene = layersRef.current.filter((l) => l.visible && l.type === "background" && l.id !== PREVIEW_ID);
       genFillTarget.current = { box: { ...marquee }, afterId: scene.length ? scene[scene.length - 1].id : null };
       const source = scene.length ? flattenLayersToDataUrl((l) => l.type === "background" && l.id !== PREVIEW_ID) : flattenToDataUrl();
+      const refDataUrl = mode === "fill" && genFillRef ? await urlToJpegDataUrl(genFillRef) : null;
+      if (mode === "fill" && genFillRef && !refDataUrl) throw new Error("讀不到參考圖，換一張試試");
       const r = await fetch("/api/magic-layers/magic-fill", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageDataUrl: source, maskDataUrl: m.toDataURL("image/png"), prompt: mode === "fill" ? genFillPrompt.trim() || undefined : undefined, mode, variants: 2 }),
+        body: JSON.stringify({ imageDataUrl: source, maskDataUrl: m.toDataURL("image/png"), prompt: mode === "fill" ? genFillPrompt.trim() || undefined : undefined, mode, variants: 2,
+          ...(mode === "fill" && refDataUrl ? { refDataUrl, box: marquee } : {}) }),
       });
       const d = await r.json(); if (!r.ok) throw new Error(d.error ?? "生成失敗");
       setGenFillResult(d.variants); setGenFillIndex(0);
       if (d.variants?.[0]) await previewGenFill(d.variants[0]);
     } catch (e) { alert("生成式填色失敗：" + (e instanceof Error ? e.message : String(e))); }
     finally { setGenFillBusy(false); }
-  }, [marquee, genFillBusy, doc.w, doc.h, flattenToDataUrl, flattenLayersToDataUrl, genFillPrompt, previewGenFill]);
+  }, [marquee, genFillBusy, doc.w, doc.h, flattenToDataUrl, flattenLayersToDataUrl, genFillPrompt, genFillRef, previewGenFill]);
 
   const generateOutpaint = useCallback(async () => {
     if (outpaintBusy) return; setOutpaintBusy(true); setOutpaintResult(null);
@@ -2014,6 +2025,64 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     setPagesChanged(true);
     void activatePage(pageIdxRef.current + 1);
   }, [stashCurrentPage, activatePage]);
+
+  /**
+   * 匯入 PSD：每個工作區域一頁（沒有工作區域就整份一頁），圖層一路從群組裡拆出來。
+   * 圖片圖層先上傳拿網址再放進畫布：直接把像素塞進存檔的話，圖層一多存檔就會超過伺服器大小上限。
+   * 目前畫布是空的（只有一頁、沒有圖層）→ 直接換成 PSD 的頁；不是空的 → 加在目前這頁後面，不會蓋掉。
+   */
+  const importPsd = async (file: File) => {
+    if (file.size > PSD_MAX_BYTES) { alert(`PSD 太大（${Math.round(file.size / 1048576)}MB）。上限 ${PSD_MAX_BYTES / 1048576}MB，請先在 Photoshop 合併不需要的圖層或縮小尺寸。`); return; }
+    setPsdImporting("讀取 PSD 中…");
+    try {
+      const [{ readPsd }, buf] = await Promise.all([import("ag-psd"), file.arrayBuffer()]);
+      await new Promise((r) => setTimeout(r, 30));   // 讓「讀取中」先畫出來，大檔讀的時候畫面才不會像當掉
+      const psd = readPsd(buf, { skipThumbnail: true, skipLinkedFilesData: true });
+      const plan = planPsdImport(psd as unknown as PsdLike);
+      const imageCount = plan.pages.reduce((n, p) => n + p.layers.filter((l) => l.kind === "image").length, 0);
+      let done = 0;
+      setPsdImporting(`上傳圖層 0／${imageCount}`);
+      const built: { name: string; w: number; h: number; els: EL[] }[] = [];
+      for (const page of plan.pages) {
+        const baked = new Map<number, { canvas: HTMLCanvasElement; left: number; top: number }>();
+        const saved: (SavedLayer | null)[] = page.layers.map(() => null);
+        const uploads: (() => Promise<void>)[] = [];
+        page.layers.forEach((l, i) => {
+          const common = { id: `psd_${i}_${crypto.randomUUID().slice(0, 6)}`, name: l.name, zIndex: i, x: l.x, y: l.y, w: l.w, h: l.h, rotation: l.rotation ?? 0, visible: l.visible, opacity: l.opacity, locked: false, groupId: l.groupId,
+            ...(l.kind !== "rect" && l.shadow ? { shadow: l.shadow } : {}), ...(l.kind !== "rect" && l.glow ? { glow: l.glow } : {}) };
+          if (l.kind === "rect") { saved[i] = { ...common, type: "background", locked: true, shape: { kind: "rect", fill: l.fill, stroke: "none", strokeWidth: 0 } }; return; }
+          if (l.kind === "text") {
+            saved[i] = { ...common, type: "independent_text", isText: true, text: l.text, color: l.color, fontSize: l.fontSize, fontFamily: l.fontFamily, fontWeight: l.fontWeight, align: l.align,
+              ...(l.runs ? { runs: l.runs } : {}), ...(l.fx ? { fx: l.fx } : {}) };
+            return;
+          }
+          const canvas = bakePsdImage(l, baked);
+          baked.set(i, { canvas, left: l.docLeft, top: l.docTop });
+          uploads.push(async () => {
+            const url = await uploadImageFile(await canvasToPngFile(canvas, l.name));
+            saved[i] = { ...common, type: l.background ? "background" : "object", image: url };
+            done += 1; setPsdImporting(`上傳圖層 ${done}／${imageCount}`);
+          });
+        });
+        // 一次傳 4 張：太多同時傳會被瀏覽器排隊，一張一張傳又太慢
+        for (let k = 0; k < uploads.length; k += 4) await Promise.all(uploads.slice(k, k + 4).map((u) => u()));
+        const layers = saved.filter((x): x is SavedLayer => !!x);
+        built.push({ name: page.name, w: page.w, h: page.h, els: await Promise.all(layers.map(elFromSavedLayer)) });
+      }
+      if (!built.length) { alert("這個 PSD 裡沒有可以匯入的圖層。"); return; }
+      stashCurrentPage();
+      const replace = pagesRef.current.length === 1 && layersRef.current.length === 0;
+      const pages: EditorPage[] = built.map((b) => ({ id: `page-${crypto.randomUUID().slice(0, 8)}`, name: b.name, w: b.w, h: b.h, els: b.els, loading: null, history: [], histIdx: 0, savedIdx: 0,
+        thumb: flattenEls(b.els, b.w, b.h, PAGE_THUMB), videoLen: null, transitionIn: null }));
+      const at = replace ? 0 : pageIdxRef.current + 1;
+      pagesRef.current.splice(at, replace ? 1 : 0, ...pages);
+      setPagesChanged(true);
+      await activatePage(at);
+      setPsdReport({ pages: built.length, layers: built.reduce((n, b) => n + b.els.length, 0), skipped: plan.skipped, approximated: plan.approximated });
+    } catch (err) {
+      alert("匯入 PSD 失敗：" + (err instanceof Error ? err.message : String(err)));
+    } finally { setPsdImporting(null); }
+  };
 
   /** 整份影片要用的每一頁（還在背景轉換的頁先等它轉完）。 */
   const sequenceItems = useCallback(async (): Promise<SeqItem[]> => {
@@ -2620,6 +2689,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                 <Plus size={16} />{adding ? "去背中…" : "加入產品（自動去背）"}
               </button>
               <button style={S.tool} onClick={addLogo}><BadgeCheck size={16} />Logo</button>
+              <button style={S.tool} onClick={() => psdInput.current?.click()} disabled={!!psdImporting} title="Photoshop 檔：每個工作區域變成一頁，圖層、文字都拆開可以改">
+                <Layers size={16} />{psdImporting ? "匯入中…" : "匯入 PSD（可多頁）"}
+              </button>
               <div style={{ fontSize: 11, color: "#9ca3af", padding: "8px 4px 0", lineHeight: 1.6 }}>也可以把「素材」裡的圖直接拖到畫布上。</div>
             </>)}
           </div>
@@ -2628,6 +2700,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         {/* 檔案選擇框一直留著：面板收起來時快捷操作、其他地方的按鈕也要用得到 */}
         <input ref={uploadImgRef} type="file" accept="image/*" onChange={onUploadImage} style={{ display: "none" }} />
         <input ref={addProdRef} type="file" accept="image/*" onChange={addProduct} style={{ display: "none" }} />
+        <input ref={psdInput} type="file" accept=".psd,image/vnd.adobe.photoshop,application/x-photoshop" style={{ display: "none" }} onChange={(e) => {
+          const f = e.target.files?.[0]; e.target.value = ""; if (f) void importPsd(f);
+        }} />
         <input ref={bgRefInput} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => {
           const f = e.target.files?.[0]; e.target.value = ""; if (!f) return;
           const fr = new FileReader(); fr.onload = () => setBgRef(String(fr.result)); fr.readAsDataURL(f);
@@ -2648,15 +2723,81 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
             pushImageLayer(url, "背景圖", "object", { cx: d.x, cy: d.y });
           }}>
           <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, touchAction: "none" }} />
-          {tplApplying && (
+          {(tplApplying || psdImporting) && (
             <div style={{ position: "absolute", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(248,249,252,.72)", backdropFilter: "blur(2px)" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 18px", borderRadius: 12, background: "#fff", border: "1px solid #ebeff5", boxShadow: "0 6px 20px rgba(17,24,39,.08)", fontSize: 13, fontWeight: 700, color: "#374151" }}>
                 <span style={{ width: 16, height: 16, borderRadius: "50%", border: "2px solid #ddd6fe", borderTopColor: "#7c3aed", animation: "tpl-spin .8s linear infinite" }} />
-                套用範本中，正在載入圖片…
+                {psdImporting ?? "套用範本中，正在載入圖片…"}
               </div>
               <style>{"@keyframes tpl-spin{to{transform:rotate(360deg)}}"}</style>
             </div>
           )}
+          {psdReport && <PsdReportCard report={psdReport} onClose={() => setPsdReport(null)} />}
+          {/* 生成式填色的輸入列／結果列：放在畫布範圍裡，才不會蓋到下面的時間軸 */}
+      {marquee && !genFillResult && (
+        <div style={{ position: "absolute", left: "50%", bottom: 16, transform: "translateX(-50%)", zIndex: 92, display: "flex", gap: 8, alignItems: "center", background: "#1f2937", padding: 10, borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,.28)" }}>
+          <input
+            autoFocus
+            value={genFillPrompt}
+            onChange={(e) => setGenFillPrompt(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !genFillBusy && (genFillPrompt.trim() || genFillRef)) generateFillInMarquee("fill"); if (e.key === "Escape") { setMarquee(null); marqueeRef.current = null; render(); } }}
+            placeholder={genFillRef ? "要放什麼？例如：放一束跟參考圖一樣的花（不寫就照參考圖）" : "要在這塊畫什麼？（想清掉東西就按右邊的「移除」）"}
+            style={{ width: 340, fontSize: 13, padding: "8px 10px", borderRadius: 8, border: "1px solid #4b5563", background: "#111827", color: "#f9fafb", outline: "none" }} />
+          {/* 參考圖（選填）：想在這塊放「長得像這張」的東西 */}
+          <button onClick={() => setGenFillPicking((v) => !v)} disabled={genFillBusy} title={genFillRef ? "換一張參考圖" : "放一張參考圖：在框裡放長得像它的東西"}
+            style={{ ...S.rbtn, background: "transparent", color: "#f9fafb", border: "1px solid #4b5563", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 6, padding: genFillRef ? "0 8px 0 4px" : undefined }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            {genFillRef ? <img src={genFillRef} alt="參考圖" style={{ width: 24, height: 24, objectFit: "cover", borderRadius: 4 }} /> : <ImageIcon size={14} />}
+            {genFillRef ? "參考圖" : "＋參考圖"}
+          </button>
+          {genFillRef && <button onClick={() => setGenFillRef(null)} disabled={genFillBusy} aria-label="拿掉參考圖" style={{ border: "none", background: "transparent", color: "#9ca3af", cursor: "pointer", fontSize: 16, padding: 0 }}>×</button>}
+          {genFillPicking && (
+            <div style={{ position: "absolute", left: 0, right: 0, bottom: "calc(100% + 8px)", background: "#fff", borderRadius: 12, padding: 10, boxShadow: "0 10px 30px rgba(0,0,0,.22)" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 6 }}>選一張參考圖：框裡會放進長得像它的東西</div>
+              <ImageLibraryPicker library={backgrounds ?? []} uploadFile={uploadImageFile} onPick={(url) => { setGenFillRef(url); setGenFillPicking(false); }} />
+            </div>
+          )}
+          <button onClick={() => generateFillInMarquee("fill")} disabled={genFillBusy || (!genFillPrompt.trim() && !genFillRef)}
+            title={genFillPrompt.trim() || genFillRef ? "在框選的那塊畫出你要的東西" : "先打字說要畫什麼，或放一張參考圖"}
+            style={{ ...S.rbtn, background: "#7c3aed", color: "#fff", border: "none", opacity: (genFillBusy || (!genFillPrompt.trim() && !genFillRef)) ? .5 : 1, whiteSpace: "nowrap" }}>
+            {genFillBusy ? "生成中…" : "生成"}
+          </button>
+          {/* 移除獨立一顆，不靠關鍵字猜意圖——打「把花瓣移除」時模型會照著畫花瓣。 */}
+          <button onClick={() => generateFillInMarquee("remove")} disabled={genFillBusy}
+            title="把框選的東西清掉，補成乾淨的表面"
+            style={{ ...S.rbtn, background: "transparent", color: "#f9fafb", border: "1px solid #4b5563", opacity: genFillBusy ? .6 : 1, whiteSpace: "nowrap" }}>
+            移除
+          </button>
+          {genFillBusy && (
+            // 不定量進度條：這一步要 15–40 秒，沒有東西在動會讓人以為當掉了。
+            <span aria-hidden style={{ width: 90, height: 4, borderRadius: 2, background: "#374151", overflow: "hidden", display: "inline-block" }}>
+              <span style={{ display: "block", width: "40%", height: "100%", background: "#7c3aed", animation: "genfill-progress 1.1s ease-in-out infinite" }} />
+            </span>
+          )}
+          <style>{"@keyframes genfill-progress{0%{transform:translateX(-100%)}100%{transform:translateX(250%)}}"}</style>
+          <button onClick={() => { setMarquee(null); marqueeRef.current = null; render(); }}
+            style={{ ...S.rbtn, background: "transparent", color: "#d1d5db", border: "1px solid #4b5563", whiteSpace: "nowrap" }}>
+            取消
+          </button>
+        </div>
+      )}
+
+      {/* 結果直接套在畫布上，用 ‹ › 原地換版本——不要彈窗擺一排小縮圖給人瞇著眼比。 */}
+      {genFillResult && genFillResult.length > 0 && (
+        <div style={{ position: "absolute", left: "50%", bottom: 16, transform: "translateX(-50%)", zIndex: 93, display: "flex", gap: 10, alignItems: "center", background: "#1f2937", padding: "10px 14px", borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,.28)", color: "#f9fafb" }}>
+          <span style={{ fontSize: 12, color: "#9ca3af" }}>只有框選的那塊被換掉</span>
+          <button
+            onClick={() => { const i = (genFillIndex - 1 + genFillResult.length) % genFillResult.length; setGenFillIndex(i); void previewGenFill(genFillResult[i]); }}
+            style={{ ...S.rbtn, background: "transparent", color: "#f9fafb", border: "1px solid #4b5563", padding: "4px 10px" }}>‹</button>
+          <span style={{ fontSize: 13, fontVariantNumeric: "tabular-nums" }}>{genFillIndex + 1}/{genFillResult.length}</span>
+          <button
+            onClick={() => { const i = (genFillIndex + 1) % genFillResult.length; setGenFillIndex(i); void previewGenFill(genFillResult[i]); }}
+            style={{ ...S.rbtn, background: "transparent", color: "#f9fafb", border: "1px solid #4b5563", padding: "4px 10px" }}>›</button>
+          <button onClick={commitGenFill} style={{ ...S.rbtn, background: "#7c3aed", color: "#fff", border: "none", whiteSpace: "nowrap" }}>完成</button>
+          <button onClick={cancelGenFill} style={{ ...S.rbtn, background: "transparent", color: "#d1d5db", border: "1px solid #4b5563", whiteSpace: "nowrap" }}>取消</button>
+        </div>
+      )}
+
         {/* 選起某幾個字之後才出現的分段樣式工具列。
             按鈕帶 data-run-tool，textarea 的 onBlur 會據此判斷不要收起編輯框，
             否則點按鈕的當下選取範圍就沒了。 */}
@@ -3106,7 +3247,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                     isCutout={() => { const l = layersRef.current.find((x) => x.id === selectedIdsRef.current[0]); return !!l?.canvas && l.type !== "background" && hasTransparency(l.canvas); }}
                     getSource={(cutout) => { const l = layersRef.current.find((x) => x.id === selectedIdsRef.current[0]); return l?.canvas ? sourceDataUrl(l.canvas, cutout) : null; }}
                     onPreview={(v, cutout) => previewLayerImage(selEl.id, v, cutout)}
-                    onConfirm={confirmLayerImage} onCancel={cancelLayerImage} />
+                    onConfirm={confirmLayerImage} onCancel={cancelLayerImage}
+                    library={backgrounds ?? []} uploadFile={uploadImageFile} />
                 )}
                 {selEl.canvas && !selEl.isText && !selEl.shape && selEl.type !== "background" && (
                   <ClipPanel
@@ -3258,56 +3400,6 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
           <button onClick={() => { penRef.current = null; setTool("select"); render(); }} style={{ ...S.rbtn, background: "transparent", color: "#d1d5db", border: "1px solid #4b5563", whiteSpace: "nowrap" }}>取消</button>
         </div>
       )}
-      {marquee && !genFillResult && (
-        <div style={{ position: "fixed", left: "50%", bottom: 124, transform: "translateX(-50%)", zIndex: 92, display: "flex", gap: 8, alignItems: "center", background: "#1f2937", padding: 10, borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,.28)" }}>
-          <input
-            autoFocus
-            value={genFillPrompt}
-            onChange={(e) => setGenFillPrompt(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && !genFillBusy && genFillPrompt.trim()) generateFillInMarquee("fill"); if (e.key === "Escape") { setMarquee(null); marqueeRef.current = null; render(); } }}
-            placeholder="要在這塊畫什麼？（想清掉東西就按右邊的「移除」）"
-            style={{ width: 340, fontSize: 13, padding: "8px 10px", borderRadius: 8, border: "1px solid #4b5563", background: "#111827", color: "#f9fafb", outline: "none" }} />
-          <button onClick={() => generateFillInMarquee("fill")} disabled={genFillBusy || !genFillPrompt.trim()}
-            title={genFillPrompt.trim() ? "在框選的那塊畫出你打的東西" : "先打字說要畫什麼"}
-            style={{ ...S.rbtn, background: "#7c3aed", color: "#fff", border: "none", opacity: (genFillBusy || !genFillPrompt.trim()) ? .5 : 1, whiteSpace: "nowrap" }}>
-            {genFillBusy ? "生成中…" : "生成"}
-          </button>
-          {/* 移除獨立一顆，不靠關鍵字猜意圖——打「把花瓣移除」時模型會照著畫花瓣。 */}
-          <button onClick={() => generateFillInMarquee("remove")} disabled={genFillBusy}
-            title="把框選的東西清掉，補成乾淨的表面"
-            style={{ ...S.rbtn, background: "transparent", color: "#f9fafb", border: "1px solid #4b5563", opacity: genFillBusy ? .6 : 1, whiteSpace: "nowrap" }}>
-            移除
-          </button>
-          {genFillBusy && (
-            // 不定量進度條：這一步要 15–40 秒，沒有東西在動會讓人以為當掉了。
-            <span aria-hidden style={{ width: 90, height: 4, borderRadius: 2, background: "#374151", overflow: "hidden", display: "inline-block" }}>
-              <span style={{ display: "block", width: "40%", height: "100%", background: "#7c3aed", animation: "genfill-progress 1.1s ease-in-out infinite" }} />
-            </span>
-          )}
-          <style>{"@keyframes genfill-progress{0%{transform:translateX(-100%)}100%{transform:translateX(250%)}}"}</style>
-          <button onClick={() => { setMarquee(null); marqueeRef.current = null; render(); }}
-            style={{ ...S.rbtn, background: "transparent", color: "#d1d5db", border: "1px solid #4b5563", whiteSpace: "nowrap" }}>
-            取消
-          </button>
-        </div>
-      )}
-
-      {/* 結果直接套在畫布上，用 ‹ › 原地換版本——不要彈窗擺一排小縮圖給人瞇著眼比。 */}
-      {genFillResult && genFillResult.length > 0 && (
-        <div style={{ position: "fixed", left: "50%", bottom: 124, transform: "translateX(-50%)", zIndex: 93, display: "flex", gap: 10, alignItems: "center", background: "#1f2937", padding: "10px 14px", borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,.28)", color: "#f9fafb" }}>
-          <span style={{ fontSize: 12, color: "#9ca3af" }}>只有框選的那塊被換掉</span>
-          <button
-            onClick={() => { const i = (genFillIndex - 1 + genFillResult.length) % genFillResult.length; setGenFillIndex(i); void previewGenFill(genFillResult[i]); }}
-            style={{ ...S.rbtn, background: "transparent", color: "#f9fafb", border: "1px solid #4b5563", padding: "4px 10px" }}>‹</button>
-          <span style={{ fontSize: 13, fontVariantNumeric: "tabular-nums" }}>{genFillIndex + 1}/{genFillResult.length}</span>
-          <button
-            onClick={() => { const i = (genFillIndex + 1) % genFillResult.length; setGenFillIndex(i); void previewGenFill(genFillResult[i]); }}
-            style={{ ...S.rbtn, background: "transparent", color: "#f9fafb", border: "1px solid #4b5563", padding: "4px 10px" }}>›</button>
-          <button onClick={commitGenFill} style={{ ...S.rbtn, background: "#7c3aed", color: "#fff", border: "none", whiteSpace: "nowrap" }}>完成</button>
-          <button onClick={cancelGenFill} style={{ ...S.rbtn, background: "transparent", color: "#d1d5db", border: "1px solid #4b5563", whiteSpace: "nowrap" }}>取消</button>
-        </div>
-      )}
-
       {magicFillResult && (
         <div style={{ position: "fixed", inset: 0, zIndex: 90, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,.45)" }} onClick={() => setMagicFillResult(null)} />
@@ -3610,6 +3702,82 @@ function shiftAnims(layers: EL[], by: number) {
   for (const l of layers) l.anims = l.anims?.map((a) => ({ ...a, start: Math.max(0, Math.round((a.start + by) * 100) / 100) }));
 }
 /** 多選的總外框：紫色虛線＋四角方形把手（螢幕座標）。 */
+/**
+ * PSD 圖層的像素：圖層遮色片、剪裁遮色片先烤進去（畫布沒有這兩種東西，烤進去看起來才會跟 PS 一樣）。
+ * baked＝這一頁已經處理好的圖層（剪裁要貼在下面那個圖層的範圍裡）。座標都用 PSD 文件的座標。
+ */
+function bakePsdImage(l: ImportImage, baked: Map<number, { canvas: HTMLCanvasElement; left: number; top: number }>): HTMLCanvasElement {
+  const src = l.source as HTMLCanvasElement;
+  const c = document.createElement("canvas"); c.width = src.width; c.height = src.height;
+  const ctx = c.getContext("2d", { willReadFrequently: true })!;
+  ctx.drawImage(src, 0, 0);
+  if (l.mask) {
+    // 遮色片是灰階（白＝看得到、黑＝挖掉），超出遮色片範圍的地方用 defaultColor
+    const m = l.mask.source as HTMLCanvasElement;
+    const mc = document.createElement("canvas"); mc.width = c.width; mc.height = c.height;
+    const mctx = mc.getContext("2d", { willReadFrequently: true })!;
+    const d = l.mask.defaultColor;
+    mctx.fillStyle = `rgb(${d},${d},${d})`; mctx.fillRect(0, 0, mc.width, mc.height);
+    mctx.drawImage(m, l.mask.left - l.docLeft, l.mask.top - l.docTop);
+    const px = ctx.getImageData(0, 0, c.width, c.height), mk = mctx.getImageData(0, 0, c.width, c.height).data;
+    for (let i = 0; i < px.data.length; i += 4) px.data[i + 3] = Math.round(px.data[i + 3] * mk[i] / 255);
+    ctx.putImageData(px, 0, 0);
+  }
+  const base = l.clipBase !== undefined ? baked.get(l.clipBase) : undefined;
+  if (base) {
+    ctx.globalCompositeOperation = "destination-in";
+    ctx.drawImage(base.canvas, base.left - l.docLeft, base.top - l.docTop);
+    ctx.globalCompositeOperation = "source-over";
+  }
+  if (!l.stroke) return c;
+  // PS 的「筆畫」（外框）：把剪影塗成外框色，往四周一圈一圈蓋出來，再把原圖疊回中間
+  const sz = Math.max(1, Math.round(l.stroke.size));
+  const sil = document.createElement("canvas"); sil.width = c.width; sil.height = c.height;
+  const sctx = sil.getContext("2d")!;
+  sctx.drawImage(c, 0, 0); sctx.globalCompositeOperation = "source-in"; sctx.fillStyle = l.stroke.color; sctx.fillRect(0, 0, sil.width, sil.height);
+  const out = document.createElement("canvas"); out.width = c.width + sz * 2; out.height = c.height + sz * 2;
+  const octx = out.getContext("2d")!;
+  octx.globalAlpha = l.stroke.opacity;
+  const steps = Math.max(16, Math.round(sz * 6));
+  for (let r = 1; r <= sz; r += Math.max(1, Math.floor(sz / 4))) {
+    for (let k = 0; k < steps; k++) { const a = (k / steps) * Math.PI * 2; octx.drawImage(sil, sz + Math.cos(a) * r, sz + Math.sin(a) * r); }
+  }
+  octx.globalAlpha = 1;
+  octx.drawImage(c, sz, sz);
+  return out;
+}
+function canvasToPngFile(c: HTMLCanvasElement, name: string): Promise<File> {
+  return new Promise((resolve, reject) => c.toBlob((b) => (b ? resolve(new File([b], `${name.replace(/[^\w\u4e00-\u9fff-]+/g, "_").slice(0, 40) || "layer"}.png`, { type: "image/png" })) : reject(new Error("圖層轉成圖片失敗"))), "image/png"));
+}
+/** 匯入 PSD 完的報告：幾頁幾個圖層，哪些略過、哪些效果被簡化（可以展開看是哪幾層）。 */
+function PsdReportCard({ report, onClose }: { report: { pages: number; layers: number; skipped: ImportNote[]; approximated: ImportNote[] }; onClose: () => void }) {
+  const [open, setOpen] = useState(false);
+  const notes = [...report.skipped.map((n) => ({ ...n, kind: "略過" })), ...report.approximated.map((n) => ({ ...n, kind: "簡化" }))];
+  return (
+    <div style={{ position: "absolute", right: 16, top: 16, zIndex: 55, width: 300, maxHeight: "70%", overflow: "auto", background: "#fff", border: "1px solid #ebeff5", borderRadius: 12, boxShadow: "0 8px 24px rgba(17,24,39,.12)", padding: "12px 14px", fontSize: 12, color: "#374151" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <span style={{ fontSize: 13, fontWeight: 800, color: "#111827" }}>PSD 匯入完成</span>
+        <button onClick={onClose} aria-label="關閉" style={{ marginLeft: "auto", border: "none", background: "transparent", cursor: "pointer", color: "#9ca3af", fontSize: 16, lineHeight: 1 }}>×</button>
+      </div>
+      <div style={{ marginTop: 4, color: "#6b7280" }}>{report.pages} 頁、{report.layers} 個圖層{notes.length ? `；${report.skipped.length} 個略過、${report.approximated.length} 個效果被簡化` : "，全部照原樣匯入"}。</div>
+      {notes.length > 0 && (
+        <>
+          <button onClick={() => setOpen((v) => !v)} style={{ marginTop: 8, border: "none", background: "transparent", padding: 0, color: "#6d28d9", fontWeight: 700, cursor: "pointer", fontSize: 12 }}>{open ? "收起" : "看是哪幾層"}</button>
+          {open && (
+            <ul style={{ margin: "6px 0 0", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 4 }}>
+              {notes.map((n, i) => (
+                <li key={i} style={{ lineHeight: 1.5 }}>
+                  <span style={{ display: "inline-block", minWidth: 30, fontWeight: 700, color: n.kind === "略過" ? "#b45309" : "#6b7280" }}>{n.kind}</span>
+                  <b style={{ color: "#111827" }}>{n.layer}</b>：{n.reason}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
 /** 播放中的選取提示：淡紫虛線、沒有把手（不能拖，只是標出是哪一個）。 */
 function drawGhostFrame(ctx: CanvasRenderingContext2D, pts: { x: number; y: number }[]) {
   ctx.save();
@@ -4830,8 +4998,10 @@ function DownloadMenu({ busy, onPick }: { busy: boolean; onPick: (f: DownloadFor
  * 右側面板「AI 換圖」：選一張圖、描述想要的畫面，出兩張挑一張換上（位置、大小、效果都保留）。
  * 「改這張」拿原圖當參考只改描述的部分；「全新生成」照描述重畫。
  */
-function ReplaceImagePanel({ layerId, aspect: frameAspect, getSource, isCutout, onPreview, onConfirm, onCancel }: {
+function ReplaceImagePanel({ layerId, aspect: frameAspect, getSource, isCutout, onPreview, onConfirm, onCancel, library, uploadFile }: {
   layerId: string; aspect: number;
+  /** 參考圖可以從品牌素材庫挑，或從電腦上傳。 */
+  library: { url: string; label?: string }[]; uploadFile: (f: File) => Promise<string>;
   getSource: (cutout: boolean) => string | null;
   isCutout: () => boolean;
   /** 在畫布上先換上看看（不記進上一步）。 */
@@ -4849,22 +5019,28 @@ function ReplaceImagePanel({ layerId, aspect: frameAspect, getSource, isCutout, 
   useEffect(() => { cancelRef.current = onCancel; }, [onCancel]);
   useEffect(() => () => cancelRef.current(), []);
   const [mode, setMode] = useState<"edit" | "new">("edit");
+  // 參考圖（選填）：想改成的樣子，例如某個髮型、背景、風格
+  const [refUrl, setRefUrl] = useState<string | null>(null);
+  const [pickingRef, setPickingRef] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<{ layerId: string; cutout: boolean; variants: ReplaceVariant[] } | null>(null);
   const shown = result && result.layerId === layerId ? result : null;
 
+  const canRun = !!prompt.trim() || !!refUrl;
   const run = async () => {
-    if (busy || !prompt.trim()) return;
+    if (busy || !canRun) return;
     if (picked) { onCancel(); setPicked(null); }
     setBusy(true); setErr(null); setResult(null);
     try {
       const cutout = isCutout();
       const imageDataUrl = mode === "edit" ? getSource(cutout) : null;
       if (mode === "edit" && !imageDataUrl) throw new Error("讀不到這張圖");
+      const refDataUrl = refUrl ? await urlToJpegDataUrl(refUrl) : null;
+      if (refUrl && !refDataUrl) throw new Error("讀不到參考圖，換一張試試");
       const r = await fetch("/api/magic-layers/replace-image", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: prompt.trim(), mode, aspect, cutout, imageDataUrl }),
+        body: JSON.stringify({ prompt: prompt.trim(), mode, aspect, cutout, imageDataUrl, ...(refDataUrl ? { refDataUrl } : {}) }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok || !Array.isArray(d.variants) || !d.variants.length) throw new Error(d.error ?? "生成失敗");
@@ -4900,11 +5076,35 @@ function ReplaceImagePanel({ layerId, aspect: frameAspect, getSource, isCutout, 
       </div>
       <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3} maxLength={400} disabled={busy}
         onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void run(); }}
-        placeholder={mode === "edit" ? "要改哪裡？例如：換成短髮、背景改成臥室" : "想要什麼畫面？例如：亞洲女生在浴室對鏡子刷牙，明亮白色調"}
+        placeholder={refUrl
+          ? (mode === "edit" ? "要照參考圖改哪裡？例如：髮型改成參考圖這樣（不寫就照參考圖自動判斷）" : "想要什麼畫面？例如：同樣的氛圍，換成我們的商品（不寫就照參考圖的感覺生成）")
+          : (mode === "edit" ? "要改哪裡？例如：換成短髮、背景改成臥室" : "想要什麼畫面？例如：亞洲女生在浴室對鏡子刷牙，明亮白色調")}
         style={{ width: "100%", boxSizing: "border-box", padding: "8px 10px", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 12, resize: "vertical", fontFamily: "inherit", background: "#fff" }} />
-      <button onClick={() => void run()} disabled={busy || !prompt.trim()}
+      {/* 參考圖（選填） */}
+      {refUrl ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, padding: 6, borderRadius: 8, border: "1px solid #ede9fe", background: "#fff" }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={refUrl} alt="參考圖" style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 6, flex: "0 0 auto" }} />
+          <div style={{ flex: 1, minWidth: 0, fontSize: 11, color: "#6b7280", lineHeight: 1.5 }}>
+            <b style={{ color: "#374151" }}>參考圖</b><br />{mode === "edit" ? "會照這張改你描述的部分" : "會照這張的風格生成新的"}
+          </div>
+          <button onClick={() => setPickingRef(true)} disabled={busy} style={{ border: "none", background: "transparent", color: "#6d28d9", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>換一張</button>
+          <button onClick={() => setRefUrl(null)} disabled={busy} aria-label="拿掉參考圖" style={{ border: "none", background: "transparent", color: "#9ca3af", fontSize: 15, cursor: "pointer", lineHeight: 1 }}>×</button>
+        </div>
+      ) : (
+        <button onClick={() => setPickingRef((v) => !v)} disabled={busy}
+          style={{ marginTop: 8, width: "100%", height: 32, borderRadius: 8, border: "1px dashed #c4b5fd", background: "#fff", color: "#6d28d9", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+          ＋ 參考圖（選填）
+        </button>
+      )}
+      {pickingRef && (
+        <div style={{ marginTop: 8 }}>
+          <ImageLibraryPicker library={library} uploadFile={uploadFile} onPick={(url) => { setRefUrl(url); setPickingRef(false); }} />
+        </div>
+      )}
+      <button onClick={() => void run()} disabled={busy || !canRun}
         style={{ width: "100%", marginTop: 8, height: 36, borderRadius: 10, border: "none", color: "#fff", fontSize: 13, fontWeight: 700,
-          cursor: busy || !prompt.trim() ? "default" : "pointer", background: busy ? "#a78bfa" : !prompt.trim() ? "#c4b5fd" : "linear-gradient(135deg,#8b5cf6,#7c3aed)" }}>
+          cursor: busy || !canRun ? "default" : "pointer", background: busy ? "#a78bfa" : !canRun ? "#c4b5fd" : "linear-gradient(135deg,#8b5cf6,#7c3aed)" }}>
         {busy ? "生成中…（約 20–40 秒）" : "✨ 生成兩張"}
       </button>
       {err && <div role="alert" style={{ marginTop: 8, fontSize: 11, color: "#b91c1c", background: "#fef2f2", borderRadius: 8, padding: "6px 8px", lineHeight: 1.5 }}>{err}</div>}
@@ -4933,6 +5133,17 @@ function ReplaceImagePanel({ layerId, aspect: frameAspect, getSource, isCutout, 
       <p style={{ margin: "8px 0 0", fontSize: 11, color: "#9ca3af", lineHeight: 1.5 }}>位置、大小、陰影等效果都會保留；去背的圖換上後也會自動去背。</p>
     </div>
   );
+}
+
+/** 參考圖網址 → 長邊 1280 以內的 JPEG data URL（送給 AI 換圖；鋪白底，透明的地方才不會變黑）。 */
+async function urlToJpegDataUrl(url: string): Promise<string | null> {
+  const src = await loadToCanvas(url);
+  if (!src) return null;
+  const s = Math.min(1, 1280 / Math.max(src.width, src.height));
+  const c = document.createElement("canvas"); c.width = Math.max(1, Math.round(src.width * s)); c.height = Math.max(1, Math.round(src.height * s));
+  const ctx = c.getContext("2d")!;
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(src, 0, 0, c.width, c.height);
+  try { return c.toDataURL("image/jpeg", 0.9); } catch { return null; }
 }
 
 function ClipPanel({ frameName, frames, onPut, onFit, onTakeOut }: {

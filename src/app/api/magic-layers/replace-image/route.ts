@@ -1,7 +1,8 @@
 /* ============================================================
    POST /api/magic-layers/replace-image
    自由畫布「AI 換圖」：選一張圖、描述想要的畫面，生成兩張讓使用者挑一張換上。
-   Body: { prompt, mode: "edit"|"new", aspect (框的寬/高), cutout?, imageDataUrl? (edit 必填) }
+   Body: { prompt, mode: "edit"|"new", aspect (框的寬/高), cutout?, imageDataUrl? (edit 必填), refDataUrl? (參考圖，選填) }
+   有參考圖時可以不打字（照參考圖的樣子改／生成）。
    Returns: { variants: [{ url, width, height }] } | { error }
 
    會花錢（每次兩張），掛在付費閘後面，額度算「AI 換圖」。
@@ -13,7 +14,7 @@ import { removeBackground } from "@/lib/fal";
 import { saveBuffer } from "@/lib/storage";
 import { protectPaidRoute } from "@/lib/site-gate";
 import { dailyQuota } from "@/lib/paid-quota";
-import { buildReplacePrompt, clampAspect, coverCrop, detailEditRequest, editExisting, generateNew, type ReplaceMode } from "@/lib/magic-layers/replace-image.ts";
+import { buildReplacePrompt, clampAspect, coverCrop, detailEditRequest, editExisting, generateFromReference, generateNew, type ReplaceMode } from "@/lib/magic-layers/replace-image.ts";
 
 export const maxDuration = 180;
 
@@ -39,9 +40,18 @@ async function finish(buffer: Buffer, aspect: number, cutout: boolean) {
 export const POST = protectPaidRoute(async (request: Request) => {
   try {
     if (!process.env.FAL_KEY) return NextResponse.json({ error: "缺少 FAL_KEY（AI 換圖需要）" }, { status: 400 });
-    const body = await request.json().catch(() => ({})) as { prompt?: unknown; mode?: unknown; aspect?: unknown; cutout?: unknown; imageDataUrl?: unknown };
+    const body = await request.json().catch(() => ({})) as { prompt?: unknown; mode?: unknown; aspect?: unknown; cutout?: unknown; imageDataUrl?: unknown; refDataUrl?: unknown };
     const typed = typeof body.prompt === "string" ? body.prompt.trim().slice(0, 400) : "";
-    if (!typed) return NextResponse.json({ error: "請描述想要的畫面" }, { status: 400 });
+    // 參考圖（選填）：一樣鋪白底、縮到 1280 以內再送模型
+    let ref: string | null = null;
+    if (typeof body.refDataUrl === "string" && body.refDataUrl) {
+      if (!body.refDataUrl.startsWith("data:image/")) return NextResponse.json({ error: "參考圖格式不對" }, { status: 400 });
+      const rb = Buffer.from(body.refDataUrl.split(",")[1] ?? "", "base64");
+      if (!rb.length || rb.length > MAX_IMAGE_BYTES) return NextResponse.json({ error: "參考圖太大或讀不到" }, { status: 400 });
+      const flatRef = await sharp(rb).flatten({ background: "#ffffff" }).resize(1280, 1280, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer();
+      ref = `data:image/jpeg;base64,${flatRef.toString("base64")}`;
+    }
+    if (!typed && !ref) return NextResponse.json({ error: "請描述想要的畫面，或放一張參考圖" }, { status: 400 });
     const mode: ReplaceMode = body.mode === "edit" ? "edit" : "new";
     const aspect = clampAspect(Number(body.aspect));
     const cutout = body.cutout === true;
@@ -58,13 +68,18 @@ export const POST = protectPaidRoute(async (request: Request) => {
     }
 
     // 全新生成（FLUX）要英文；改這張給原話＋寫具體的版本，見 buildReplacePrompt 的說明。
-    const prompt = mode === "edit"
-      ? buildReplacePrompt(mode, typed, cutout, (await detailEditRequest(typed)) ?? undefined)
-      : buildReplacePrompt(mode, (await translateBriefToEnglishPrompt(typed)) || typed, cutout);
+    // 有參考圖時都走 nano-banana（看得懂中文），直接給原話，讓模型自己對照參考圖。
+    const prompt = ref
+      ? buildReplacePrompt(mode, typed, cutout, undefined, true)
+      : mode === "edit"
+        ? buildReplacePrompt(mode, typed, cutout, (await detailEditRequest(typed)) ?? undefined)
+        : buildReplacePrompt(mode, (await translateBriefToEnglishPrompt(typed)) || typed, cutout);
     const one = async (_: unknown, i: number) => {
-      const gen = source ? await editExisting(prompt, source, aspect, i) : await generateNew(prompt, aspect);
+      const gen = source ? await editExisting(prompt, source, aspect, i, ref ?? undefined)
+        : ref ? await generateFromReference(prompt, ref, aspect, i)
+        : await generateNew(prompt, aspect);
       const done = await finish(gen.buffer, aspect, cutout);
-      return source ? { ...done, label: ["改得明顯", "改得自然"][i] } : done;
+      return source ? { ...done, label: ["改得明顯", "改得自然"][i] } : ref ? { ...done, label: ["貼近參考圖", "自由發揮"][i] } : done;
     };
     const settled = await Promise.allSettled(Array.from({ length: VARIANTS }, one));
     const variants = settled.flatMap((s) => (s.status === "fulfilled" ? [s.value] : []));

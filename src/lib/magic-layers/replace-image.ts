@@ -4,6 +4,9 @@
    兩種模式：
    ・edit（改這張）：原圖當參考，只改使用者說的部分（nano-banana edit）。
    ・new（全新生成）：不看原圖，照描述重畫（FLUX.2 pro，可以直接指定長寬）。
+   兩種都可以多給一張「參考圖」（例如想要的髮型、背景、風格）：
+   ・改這張＋參考圖：原圖是第 1 張、參考圖是第 2 張，只把要求的部分改成參考圖那樣。
+   ・全新生成＋參考圖：改用 nano-banana edit（FLUX 不看圖），照參考圖的樣子重畫一張新的。
 
    新圖要能直接塞回原本的框：照圖層的長寬比生成，最後再裁成一模一樣的比例；
    原圖是去背的（例如商品）就把新圖也去背，換上去才不會多一塊白底。
@@ -60,10 +63,22 @@ export function coverCrop(w: number, h: number, aspect: number): { left: number;
  *    （口紅、腮紅、眼影各淡多少），再說「除此之外」保留。
  * 「全新生成」走 FLUX，一定要英文（中文會被畫成字），所以傳進來的是翻好的。
  */
-export function buildReplacePrompt(mode: ReplaceMode, request: string, cutout: boolean, detail?: string): string {
+export function buildReplacePrompt(mode: ReplaceMode, request: string, cutout: boolean, detail?: string, withRef = false): string {
   const tail = cutout
     ? "Show the subject alone, fully in frame, isolated on a plain seamless white background. No text, no logo, no watermark."
     : "No text, no logo, no watermark.";
+  if (withRef && mode === "edit") {
+    // 原圖＝第 1 張、參考圖＝第 2 張：要講清楚哪張是要改的，不然模型會直接把參考圖照搬過來
+    const what = request ? `The user's request (may be in Chinese): "${request}".` : "Make the first image look like the second image in the most relevant way (e.g. hairstyle, outfit, background or style).";
+    return "Edit the FIRST image. Use the SECOND image only as a visual reference for the change. " + what +
+      " Make the change clearly match the reference. Apart from that change, keep the first image the same: the same person and face, pose, " +
+      `anything they are holding, the framing, camera angle and photographic style. Do not copy any text or logos from the reference. ${tail}`;
+  }
+  if (withRef) {
+    const what = request ? `The user's request (may be in Chinese): "${request}".` : "Create a similar scene with the same look, mood, colours and composition.";
+    return "Create a NEW image using the given image as a visual reference for style, mood, colours and composition. " + what +
+      ` It must be a new photo, not a copy of the reference. Do not copy any text or logos from the reference. High quality, sharp focus. ${tail}`;
+  }
   if (mode === "edit") {
     const what = detail && detail !== request ? `${detail} (The user's original words: "${request}".)` : `The user's request (may be in Chinese): "${request}".`;
     return `Edit this image. ${what} Make this change clearly visible. ` +
@@ -149,15 +164,44 @@ export const EDIT_STRENGTHS = [
 ] as const;
 
 /** 改這張：第 i 張用 EDIT_STRENGTHS[i] 的強度；pro 失敗就退回 nano-banana。 */
-export async function editExisting(prompt: string, imageDataUri: string, aspect: number, i = 0): Promise<Generated> {
+export async function editExisting(prompt: string, imageDataUri: string, aspect: number, i = 0, refDataUri?: string): Promise<Generated> {
   const body = (model: string) => ({
     prompt: `${prompt} ${EDIT_STRENGTHS[i % EDIT_STRENGTHS.length]}`,
-    image_urls: [imageDataUri], num_images: 1, aspect_ratio: nearestEditRatio(aspect),
+    image_urls: refDataUri ? [imageDataUri, refDataUri] : [imageDataUri], num_images: 1, aspect_ratio: nearestEditRatio(aspect),
   });
   try {
     return await falPost(EDIT_MODEL, body(EDIT_MODEL), 150_000);
   } catch (e) {
     console.warn(`[replace-image] ${EDIT_MODEL} failed, falling back:`, e instanceof Error ? e.message : e);
     return falPost(EDIT_FALLBACK, body(EDIT_FALLBACK), 120_000);
+  }
+}
+
+/** 全新生成＋參考圖：兩張一張貼近參考圖、一張自由一點，讓使用者挑。 */
+export const REF_STRENGTHS = [
+  "Stay close to the reference's composition and look.",
+  "Take more creative freedom with the composition while keeping the reference's look and mood.",
+];
+export async function generateFromReference(prompt: string, refDataUri: string, aspect: number, i = 0): Promise<Generated> {
+  const body = () => ({
+    prompt: `${prompt} ${REF_STRENGTHS[i % REF_STRENGTHS.length]}`,
+    image_urls: [refDataUri], num_images: 1, aspect_ratio: nearestEditRatio(aspect),
+  });
+  try {
+    return await falPost(EDIT_MODEL, body(), 150_000);
+  } catch (e) {
+    console.warn(`[replace-image] ${EDIT_MODEL} (reference) failed, falling back:`, e instanceof Error ? e.message : e);
+    return falPost(EDIT_FALLBACK, body(), 120_000);
+  }
+}
+
+/** 給好幾張圖＋一段指令改圖（nano-banana edit，失敗換備用模型）；生成式填色＋參考圖用。 */
+export async function editWithImages(prompt: string, images: string[], aspect: number): Promise<Generated> {
+  const body = { prompt, image_urls: images, num_images: 1, aspect_ratio: nearestEditRatio(aspect) };
+  try {
+    return await falPost(EDIT_MODEL, body, 150_000);
+  } catch (e) {
+    console.warn(`[replace-image] ${EDIT_MODEL} (images) failed, falling back:`, e instanceof Error ? e.message : e);
+    return falPost(EDIT_FALLBACK, body, 120_000);
   }
 }

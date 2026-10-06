@@ -177,10 +177,16 @@ export async function editExisting(prompt: string, imageDataUri: string, aspect:
   }
 }
 
-/** 全新生成＋參考圖：兩張一張貼近參考圖、一張自由一點，讓使用者挑。 */
+/**
+ * 全新生成＋參考圖：兩張一張貼近參考圖、一張自由一點，讓使用者挑。
+ * 第二張一開始只說「構圖自由一點」，實測（琥珀色滴管瓶）兩張幾乎一模一樣——模型還是緊貼參考圖。
+ * 所以要明確叫它換：角度、擺放方式、背景／光線至少換兩樣，只保留東西本身的樣子和色調。
+ */
 export const REF_STRENGTHS = [
-  "Stay close to the reference's composition and look.",
-  "Take more creative freedom with the composition while keeping the reference's look and mood.",
+  "Stay close to the reference's composition, angle and look.",
+  "Make this one clearly DIFFERENT from the reference photo: change at least two of the camera angle (e.g. three-quarter view or slightly from above), " +
+    "the arrangement or pose, and the setting, background and lighting. Keep only the subject's look, materials and colour palette from the reference; " +
+    "do not reproduce the reference's framing.",
 ];
 export async function generateFromReference(prompt: string, refDataUri: string, aspect: number, i = 0): Promise<Generated> {
   const body = () => ({

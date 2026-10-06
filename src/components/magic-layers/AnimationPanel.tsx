@@ -6,9 +6,10 @@
    只負責畫面與回呼；圖層怎麼改、怎麼畫、怎麼輸出都在編輯器（MagicLayersEditor）裡。
    ============================================================ */
 import { useEffect, useRef, useState } from "react";
-import { Pause, Play, Sparkles, Trash2, Film, Plus, ChevronsUp, HeartPulse, Star, Waves, Sunrise, Zap, Keyboard, GalleryHorizontal, Vibrate, Focus, ArrowDownToLine, RotateCw, Clock, type LucideIcon } from "lucide-react";
+import { Pause, Play, Sparkles, Trash2, Film, Plus, Copy, ClipboardPaste, Bookmark, X as XIcon, ChevronsUp, HeartPulse, Star, Waves, Sunrise, Zap, Keyboard, GalleryHorizontal, Vibrate, Focus, ArrowDownToLine, RotateCw, Clock, type LucideIcon } from "lucide-react";
 import { ImageLibraryPicker } from "./ImageLibraryPicker";
 import { dragLifespan } from "@/lib/magic-layers/layer-lifespan.ts";
+import type { AnimPreset } from "@/lib/magic-layers/anim-presets.ts";
 import { ANIM_LABELS, animEnd, isOneShot, speedOf, SPEED_LABELS, SPEED_PRESETS, type AnimSpeed, TYPE_STYLES, type AnimKind, type LayerAnim, type ShineDirection, type TypeStyle } from "@/lib/magic-layers/layer-animation.ts";
 
 const KINDS: { kind: AnimKind; hint: string }[] = [
@@ -87,6 +88,8 @@ export function AnimationTab(props: {
   /** 有幾頁：兩頁以上可以預覽／輸出整份影片（頁跟頁之間有過場）。 */
   pageCount: number; onPreviewAll: () => void;
   onExport: (allPages: boolean) => void; exporting: boolean; progress: number;
+  /** 我的動畫公版（存在這台瀏覽器）：點一下套到選取的物件。 */
+  presets: AnimPreset[]; onApplyPreset: (p: AnimPreset) => void; onDeletePreset: (p: AnimPreset) => void;
 }) {
   const multi = props.pageCount > 1;
   // 圖層在編輯器的 ref 裡：每次這個面板重新 render 時讀一次（編輯器改圖層後會 refresh）
@@ -156,6 +159,31 @@ export function AnimationTab(props: {
         style={{ height: 42, borderRadius: 10, border: "1.5px solid #ebe4f9", background: "#f9f6ff", color: "#4c1d95", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
         <Sparkles size={16} color="#7c3aed" />加一塊光澤範圍
       </button>
+
+      {divider}
+
+      {/* ── 我的動畫公版 ── */}
+      <SectionHead icon={Bookmark} title="我的動畫公版" hint={props.presets.length ? (props.selectionCount ? "點一下套到選取的物件" : "先在畫布上選物件") : undefined} />
+      {props.presets.length ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {props.presets.map((pr) => (
+            <div key={pr.id} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <button onClick={() => props.onApplyPreset(pr)} disabled={!props.selectionCount}
+                title={props.selectionCount ? `套到選取的 ${props.selectionCount} 個物件（會取代原本的動畫）` : "先在畫布上選物件"}
+                style={{ ...pill, flex: 1, minWidth: 0, height: 38, display: "flex", alignItems: "center", gap: 6, padding: "0 10px", textAlign: "left", ...(props.selectionCount ? {} : { opacity: 0.5, cursor: "not-allowed" }) }}>
+                <span style={{ display: "inline-flex", gap: 2, flex: "0 0 auto" }}>
+                  {[...new Set(pr.anims.map((a) => a.kind))].slice(0, 3).map((k) => { const Icon = ANIM_ICONS[k]; return <Icon key={k} size={13} color={ANIM_COLORS[k]} />; })}
+                </span>
+                <span style={{ fontSize: 12, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pr.name}</span>
+              </button>
+              <button onClick={() => props.onDeletePreset(pr)} aria-label={`刪除公版「${pr.name}」`} title="刪除這個公版"
+                style={{ border: "none", background: "transparent", color: "#9ca3af", cursor: "pointer", padding: 4, display: "inline-flex" }}><XIcon size={14} /></button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={{ fontSize: 11, color: "#9ca3af", lineHeight: 1.6 }}>還沒有公版。在畫布選一個調好動畫的物件，右側「動畫」分頁按「存成公版」，之後就能一鍵套用。</div>
+      )}
 
       {divider}
 
@@ -758,6 +786,35 @@ export function AnimDock(props: {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * 右側動畫分頁：複製／貼上動畫、存成公版（像 Lightroom 的拷貝設定 → 貼上設定）。
+ * 貼上會取代目標物件原本的動畫；選好幾個時可以依序錯開。
+ */
+export function AnimCopyBar(props: {
+  canCopy: boolean; hasClip: boolean; clipLabel: string | null; count: number;
+  stagger: boolean; onStagger: (v: boolean) => void;
+  onCopy: () => void; onPaste: () => void; onSavePreset: () => void;
+}) {
+  const b: React.CSSProperties = { ...btn, height: 30, padding: "0 8px", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4, fontSize: 12, flex: 1 };
+  const off: React.CSSProperties = { opacity: 0.45, cursor: "not-allowed" };
+  return (
+    <div style={{ margin: "8px 0 0" }}>
+      <div style={{ display: "flex", gap: 6 }}>
+        <button onClick={props.onCopy} disabled={!props.canCopy} title={props.canCopy ? "複製這個物件的動畫" : "這個物件還沒有可以複製的動畫"} style={{ ...b, ...(props.canCopy ? {} : off) }}><Copy size={12} />複製動畫</button>
+        <button onClick={props.onPaste} disabled={!props.hasClip} title={props.hasClip ? `貼到選取的 ${props.count} 個物件（會取代原本的動畫）` : "先在別的物件按「複製動畫」"} style={{ ...b, ...(props.hasClip ? {} : off) }}><ClipboardPaste size={12} />貼上{props.count > 1 ? `（${props.count}）` : ""}</button>
+        <button onClick={props.onSavePreset} disabled={!props.canCopy} title="把這個物件的動畫存成公版，之後在左側「動畫」分頁一鍵套用" style={{ ...b, ...(props.canCopy ? {} : off) }}><Bookmark size={12} />存成公版</button>
+      </div>
+      {props.hasClip && props.clipLabel && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>已複製：{props.clipLabel}</div>}
+      {props.count > 1 && (
+        <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, fontSize: 11, color: "#6b7280", cursor: "pointer" }}>
+          <input type="checkbox" checked={props.stagger} onChange={(e) => props.onStagger(e.target.checked)} style={{ accentColor: "#7c3aed" }} />
+          貼上／套公版時依序錯開（由上到下、由左到右，每個晚 0.3 秒）
+        </label>
+      )}
     </div>
   );
 }

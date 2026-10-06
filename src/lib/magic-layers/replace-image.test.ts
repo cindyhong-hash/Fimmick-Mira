@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildReplacePrompt, clampAspect, coverCrop, generationSize, nearestEditRatio } from "./replace-image.ts";
+import { buildReplacePrompt, clampAspect, coverCrop, generationSize, nearestEditRatio, REF_STRENGTHS } from "./replace-image.ts";
 
 test("clampAspect keeps frames between 1:3 and 3:1 and survives bad input", () => {
   assert.equal(clampAspect(10), 3);
@@ -65,4 +65,10 @@ test("有參考圖：改這張要講清楚第 1 張是原圖、第 2 張是參�
   assert.match(n, /Create a NEW image/);
   assert.match(n, /not a copy of the reference/);
   assert.match(n, /plain seamless white background/);
+});
+
+test("全新生成＋參考圖的第二張要明確要求換角度、擺放、背景（不然兩張會長一樣）", () => {
+  assert.match(REF_STRENGTHS[1], /clearly DIFFERENT/);
+  assert.match(REF_STRENGTHS[1], /camera angle/);
+  assert.match(REF_STRENGTHS[1], /do not reproduce the reference's framing/);
 });

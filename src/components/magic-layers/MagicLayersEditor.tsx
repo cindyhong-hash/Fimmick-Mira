@@ -15,9 +15,10 @@ import { distanceToPolyline, drawPaint, paintHits, samplePath, smoothStroke, str
    ============================================================ */
 import { drawEditableText, layoutText, readTextLayout, DEFAULT_TEXT_LAYOUT, type TextLayout } from "@/lib/magic-layers/editable-text.ts";
 import { idsInBox, selectableIds } from "@/lib/magic-layers/box-select.ts";
-import { animEnd, animFrame, animUnits, carouselLayout, carouselSlot, carouselSteps, defaultAnim, isOneShot, readAnims, shineBand, staggeredStarts, typeChar, videoDuration, REST, type AnimFrame, type AnimKind, type LayerAnim, type TypingState } from "@/lib/magic-layers/layer-animation.ts";
+import { ANIM_LABELS, animEnd, animFrame, animUnits, carouselLayout, carouselSlot, carouselSteps, defaultAnim, isOneShot, readAnims, shineBand, staggeredStarts, typeChar, videoDuration, REST, type AnimFrame, type AnimKind, type LayerAnim, type TypingState } from "@/lib/magic-layers/layer-animation.ts";
 import { encodeMp4, videoSize } from "@/lib/magic-layers/mp4-export.ts";
-import { AnimationTab, AnimDock, LayerAnimSettings, SequencePreview, type AnimTrack, type DockMode, type LifeRow } from "./AnimationPanel";
+import { AnimationTab, AnimCopyBar, AnimDock, LayerAnimSettings, SequencePreview, type AnimTrack, type DockMode, type LifeRow } from "./AnimationPanel";
+import { addPreset, animsForTargets, copyableAnims, loadPresets, PASTE_STAGGER, readingOrder, savePresets, type AnimPreset } from "@/lib/magic-layers/anim-presets.ts";
 import { ImageLibraryPicker } from "./ImageLibraryPicker";
 import { CarouselSetup, isVerticalText, toVertical, type CarouselCardContent, type CarouselPart } from "./CarouselSetup";
 import { aliveAt, clampLifespan, lifespanOf, readLifespan } from "@/lib/magic-layers/layer-lifespan.ts";
@@ -189,12 +190,17 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
   // 套用範本要下載整組圖片，可能要好幾秒：期間蓋一層「套用中」，也擋掉重複點
   const [tplApplying, setTplApplying] = useState(false);
   const tplApplyingRef = useRef(false);
-  const [layersOpen, setLayersOpen] = useState(true);         // 右下「圖層」可收合
+  // 右下「圖層」可收合；開或關記在這台瀏覽器
+  const [layersOpen, setLayersOpenState] = useState(() => { try { return window.localStorage.getItem("mira.layersOpen") !== "0"; } catch { return true; } });
+  const setLayersOpen = (f: (v: boolean) => boolean) => setLayersOpenState((v) => { const n = f(v); try { window.localStorage.setItem("mira.layersOpen", n ? "1" : "0"); } catch { /* 存不了就算了 */ } return n; });
   // 可拖曳調整的高度，記在這台瀏覽器（圖層區含標題列；範本庫、素材庫是縮圖格的高度）
-  const [layersH, startLayersResize] = useStoredHeight(LAYERS_H_KEY, 340, 150);
+  // 預設高度從 340 降到 260：右上的設定區才有空間（使用者自己拖過的高度照舊）
+  const [layersH, startLayersResize] = useStoredHeight(LAYERS_H_KEY, 260, 150);
   const rpanelRef = useRef<HTMLElement>(null);
   /** 左欄拉高某一區時，至少留一點給下面的工具列。 */
-  const [panelTab, setPanelTab] = useState<"design" | "anim" | "settings">("design");
+  // 右側分頁：設計／動畫。原本還有一個「設定」，只寫文件尺寸和圖層數，
+  // 已經併到「沒選東西時」的「這一頁」（尺寸、比例、背景色、圖層數）
+  const [panelTab, setPanelTab] = useState<"design" | "anim">("design");
   const [renaming, setRenaming] = useState(false);            // 重新命名這個設計
   const [renamingLayerId, setRenamingLayerId] = useState<string | null>(null);
   const [renamingLayerValue, setRenamingLayerValue] = useState("");
@@ -1286,6 +1292,41 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     markDirty(); refresh(); render();
   };
 
+  /* ---------- 動畫的複製／貼上、公版（像 Lightroom 的拷貝設定 → 貼上設定） ---------- */
+  const [animClip, setAnimClip] = useState<{ anims: LayerAnim[]; label: string } | null>(null);
+  const [animPresets, setAnimPresets] = useState<AnimPreset[]>([]);
+  const [staggerPaste, setStaggerPaste] = useState(true);
+  // 公版存在這台瀏覽器：掛載後再讀（伺服器端沒有 localStorage）
+  useEffect(() => { const t = setTimeout(() => setAnimPresets(loadPresets()), 0); return () => clearTimeout(t); }, []);
+  const animSummary = (anims: LayerAnim[]) => [...new Set(anims.map((a) => ANIM_LABELS[a.kind]))].join("＋");
+  const copyAnims = () => {
+    const l = layersRef.current.find((x) => x.id === selectedIdsRef.current[0]);
+    const anims = copyableAnims(l?.anims);
+    if (anims.length) setAnimClip({ anims, label: animSummary(anims) });
+  };
+  /** 把一組動畫套到選取的物件（取代原本的動畫）；錯開的話照畫面閱讀順序一個晚 0.3 秒。 */
+  const applyAnimsToSelection = (src: LayerAnim[]) => {
+    endTryAnim();
+    if (!pasteAnimsTo(layersRef.current, selectedIdsRef.current, src, staggerPaste ? PASTE_STAGGER : 0)) return;
+    setPanelTab("anim");
+    markDirty(); refresh(); playAnim();
+  };
+  const saveAnimPreset = () => {
+    const l = layersRef.current.find((x) => x.id === selectedIdsRef.current[0]);
+    const anims = copyableAnims(l?.anims);
+    if (!anims.length) return;
+    const name = window.prompt("公版名稱（同名會覆蓋）", animSummary(anims))?.trim();
+    if (!name) return;
+    const next = addPreset(animPresets, { id: `preset_${crypto.randomUUID().slice(0, 8)}`, name: name.slice(0, 40), anims: anims.map((a, i) => ({ ...a, id: `p${i}` })), createdAt: Date.now() });
+    setAnimPresets(next);
+    if (!savePresets(next)) alert("這個瀏覽器不能存資料（可能是私密模式），公版只會留到關掉頁面為止。");
+  };
+  const deleteAnimPreset = (pr: AnimPreset) => {
+    if (!window.confirm(`刪除公版「${pr.name}」？`)) return;
+    const next = animPresets.filter((x) => x.id !== pr.id);
+    setAnimPresets(next); savePresets(next);
+  };
+
   /** 把效果套到選到的圖層；選好幾個時，閃光／彈跳／閃爍依由左到右自動錯開，循環時也保持同樣順序。 */
   const applyAnimToSelection = (kind: AnimKind) => {
     endTryAnim();
@@ -1509,6 +1550,12 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
     };
     el.thumb = makeThumb(el); layersRef.current.push(el); selectOnly(el.id); markDirty(); refresh(); render();
   }, [doc.w, doc.h, markDirty, refresh, render]);
+
+  /** 這一頁的背景色：最底下已經有鋪滿的色塊背景就改它的顏色，沒有就墊一塊（鎖住，不會被誤點拖走）。 */
+  const setPageBackground = (color: string) => {
+    if (!applyPageBackground(layersRef.current, color, doc.w, doc.h, FONT)) return;
+    markDirty(); refresh(); render();
+  };
 
   // 向量圖層（形狀 / 線條 / 圖標）——畫在 canvas，可改色，不烤成點陣
   /**
@@ -2436,6 +2483,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
 
   /* ---------- panel (top layer first) ---------- */
   const panel = [...layersRef.current].reverse();
+  // 這一頁的純色背景（沒選東西時右側「這一頁」用）；panel 是由上往下，背景在最後一個
+  const pageBackground = pageBackgroundOf([...panel].reverse(), doc.w, doc.h);
   // 下方時間軸：開著左側「動畫」、這頁有動畫或存在時間、或使用者打開了，才出現
   const dockShown = leftTab === "animate" || dockMode !== "closed" || panel.some((l) => l.anims?.length || l.startTime !== undefined || l.endTime !== undefined);
   // 時間軸出現／展開、左側面板變寬時畫布區變小：重新縮放，畫布才不會被時間軸蓋住、被右欄切掉
@@ -2469,13 +2518,20 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
         <button style={{ ...S.tbtn, ...(handMode ? { background: "#f5f3ff", color: "#6d28d9", border: "1px solid #c4b5fd" } : {}) }} aria-pressed={handMode}
           title={handMode ? "手形工具開著：拖曳移動畫面（按 H 或 Esc 關掉）" : "手形工具（H）：拖曳移動畫面；也可以按住空白鍵拖曳"}
           onClick={() => { const on = !handRef.current; handRef.current = on; setHandMode(on); if (canvasRef.current) canvasRef.current.style.cursor = on ? "grab" : "default"; }}><Hand size={15} /></button>
-        <button style={S.tbtn} onClick={() => setZoom(view.current.zoom / 1.2)}>−</button>
-        <span style={{ width: 52, textAlign: "center", color: "#9a9cab", fontVariantNumeric: "tabular-nums" }}>{zoomPct}%</span>
-        <button style={S.tbtn} onClick={() => setZoom(view.current.zoom * 1.2)}>＋</button>
-        <select aria-label="畫布比例" title="改尺寸畫布" value={canvasRatio} onChange={(e) => resizeCanvasToRatio(e.target.value)} style={{ ...S.tbtn, appearance: "auto", minWidth: 70, paddingInline: 9 }}>
-          {canvasRatio === "custom" && <option value="custom" disabled>自訂比例</option>}
-          {CANVAS_RATIOS.map(([k]) => <option key={k} value={k}>{k}</option>)}
-        </select>
+        {/* 縮放（只改看的大小）跟「比例」（會改畫布尺寸）分開放，中間隔一條線：原本「− 58% ＋ 1:1」連在一起，1:1 很像「縮放 100%」 */}
+        <button style={S.tbtn} onClick={() => setZoom(view.current.zoom / 1.2)} title="縮小畫面" aria-label="縮小畫面">−</button>
+        <span style={{ width: 48, textAlign: "center", color: "#6b7280", fontSize: 13, fontVariantNumeric: "tabular-nums" }} title="目前顯示大小（不影響輸出尺寸）">{zoomPct}%</span>
+        <button style={S.tbtn} onClick={() => setZoom(view.current.zoom * 1.2)} title="放大畫面" aria-label="放大畫面">＋</button>
+        <button style={S.tbtn} onClick={() => fitRef.current()} title="整張畫布剛好放進畫面"><Maximize2 size={14} />符合畫面</button>
+        <span style={S.divider} />
+        <label title={`畫布比例：會改輸出尺寸（目前 ${doc.w}×${doc.h}）`} style={{ ...S.tbtn, gap: 4, paddingRight: 6, cursor: "pointer" }}>
+          <span style={{ color: "#9ca3af", fontWeight: 600 }}>比例</span>
+          <select aria-label="畫布比例" value={canvasRatio} onChange={(e) => resizeCanvasToRatio(e.target.value)}
+            style={{ border: "none", background: "transparent", fontSize: 13, fontWeight: 700, color: "#374151", cursor: "pointer", outline: "none", paddingRight: 2 }}>
+            {canvasRatio === "custom" && <option value="custom" disabled>自訂</option>}
+            {CANVAS_RATIOS.map(([k]) => <option key={k} value={k}>{k}</option>)}
+          </select>
+        </label>
         <span style={S.divider} />
         {selectedIds.length >= 2 && !selectedIds.some((id) => !!layersRef.current.find((l) => l.id === id)?.groupId) && <button style={S.tbtn} onClick={groupSelected} title="將選取的物件設為一組（⌘G）">群組</button>}
         {selectedIds.some((id) => !!layersRef.current.find((l) => l.id === id)?.groupId) && <button style={S.tbtn} onClick={ungroupSelected} title="解除目前群組（⌘⇧G）">解散群組</button>}
@@ -2681,7 +2737,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                 activeKinds={[...new Set(selEl?.anims?.map((a) => a.kind) ?? [])]}
                 onTry={tryAnim} onClearAll={clearPageAnims}
                 pageCount={pagesView.length || 1} onPreviewAll={() => void openSequencePreview()}
-                onExport={(all) => void (all ? exportWholeMp4() : exportMp4())} exporting={mp4Busy !== null} progress={mp4Busy ?? 0} />
+                onExport={(all) => void (all ? exportWholeMp4() : exportMp4())} exporting={mp4Busy !== null} progress={mp4Busy ?? 0}
+                presets={animPresets} onApplyPreset={(pr) => applyAnimsToSelection(pr.anims)} onDeletePreset={deleteAnimPreset} />
             )}
             {leftTab === "upload" && (<>
               <button style={S.tool} onClick={() => uploadImgRef.current?.click()}><Upload size={16} />上傳圖片</button>
@@ -2733,6 +2790,13 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
             </div>
           )}
           {psdReport && <PsdReportCard report={psdReport} onClose={() => setPsdReport(null)} />}
+          {/* 空白畫布：直接給幾個起點，不讓人對著一張白紙不知道要按哪裡 */}
+          {/* 只有純色背景也還算空白（先選了背景色），有圖片或其他東西才收起來 */}
+          {panel.every((l) => l.type === "background" && !l.canvas) && !tplApplying && !psdImporting && (
+            <EmptyCanvasStart
+              onTemplate={() => setLeftTab("templates")} onUpload={() => uploadImgRef.current?.click()} onPsd={() => psdInput.current?.click()}
+              onText={addTextLayer} onAi={() => setLeftTab("ai")} />
+          )}
           {/* 生成式填色的輸入列／結果列：放在畫布範圍裡，才不會蓋到下面的時間軸 */}
       {marquee && !genFillResult && (
         <div style={{ position: "absolute", left: "50%", bottom: 16, transform: "translateX(-50%)", zIndex: 92, display: "flex", gap: 8, alignItems: "center", background: "#1f2937", padding: 10, borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,.28)" }}>
@@ -2939,9 +3003,30 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
               </div>
             </>
           ) : !selEl ? (
-            <div style={{ padding: 20, fontSize: 12, color: "#9ca3af", lineHeight: 1.7 }}>
-              選一個圖層來編輯它的設定。<br />
-              雙擊文字可以直接在畫布上改字。
+            /* 沒選東西：顯示這一頁的設定（尺寸、比例、背景色），不是一句「請選圖層」 */
+            <div style={{ padding: "16px 16px 20px" }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: "#111827" }}>這一頁</div>
+              <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>{doc.w} × {doc.h} px・{panel.length} 個圖層</div>
+              <label style={S.rlabel}>比例</label>
+              <select aria-label="這一頁的比例" value={canvasRatio} onChange={(e) => resizeCanvasToRatio(e.target.value)} style={S.rinput}>
+                {canvasRatio === "custom" && <option value="custom" disabled>自訂（{doc.w}×{doc.h}）</option>}
+                {CANVAS_RATIOS.map(([k]) => <option key={k} value={k}>{k}</option>)}
+              </select>
+              <label style={S.rlabel}>背景顏色</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                {["#ffffff", "#f8f9fc", "#f5f3ff", "#fff1f2", "#ecfdf5", "#111827"].map((c) => (
+                  <button key={c} onClick={() => setPageBackground(c)} aria-label={`背景改成 ${c}`} title={c}
+                    style={{ width: 28, height: 28, borderRadius: 8, background: c, cursor: "pointer", border: pageBackground === c ? "2px solid #7c3aed" : "1px solid #e5e7eb" }} />
+                ))}
+                <input type="color" aria-label="自訂背景顏色" value={toHex(pageBackground ?? "#ffffff")} onChange={(e) => setPageBackground(e.target.value)}
+                  style={{ width: 34, height: 30, border: "1px solid #e5e7eb", borderRadius: 8, padding: 0, cursor: "pointer" }} />
+              </div>
+              {pageBackground === null && panel.some((l) => l.type === "background") && (
+                <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 6, lineHeight: 1.6 }}>這頁的背景是圖片；選了顏色會墊在最底下，被圖片蓋住的地方看不到。</div>
+              )}
+              <div style={{ fontSize: 12, color: "#9ca3af", lineHeight: 1.7, marginTop: 18, paddingTop: 14, borderTop: "1px solid #eef0f3" }}>
+                點畫布上的東西就能編輯它；雙擊文字可以直接改字。<br />按住空白鍵（或 H）可以拖曳移動畫面。
+              </div>
             </div>
           ) : (
           <>
@@ -2950,7 +3035,6 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
               <button style={{ ...S.rtab, ...(panelTab === "anim" ? S.rtabOn : {}) }} onClick={() => setPanelTab("anim")}>
                 動畫{selEl.anims?.length ? <span style={S.rtabCount}>{selEl.anims.length}</span> : null}
               </button>
-              <button style={{ ...S.rtab, ...(panelTab === "settings" ? S.rtabOn : {}) }} onClick={() => setPanelTab("settings")}>設定</button>
             </div>
             {panelTab === "design" ? (
               <div style={{ padding: 16, overflowY: "auto" }}>
@@ -2990,8 +3074,8 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                 ) : (
                   /* ===== State A：一般文字（可編輯；不含任何 AI 分析／參考圖 UI） ===== */
                   <>
-                    <div style={S.rhead}>文字設定</div>
-                    <label style={S.rlabel}>文字內容</label>
+                    <PropSection id="text" title="文字" defaultOpen first>
+                    <label style={{ ...S.rlabel, marginTop: 0 }}>文字內容</label>
                     {/* 用 textarea 不用 input：單行輸入框打不出換行，使用者按 Enter 沒反應。
                         繪製端本來就支援多行（editable-text.ts 會 split("\n")），卡住的只有輸入。
                         Enter 換行、⌘Enter 收起鍵盤焦點。 */}
@@ -3037,28 +3121,32 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                           {!FONT_WEIGHTS.some(([v]) => v === selEl.fontWeight) && <option value={selEl.fontWeight}>{selEl.fontWeight}</option>}
                         </select></div>
                     </div>
+                    <label style={S.rlabel}>顏色</label>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <input type="color" value={toHex(selEl.color)} onChange={(e) => updateText({ color: e.target.value })} style={{ width: 40, height: 34, border: "1px solid #e5e7eb", borderRadius: 8, padding: 0, cursor: "pointer" }} />
+                      <input value={selEl.color} onChange={(e) => updateText({ color: e.target.value })} style={{ ...S.rinput, flex: 1 }} />
+                    </div>
+                    </PropSection>
                     {/* 字距／行高：drawTextEl 早就會讀 textLayout 來排版，但一直沒有 UI，
                         使用者調不到。沒有 textLayout 的舊圖層在這裡第一次調整時建立預設值。 */}
+                    <PropSection id="spacing" title="字距與行高" summary={`字距 ${selEl.textLayout?.letterSpacing ?? 0}・行高 ${selEl.textLayout?.lineHeight ?? DEFAULT_TEXT_LAYOUT.lineHeight}`}>
                     <div style={{ display: "flex", gap: 10 }}>
-                      <div style={{ flex: 1 }}><label style={S.rlabel}>字距</label>
+                      <div style={{ flex: 1 }}><label style={{ ...S.rlabel, marginTop: 0 }}>字距</label>
                         <input type="number" step={0.5} value={selEl.textLayout?.letterSpacing ?? 0}
                           onChange={(e) => {
                             const v = Math.max(-20, Math.min(20, Number(e.target.value) || 0));
                             updateText({ textLayout: { ...(selEl.textLayout ?? DEFAULT_TEXT_LAYOUT), letterSpacing: v } });
                           }} style={S.rinput} /></div>
-                      <div style={{ flex: 1 }}><label style={S.rlabel}>行高</label>
+                      <div style={{ flex: 1 }}><label style={{ ...S.rlabel, marginTop: 0 }}>行高</label>
                         <input type="number" step={0.05} value={selEl.textLayout?.lineHeight ?? DEFAULT_TEXT_LAYOUT.lineHeight}
                           onChange={(e) => {
                             const v = Math.max(1, Math.min(2, Number(e.target.value) || DEFAULT_TEXT_LAYOUT.lineHeight));
                             updateText({ textLayout: { ...(selEl.textLayout ?? DEFAULT_TEXT_LAYOUT), lineHeight: v } });
                           }} style={S.rinput} /></div>
                     </div>
-                    <label style={S.rlabel}>顏色</label>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <input type="color" value={toHex(selEl.color)} onChange={(e) => updateText({ color: e.target.value })} style={{ width: 40, height: 34, border: "1px solid #e5e7eb", borderRadius: 8, padding: 0, cursor: "pointer" }} />
-                      <input value={selEl.color} onChange={(e) => updateText({ color: e.target.value })} style={{ ...S.rinput, flex: 1 }} />
-                    </div>
-                    <label style={S.rlabel}>文字效果</label>
+                    </PropSection>
+                    <PropSection id="textfx" title="文字效果" summary={textFxSummary(selEl.fx)}>
+                    <label style={{ ...S.rlabel, marginTop: 0 }}>樣式</label>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                       <button style={{ ...S.fxChip, ...(!selEl.fx ? S.fxChipOn : {}) }} onClick={() => applyFxPreset(null)}>無</button>
                       <button style={S.fxChip} onClick={() => applyFxPreset({ gradient: ["#fce38a", "#c8811f"] })}>漸層金</button>
@@ -3087,8 +3175,11 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                         </div>
                       );
                     })() : null}
-                    <label style={S.rlabel}>字距 <span style={{ float: "right", color: "#9ca3af" }}>{selEl.fx?.letterSpacing ?? 0}px</span></label>
-                    <input type="range" min={-12} max={48} step={1} value={selEl.fx?.letterSpacing ?? 0} onChange={(e) => updateFx({ letterSpacing: Number(e.target.value) })} style={{ width: "100%", accentColor: "#7c3aed" }} />
+                    {/* 舊的「效果字距」：跟上面「字距與行高」的字距重複，只在舊設計已經有值時才顯示（才調得回 0） */}
+                    {selEl.fx?.letterSpacing ? (<>
+                      <label style={S.rlabel}>額外字距（舊設定） <span style={{ float: "right", color: "#9ca3af" }}>{selEl.fx.letterSpacing}px</span></label>
+                      <input type="range" min={-12} max={48} step={1} value={selEl.fx.letterSpacing} onChange={(e) => updateFx({ letterSpacing: Number(e.target.value) })} style={{ width: "100%", accentColor: "#7c3aed" }} />
+                    </>) : null}
                     <label style={S.rlabel}>文字路徑</label>
                     <select value={selEl.fx?.warp ?? "none"} onChange={(e) => updateFx({ warp: e.target.value as TextFx["warp"] })} style={S.rinput}>
                       <option value="none">一般直線</option><option value="arc-up">向上弧形</option><option value="arc-down">向下弧形</option><option value="wave">波浪文字</option>
@@ -3098,8 +3189,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                       <input type="range" min={5} max={100} value={selEl.fx?.warpAmount ?? 35} onChange={(e) => updateFx({ warpAmount: Number(e.target.value) })} style={{ width: "100%", accentColor: "#7c3aed" }} />
                       {selEl.fx?.warp === "wave" && <><label style={S.rlabel}>波浪數</label><input type="range" min={1} max={5} step={1} value={selEl.fx?.waveCount ?? 2} onChange={(e) => updateFx({ waveCount: Number(e.target.value) })} style={{ width: "100%", accentColor: "#7c3aed" }} /></>}
                     </>)}
+                    </PropSection>
                     {/* AI 文字藝術字入口 */}
-                    <div style={{ height: 1, background: "#e5e7eb", margin: "18px 0" }} />
+                    <PropSection id="textart" title="AI 文字藝術字" summary="參考圖片生成特殊字">
                     <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>想做更特殊的文字效果？</div>
                     <button onClick={() => setArtView("setup")} style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", padding: "12px 14px", borderRadius: 12, border: "none", cursor: "pointer", background: "linear-gradient(135deg,#8b5cf6,#7c3aed)", color: "#fff", textAlign: "left" }}>
                       <span style={{ fontSize: 20, lineHeight: 1 }}>✨</span>
@@ -3108,13 +3200,13 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                         <span style={{ display: "block", fontSize: 11, opacity: 0.85, marginTop: 2 }}>參考圖片生成特殊文字設計</span>
                       </span>
                     </button>
-                    <div style={{ height: 1, background: "#e5e7eb", margin: "18px 0" }} />
+                    </PropSection>
                   </>
                 ))}
                 {selEl.textLayout && selEl.fx?.warp && selEl.fx.warp !== "none" && <p style={{padding:12,fontSize:12}}>變形文字以單行顯示；取消變形即可恢復多行排版。</p>}
                 {selEl.shape && (
                   <>
-                    <div style={S.rhead}>{selEl.shape.kind === "icon" ? "圖標設定" : selEl.shape.kind === "line" ? "線條設定" : "形狀設定"}</div>
+                    <PropSection id="shape" title={selEl.shape.kind === "icon" ? "圖標" : selEl.shape.kind === "line" ? "線條" : "形狀"} defaultOpen first>
                     {selEl.shape.kind === "path" && !selEl.shape.closed && selEl.type !== "drawing" && (
                       <div style={{ marginBottom: 12 }}>
                         <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.6, marginBottom: 8 }}>這是一條沒有封閉的線：可以改顏色、粗細；封閉之後就能填色、當成放圖的框。</div>
@@ -3193,7 +3285,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                         <input value={selEl.shape.fill} onChange={(e) => updateShape({ fill: e.target.value })} style={{ ...S.rinput, flex: 1 }} />
                       </div>
                     </>)}
-                    <div style={{ height: 1, background: "#e5e7eb", margin: "18px 0" }} />
+                    </PropSection>
                   </>
                 )}
                 {selEl.isArt && (
@@ -3228,6 +3320,7 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                   </>
                 )}
                 {selEl.canvas && !selEl.isText && !selEl.shape && !selEl.isArt && selectedIds.length === 1 && (
+                  <PropSection id="swap" title="換圖" defaultOpen first>
                   <div style={{ marginBottom: 14 }}>
                     <button onClick={() => setSwapFor((v) => (v === selEl.id ? null : selEl.id))}
                       style={{ width: "100%", height: 34, borderRadius: 8, border: "1px solid #c4b5fd", background: swapFor === selEl.id ? "#f5f3ff" : "#fff", color: "#6d28d9", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
@@ -3241,22 +3334,23 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                       </div>
                     )}
                   </div>
-                )}
-                {selEl.canvas && !selEl.isText && !selEl.shape && !selEl.isArt && selectedIds.length === 1 && (
                   <ReplaceImagePanel key={selEl.id} layerId={selEl.id} aspect={selEl.w / (selEl.h || 1)}
                     isCutout={() => { const l = layersRef.current.find((x) => x.id === selectedIdsRef.current[0]); return !!l?.canvas && l.type !== "background" && hasTransparency(l.canvas); }}
                     getSource={(cutout) => { const l = layersRef.current.find((x) => x.id === selectedIdsRef.current[0]); return l?.canvas ? sourceDataUrl(l.canvas, cutout) : null; }}
                     onPreview={(v, cutout) => previewLayerImage(selEl.id, v, cutout)}
                     onConfirm={confirmLayerImage} onCancel={cancelLayerImage}
                     library={backgrounds ?? []} uploadFile={uploadImageFile} />
+                  </PropSection>
                 )}
                 {selEl.canvas && !selEl.isText && !selEl.shape && selEl.type !== "background" && (
+                  <PropSection id="clip" title="放進形狀（剪裁遮色片）" summary={selEl.clipTo ? "已放進形狀" : undefined}>
                   <ClipPanel
                     frameName={selEl.clipTo ? (panel.find((l) => l.id === selEl.clipTo)?.name ?? null) : null}
                     frames={panel.filter((l) => l.id !== selEl.id && isFillableShape(l.shape)).map((l) => ({ id: l.id, name: l.name, shape: l.shape! }))}
                     onPut={(frameId) => putIntoFrame(selectedIdsRef.current[0], frameId)}
                     onFit={() => { const id = selectedIdsRef.current[0], f = layersRef.current.find((l) => l.id === id)?.clipTo; if (f) fitIntoFrame(id, f); }}
                     onTakeOut={() => takeOutOfFrame(selectedIdsRef.current[0])} />
+                  </PropSection>
                 )}
                 {/* 畫在這張圖片上的筆畫：跟 PS 一樣就是這個圖層的一部分，圖層列表不另外列出來 */}
                 {selEl.paint?.length ? (
@@ -3267,20 +3361,18 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                       style={{ ...S.rbtn, height: 26, padding: "0 10px", fontSize: 12 }}>清除筆畫</button>
                   </div>
                 ) : null}
-                <div style={S.rhead}>圖層設定</div>
-                <label style={S.rlabel}>透明度 <span style={{ float: "right", color: "#9ca3af" }}>{Math.round(selEl.opacity * 100)}%</span></label>
-                <input type="range" min={0} max={100} value={Math.round(selEl.opacity * 100)} onChange={(e) => updateText({ opacity: Number(e.target.value) / 100 })} style={{ width: "100%", accentColor: "#7c3aed" }} />
+                <PropSection id="opacity" title="透明度" defaultOpen summary={`${Math.round(selEl.opacity * 100)}%`}>
+                <input type="range" min={0} max={100} value={Math.round(selEl.opacity * 100)} onChange={(e) => updateText({ opacity: Number(e.target.value) / 100 })} aria-label="透明度" style={{ width: "100%", accentColor: "#7c3aed" }} />
+                </PropSection>
                 {selEl.type !== "background" && (
-                  <SkewControls skewX={selEl.skewX ?? 0} skewY={selEl.skewY ?? 0} onChange={(patch) => updateText(patch)} />
-                )}
-                {selEl.type !== "background" && (
+                  <PropSection id="layerfx" title="陰影・光暈・傾斜" summary={layerFxSummary(selEl)}>
                   <ShadowControls shadow={selEl.shadow ?? null} onChange={(shadow) => updateText({ shadow })} />
-                )}
-                {selEl.type !== "background" && (
                   <GlowControls glow={selEl.glow ?? null} onChange={(glow) => updateText({ glow })} />
+                  <SkewControls skewX={selEl.skewX ?? 0} skewY={selEl.skewY ?? 0} onChange={(patch) => updateText(patch)} />
+                  </PropSection>
                 )}
               </div>
-            ) : panelTab === "anim" ? (
+            ) : (
               <div style={{ padding: "2px 16px 16px", overflowY: "auto" }}>
                 <CurrentLayerPicker layers={panel} selected={selEl} extra={selectedIds.length - 1} onPick={(id) => { selectLayerOrGroup(id); render(); }} />
                 {/* 物件存在時間：細節在下方時間軸拖，這裡只顯示、給一個入口 */}
@@ -3291,6 +3383,9 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                   </span>
                   <button onClick={() => setDockMode("selected")} style={{ marginLeft: "auto", border: "none", background: "transparent", color: "#6d28d9", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>在時間軸調整 ↓</button>
                 </div>
+                <AnimCopyBar canCopy={copyableAnims(selEl.anims).length > 0} hasClip={!!animClip} clipLabel={animClip?.label ?? null} count={selectedIds.length}
+                  stagger={staggerPaste} onStagger={setStaggerPaste}
+                  onCopy={copyAnims} onPaste={() => { if (animClip) applyAnimsToSelection(animClip.anims); }} onSavePreset={saveAnimPreset} />
                 <LayerAnimSettings anims={selEl.anims} shineOnly={selEl.shineOnly} focusId={focusAnimId}
                   carouselCard={carouselCardOf(panel, selEl)} library={backgrounds ?? []} uploadFile={uploadImageFile}
                   onCardText={(id, value) => {
@@ -3302,12 +3397,6 @@ export function MagicLayersEditor({ image, layers, fragmentation, backgrounds, l
                   onChange={(animId, patch) => { patchAnimShared(layersRef.current, selEl, animId, patch); markDirty(); render(); refresh(); }}
                   onRemove={(animId) => { removeAnimShared(layersRef.current, selEl, animId); markDirty(); render(); refresh(); }}
                   onAdd={(kind) => { addAnimsTo([selEl], kind, doc.w / 2, layersRef.current); markDirty(); render(); refresh(); }} />
-              </div>
-            ) : (
-              <div style={{ padding: 16 }}>
-                <div style={S.rhead}>文件</div>
-                <div style={{ fontSize: 13, color: "#6b7280" }}>尺寸：{doc.w} × {doc.h} px</div>
-                <div style={{ fontSize: 13, color: "#6b7280", marginTop: 6 }}>圖層數：{layersRef.current.length}</div>
               </div>
             )}
           </>
@@ -3775,6 +3864,72 @@ function PsdReportCard({ report, onClose }: { report: { pages: number; layers: n
           )}
         </>
       )}
+    </div>
+  );
+}
+/**
+ * 貼上動畫／套公版：取代選取物件原本的動畫（輪播那組保留，不然卡片會停住）。
+ * 錯開時照畫面閱讀順序（由上到下、由左到右）一個晚 stagger 秒。回傳有沒有套到東西。
+ */
+function pasteAnimsTo(layers: EL[], ids: string[], src: LayerAnim[], stagger: number): boolean {
+  const picked = layers.filter((l) => ids.includes(l.id) && !l.locked);
+  if (!picked.length || !src.length) return false;
+  const order = readingOrder(picked.map((l) => ({ cx: l.cx, cy: l.cy, h: l.h }))).map((i) => picked[i]);
+  const per = animsForTargets(src, order.length, stagger, () => `anim_${crypto.randomUUID().slice(0, 6)}`);
+  order.forEach((l, i) => {
+    const keep = (l.anims ?? []).filter((a) => a.kind === "carousel");
+    l.anims = [...keep, ...per[i]];
+  });
+  return true;
+}
+/** 這一頁的背景色：最底下一層是鋪滿整頁的純色色塊才算（圖片背景回傳 null）。 */
+function pageBackgroundOf(layers: EL[], w: number, h: number): string | null {
+  const b = layers[0];
+  if (!b || b.type !== "background" || b.shape?.kind !== "rect" || b.shape.gradient) return null;
+  return b.w >= w * 0.98 && b.h >= h * 0.98 ? b.shape.fill : null;
+}
+/** 設定背景色：有純色背景就改顏色，沒有就在最底下墊一塊鋪滿的色塊（鎖住）。回傳有沒有改。 */
+function applyPageBackground(layers: EL[], color: string, w: number, h: number, font: string): boolean {
+  const b = layers[0];
+  if (b && pageBackgroundOf(layers, w, h) !== null && b.shape) { b.shape = { ...b.shape, fill: color }; b.thumb = makeThumb(b); return true; }
+  const el: EL = {
+    id: `bg_${crypto.randomUUID().slice(0, 8)}`, name: "背景色", type: "background", semanticId: "background", instanceId: null, confidence: 1, editable: true, source: "generated",
+    isText: false, text: "", color: "#000", fontSize: 24, fontFamily: font, fontWeight: 700, align: "center",
+    shape: { kind: "rect", fill: color, stroke: "none", strokeWidth: 0 }, canvas: null, naturalW: w, naturalH: h, src: null,
+    cx: w / 2, cy: h / 2, w, h, rotation: 0, visible: true, locked: true, opacity: 1, embeddedText: [], thumb: null,
+  };
+  el.thumb = makeThumb(el);
+  layers.unshift(el);
+  return true;
+}
+/** 空白畫布的起點：套範本、上傳、匯入 PSD、加文字、AI 生成背景。 */
+function EmptyCanvasStart(props: { onTemplate: () => void; onUpload: () => void; onPsd: () => void; onText: () => void; onAi: () => void }) {
+  const items: { label: string; hint: string; Icon: typeof LayoutTemplate; onClick: () => void; primary?: boolean }[] = [
+    { label: "套用範本", hint: "從現成版型開始改", Icon: LayoutTemplate, onClick: props.onTemplate, primary: true },
+    { label: "上傳圖片", hint: "照片、商品圖", Icon: Upload, onClick: props.onUpload },
+    { label: "匯入 PSD", hint: "工作區域變成多頁", Icon: Layers, onClick: props.onPsd },
+    { label: "加文字", hint: "標題、說明文字", Icon: Type, onClick: props.onText },
+    { label: "AI 生成背景", hint: "描述畫面就生成", Icon: WandSparkles, onClick: props.onAi },
+  ];
+  return (
+    <div style={{ position: "absolute", inset: 0, zIndex: 40, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
+      <div style={{ pointerEvents: "auto", width: "min(460px, 90%)", background: "#fff", border: "1px solid #ebeff5", borderRadius: 16, boxShadow: "0 8px 30px rgba(17,24,39,.08)", padding: 20 }}>
+        <div style={{ fontSize: 16, fontWeight: 800, color: "#111827" }}>從哪裡開始？</div>
+        <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>選一個起點，之後都可以再加別的東西。</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 14 }}>
+          {items.map(({ label, hint, Icon, onClick, primary }) => (
+            <button key={label} onClick={onClick}
+              style={{ gridColumn: primary ? "1 / -1" : undefined, display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 12, cursor: "pointer", textAlign: "left",
+                border: `1.5px solid ${primary ? "#7c3aed" : "#ebeff5"}`, background: primary ? "#f5f3ff" : "#fff" }}>
+              <span style={{ width: 34, height: 34, flex: "0 0 auto", borderRadius: 10, display: "inline-flex", alignItems: "center", justifyContent: "center", background: primary ? "#7c3aed" : "#f5f3ff", color: primary ? "#fff" : "#7c3aed" }}><Icon size={17} /></span>
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: "block", fontSize: 13, fontWeight: 700, color: "#111827" }}>{label}</span>
+                <span style={{ display: "block", fontSize: 11, color: "#9ca3af", marginTop: 1 }}>{hint}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -5158,7 +5313,6 @@ function ClipPanel({ frameName, frames, onPut, onFit, onTakeOut }: {
   });
   return (
     <div style={{ marginBottom: 18 }}>
-      <div style={S.rhead}>放進形狀（剪裁遮色片）</div>
       {frameName !== null ? (<>
         <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.6, marginBottom: 8 }}>
           已放進「{frameName}」。拖這張圖可以調整在框裡的位置；拖形狀會連圖一起移動。
@@ -5373,6 +5527,42 @@ function ResizeHandle({ label, onPointerDown }: { label: string; onPointerDown: 
  * 改成淺底、深色粗體、帶圖示與數量，一眼就找得到。
  * collapseDown：放在最下面的區塊（圖層）收合方向是往下。
  */
+/**
+ * 右側設定的一個區塊：標題列點了可以收合，收起來時標題旁顯示目前的設定摘要（例如「外框、陰影」）。
+ * 每個區塊開或關記在這台瀏覽器：常用的預設展開、進階的預設收起，使用者改過就照他的。
+ */
+function PropSection({ id, title, summary, defaultOpen = false, first = false, children }: {
+  id: string; title: string; summary?: string; defaultOpen?: boolean; first?: boolean; children: React.ReactNode;
+}) {
+  const key = `mira.props.${id}`;
+  const [open, setOpen] = useState(() => {
+    try { const v = window.localStorage.getItem(key); if (v === "1" || v === "0") return v === "1"; } catch { /* 讀不到就用預設 */ }
+    return defaultOpen;
+  });
+  const toggle = () => setOpen((v) => { try { window.localStorage.setItem(key, v ? "0" : "1"); } catch { /* 存不了就只在這次有效 */ } return !v; });
+  return (
+    <div style={{ borderTop: first ? "none" : "1px solid #eef0f3", margin: first ? "4px 0 0" : 0 }}>
+      <button onClick={toggle} aria-expanded={open}
+        style={{ width: "100%", height: 40, display: "flex", alignItems: "center", gap: 8, padding: 0, border: "none", background: "transparent", cursor: "pointer", textAlign: "left" }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: "#111827", whiteSpace: "nowrap" }}>{title}</span>
+        {!open && summary && <span style={{ flex: 1, minWidth: 0, fontSize: 11, color: "#9ca3af", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{summary}</span>}
+        <span style={{ marginLeft: "auto", color: "#9ca3af", display: "inline-flex" }}>{open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</span>
+      </button>
+      {open && <div style={{ paddingBottom: 14 }}>{children}</div>}
+    </div>
+  );
+}
+/** 文字效果收起來時的摘要。 */
+function textFxSummary(fx: TextFx | null | undefined): string {
+  if (!fx) return "無";
+  const on = [fx.gradient ? "漸層" : "", fx.strokeW ? "外框" : "", fx.shadow ? "陰影" : "", fx.italic ? "斜體" : "", fx.warp && fx.warp !== "none" ? "彎曲" : ""].filter(Boolean);
+  return on.length ? on.join("、") : "無";
+}
+/** 陰影／光暈／傾斜收起來時的摘要。 */
+function layerFxSummary(l: { shadow?: unknown; glow?: unknown; skewX?: number; skewY?: number }): string {
+  const on = [l.shadow ? "陰影" : "", l.glow ? "光暈" : "", l.skewX || l.skewY ? "傾斜" : ""].filter(Boolean);
+  return on.length ? on.join("、") : "無";
+}
 function SectionHeader({ icon, title, hint, count, open, onToggle, collapseDown }: {
   icon: React.ReactNode; title: string; hint?: string; count?: number; open: boolean; onToggle: () => void; collapseDown?: boolean;
 }) {

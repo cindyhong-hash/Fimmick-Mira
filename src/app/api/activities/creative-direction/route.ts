@@ -3,6 +3,8 @@
  * 一句「本次廣告的建議畫面方向」+ 3–5 個「這次想強調什麼」的快速選項。
  * 只當創作輔助（非阻塞、可修改），不直接決定生成。
  */
+import { protectPaidRoute } from "@/lib/site-gate";
+import { dailyQuota } from "@/lib/paid-quota";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { chatTextOpenRouter } from "@/lib/openrouter";
@@ -22,7 +24,7 @@ function parseJson(text: string | null): Record<string, unknown> | null {
   }
 }
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   const body = await request.json().catch(() => ({}));
   const clientId = String(body.clientId ?? "");
   const productId = String(body.productId ?? "");
@@ -82,3 +84,6 @@ ${colors.length ? `主要色彩：${colors.join("、")}` : ""}
     return NextResponse.json(fallback);
   }
 }
+
+// 會花 AI 費用：正式站沒設網站密碼時，用每日上限把關（見 src/lib/paid-quota.ts）
+export const POST = protectPaidRoute(handlePost, { quota: dailyQuota("ai-text") });

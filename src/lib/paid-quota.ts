@@ -20,13 +20,25 @@ const SYSTEM_CLIENT_ID = "__system__";
 
 /** 每個付費功能的預設每日上限；可用環境變數 PAID_DAILY_LIMIT_<BUCKET> 覆蓋（例如 PAID_DAILY_LIMIT_REBUILD=80，設 0 就是關閉）。 */
 export const PAID_BUCKETS = {
-  "rebuild": { label: "照參考圖重做", limit: 50 },
-  "image-set": { label: "產品套圖", limit: 30 },
-  "image-set-analyze": { label: "產品分析", limit: 60 },
-  "image-set-retry": { label: "套圖重新生成", limit: 60 },
-  "library-regenerate": { label: "素材重新生成", limit: 60 },
-  "compose": { label: "AI 生成背景／合成設計稿", limit: 80 },
-  "replace-image": { label: "AI 換圖", limit: 60 },
+  // 2026-10-06 使用者要求全面調低（正式站沒設密碼，避免被刷爆）；要調整用環境變數，不用改程式
+  "rebuild": { label: "照參考圖重做", limit: 20 },
+  "image-set": { label: "產品套圖", limit: 10 },
+  "image-set-analyze": { label: "產品分析", limit: 20 },
+  "image-set-retry": { label: "套圖重新生成", limit: 20 },
+  "library-regenerate": { label: "素材重新生成", limit: 20 },
+  "compose": { label: "AI 生成背景／合成設計稿", limit: 30 },
+  "replace-image": { label: "AI 換圖", limit: 20 },
+  // 下面這些原本完全沒有上限
+  "generate": { label: "AI 生成圖文", limit: 30 },
+  "magic-fill": { label: "生成式填色", limit: 20 },
+  "outpaint": { label: "擴圖", limit: 10 },
+  "arttext": { label: "AI 文字藝術字", limit: 15 },
+  "cutout": { label: "去背", limit: 50 },
+  "inpaint": { label: "局部重繪", limit: 20 },
+  "layer-analyze": { label: "拆解圖層", limit: 20 },
+  "ai-text": { label: "AI 文字功能（文案、分析、企劃）", limit: 100 },
+  // 首頁「今日靈感」一進來就會自動呼叫：獨立一個額度，才不會逛首頁就把文案、分析的次數吃光
+  "inspiration": { label: "靈感中心", limit: 80 },
 } as const;
 export type PaidBucket = keyof typeof PAID_BUCKETS;
 

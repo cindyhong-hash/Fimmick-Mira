@@ -1,3 +1,5 @@
+import { protectPaidRoute } from "@/lib/site-gate";
+import { dailyQuota } from "@/lib/paid-quota";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { chatTextOpenRouter } from "@/lib/openrouter";
@@ -13,7 +15,7 @@ function extractJson(text: string | null) {
   try { return JSON.parse(text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")); } catch { return null; }
 }
 
-export async function POST(request: Request, { params }: { params: Promise<{ planId: string }> }) {
+async function handlePost(request: Request, { params }: { params: Promise<{ planId: string }> }) {
   const { planId } = await params;
   const body = await request.json().catch(() => ({}));
   const plan = await db.monthlyMarketingPlan.findUnique({
@@ -47,3 +49,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ pla
   if (!plan) return NextResponse.json({ error: "Plan not found" }, { status: 404 });
   return NextResponse.json({ strategy: parseJsonObject(plan.strategyJson, {}) });
 }
+
+// 會花 AI 費用：正式站沒設網站密碼時，用每日上限把關（見 src/lib/paid-quota.ts）
+export const POST = protectPaidRoute(handlePost, { quota: dailyQuota("ai-text") });

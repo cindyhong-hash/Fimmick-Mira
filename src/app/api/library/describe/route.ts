@@ -1,3 +1,5 @@
+import { protectPaidRoute } from "@/lib/site-gate";
+import { dailyQuota } from "@/lib/paid-quota";
 import { NextResponse } from "next/server";
 
 // LLM 呼叫可能超過 Vercel 的預設 10 秒上限（素材描述）。
@@ -11,7 +13,7 @@ const OPENROUTER_MODEL = process.env.OPENROUTER_VISION_MODEL ?? "openai/gpt-5.4-
  * Vision-describes an uploaded product image into a short Traditional-Chinese
  * subject phrase, used to fill the composer's 主體物件.
  */
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   try {
     if (!OPENROUTER_API_KEY || OPENROUTER_API_KEY === "your-openrouter-api-key-here") {
       return NextResponse.json({ error: "OPENROUTER_API_KEY 尚未設定" }, { status: 500 });
@@ -80,3 +82,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+// 會花 AI 費用：正式站沒設網站密碼時，用每日上限把關（見 src/lib/paid-quota.ts）
+export const POST = protectPaidRoute(handlePost, { quota: dailyQuota("ai-text") });

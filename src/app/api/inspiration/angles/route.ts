@@ -3,6 +3,8 @@
  * POST { clientId, topic } → { angles: [{ type, title, copyDirection }] }
  * 讓使用者點「看看 AI 怎麼切入」後，直接選一個角度「用這個做貼文」，不必先進完整 Brief。
  */
+import { protectPaidRoute } from "@/lib/site-gate";
+import { dailyQuota } from "@/lib/paid-quota";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { chatTextOpenRouter } from "@/lib/openrouter";
@@ -22,7 +24,7 @@ function extractArray(text: string | null): Record<string, unknown>[] {
   }
 }
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   const body = await request.json().catch(() => ({}));
   const clientId = String(body.clientId ?? "");
   const topic = String(body.topic ?? "").trim();
@@ -60,3 +62,6 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ angles });
 }
+
+// 會花 AI 費用：正式站沒設網站密碼時，用每日上限把關（見 src/lib/paid-quota.ts）
+export const POST = protectPaidRoute(handlePost, { quota: dailyQuota("inspiration") });

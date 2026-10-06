@@ -1,3 +1,5 @@
+import { protectPaidRoute } from "@/lib/site-gate";
+import { dailyQuota } from "@/lib/paid-quota";
 import { classifyAndStoreAssetType } from "@/lib/library/classify-asset";
 import { NextResponse } from "next/server";
 import { after } from "next/server";
@@ -33,7 +35,7 @@ async function loadImageBuffer(url: string, host: string): Promise<Buffer> {
  * 關閉 popup ——實際生成用 `after()` 喺 response 送出之後繼續行，完成/失敗都會更新
  * 返嗰筆記錄（DONE/FAILED），畫廊 poll 呢個 id 就會見到最新狀態。
  */
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   const body = await request.json();
   const { clientId, subject, batchId } = body ?? {};
   const host = new URL(request.url).origin;
@@ -417,3 +419,6 @@ async function runGeneration(rowId: string, body: Record<string, any>, host: str
     await markFailed(rowId, message);
   }
 }
+
+// 會花 AI 費用：正式站沒設網站密碼時，用每日上限把關（見 src/lib/paid-quota.ts）
+export const POST = protectPaidRoute(handlePost, { quota: dailyQuota("generate") });

@@ -1,3 +1,5 @@
+import { protectPaidRoute } from "@/lib/site-gate";
+import { dailyQuota } from "@/lib/paid-quota";
 import { NextResponse } from "next/server";
 import sharp from "sharp";
 import { inpaintImageFal } from "@/lib/fal";
@@ -10,7 +12,7 @@ export const maxDuration = 180;
 type Direction = "auto" | "left" | "right" | "top" | "bottom" | "center";
 const RATIOS: Record<string, [number, number]> = { "1:1": [1, 1], "4:5": [4, 5], "9:16": [9, 16], "16:9": [16, 9] };
 
-export async function POST(req: Request) {
+async function handlePost(req: Request) {
   try {
     const body = await req.json() as { imageDataUrl?: string; width?: number; height?: number; ratio?: string; direction?: Direction; mode?: "keep" | "recompose"; variants?: number; prompt?: string };
     if (!body.imageDataUrl?.startsWith("data:image/")) return NextResponse.json({ error: "缺少畫布圖片" }, { status: 400 });
@@ -79,3 +81,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "擴圖失敗" }, { status: 500 });
   }
 }
+
+// 會花 AI 費用：正式站沒設網站密碼時，用每日上限把關（見 src/lib/paid-quota.ts）
+export const POST = protectPaidRoute(handlePost, { quota: dailyQuota("outpaint") });

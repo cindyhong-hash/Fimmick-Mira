@@ -1,3 +1,5 @@
+import { protectPaidRoute } from "@/lib/site-gate";
+import { dailyQuota } from "@/lib/paid-quota";
 import { NextResponse } from "next/server";
 import "@/lib/fonts"; // 必須喺 sharp 之前 import，令 fontconfig 揾到打包咗嘅中文字型
 import { editImageFal, eraseImageFal } from "@/lib/fal";
@@ -596,7 +598,7 @@ function boundsToPreciseLocation(b?: { x:number;y:number;width:number;height:num
 
 // ── Route handler ─────────────────────────────────────────────────────────────
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   try {
     const {
       imageUrl,
@@ -771,3 +773,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }
 }
+
+// 會花 AI 費用：正式站沒設網站密碼時，用每日上限把關（見 src/lib/paid-quota.ts）
+export const POST = protectPaidRoute(handlePost, { quota: dailyQuota("inpaint") });

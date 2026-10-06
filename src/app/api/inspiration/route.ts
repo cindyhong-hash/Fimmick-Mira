@@ -8,6 +8,8 @@
  * 防幻覺：產品 label / reuse 活動 id 都對照真實資料驗證；brandFit clamp 0–100；tag/format 白名單。
  * 誠實原則：reuse 不使用捏造的互動數據，只用「同期做過」這類質化說明。
  */
+import { protectPaidRoute } from "@/lib/site-gate";
+import { dailyQuota } from "@/lib/paid-quota";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { chatTextOpenRouter } from "@/lib/openrouter";
@@ -133,7 +135,7 @@ function buildReuseOpportunity(
   };
 }
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   const body = await request.json().catch(() => ({}));
   const clientId = String(body.clientId ?? "");
   const query = String(body.query ?? "").trim();
@@ -453,3 +455,6 @@ ${countRule}`;
   console.log(`[inspiration] ${Object.entries(lap).map(([k, v]) => `${k}=${v}ms`).join(" ")}`);
   return NextResponse.json(result);
 }
+
+// 會花 AI 費用：正式站沒設網站密碼時，用每日上限把關（見 src/lib/paid-quota.ts）
+export const POST = protectPaidRoute(handlePost, { quota: dailyQuota("inspiration") });

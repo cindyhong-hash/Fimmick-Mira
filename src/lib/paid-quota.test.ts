@@ -57,12 +57,12 @@ test("每個功能各算各的", async () => {
 });
 
 test("上限可以用環境變數調整，設 0 就是暫停；亂填就用預設值", () => {
-  assert.equal(dailyLimitFor("rebuild", {}), 50);
-  assert.equal(dailyLimitFor("image-set", {}), 30);
+  assert.equal(dailyLimitFor("rebuild", {}), 20);
+  assert.equal(dailyLimitFor("image-set", {}), 10);
   assert.equal(dailyLimitFor("rebuild", { PAID_DAILY_LIMIT_REBUILD: "80" }), 80);
   assert.equal(dailyLimitFor("image-set-analyze", { PAID_DAILY_LIMIT_IMAGE_SET_ANALYZE: "0" }), 0);
-  assert.equal(dailyLimitFor("rebuild", { PAID_DAILY_LIMIT_REBUILD: "abc" }), 50);
-  assert.equal(dailyLimitFor("rebuild", { PAID_DAILY_LIMIT_REBUILD: "-5" }), 50);
+  assert.equal(dailyLimitFor("rebuild", { PAID_DAILY_LIMIT_REBUILD: "abc" }), 20);
+  assert.equal(dailyLimitFor("rebuild", { PAID_DAILY_LIMIT_REBUILD: "-5" }), 20);
 });
 
 test("設 0 的功能直接擋下，不寫任何紀錄", async () => {

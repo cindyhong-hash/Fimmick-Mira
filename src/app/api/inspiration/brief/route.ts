@@ -8,6 +8,8 @@
  *
  * 失敗不阻斷：回 {} 讓呼叫端退回既有的欄位拼裝法，使用者照樣進得了表單。
  */
+import { protectPaidRoute } from "@/lib/site-gate";
+import { dailyQuota } from "@/lib/paid-quota";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { chatTextOpenRouter } from "@/lib/openrouter";
@@ -37,7 +39,7 @@ const cleanRequiredText = (raw: unknown): string | undefined => {
   return t && t.length <= 20 ? t : undefined;
 };
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   const body = await request.json().catch(() => ({}));
   const clientId = String(body.clientId ?? "");
   const topic = String(body.topic ?? "").trim();
@@ -75,3 +77,6 @@ ${ctxLines}
     requiredText: cleanRequiredText(parsed?.requiredText),
   });
 }
+
+// 會花 AI 費用：正式站沒設網站密碼時，用每日上限把關（見 src/lib/paid-quota.ts）
+export const POST = protectPaidRoute(handlePost, { quota: dailyQuota("inspiration") });

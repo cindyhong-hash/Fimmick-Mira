@@ -1,3 +1,5 @@
+import { protectPaidRoute } from "@/lib/site-gate";
+import { dailyQuota } from "@/lib/paid-quota";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { chatTextOpenRouter } from "@/lib/openrouter";
@@ -8,7 +10,7 @@ export const maxDuration = 60;
 
 function parse(text: string | null) { if (!text) return null; try { return JSON.parse(text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")); } catch { return null; } }
 
-export async function POST(_request: Request, { params }: { params: Promise<{ itemId: string }> }) {
+async function handlePost(_request: Request, { params }: { params: Promise<{ itemId: string }> }) {
   const { itemId } = await params;
   const item = await db.contentPlanItem.findUnique({ where: { id: itemId }, include: { campaign: true, monthlyPlan: { include: { client: { select: { name: true } } } } } });
   if (!item) return NextResponse.json({ error: "Item not found" }, { status: 404 });
@@ -17,3 +19,6 @@ export async function POST(_request: Request, { params }: { params: Promise<{ it
   const updated = await db.contentPlanItem.update({ where: { id: itemId }, data: { topic: String(generated.topic || item.topic), contentDirection: String(generated.contentDirection || item.contentDirection), recommendationReason: String(generated.recommendationReason || item.recommendationReason || ""), format: generated.format === "CAROUSEL" ? "CAROUSEL" : "SINGLE" } });
   return NextResponse.json({ ...updated, platforms: parseJsonArray(updated.platforms), sourceSignals: parseJsonArrayAny(updated.sourceSignals) });
 }
+
+// 會花 AI 費用：正式站沒設網站密碼時，用每日上限把關（見 src/lib/paid-quota.ts）
+export const POST = protectPaidRoute(handlePost, { quota: dailyQuota("ai-text") });

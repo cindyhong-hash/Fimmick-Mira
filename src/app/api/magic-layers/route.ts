@@ -10,6 +10,8 @@
    Requires .env.local: OPENROUTER_API_KEY, FAL_KEY.
    Optional: ML_MASK_PRIMARY=sam2 (default birefnet), FAL_SAM2_MODEL.
    ============================================================ */
+import { protectPaidRoute } from "@/lib/site-gate";
+import { dailyQuota } from "@/lib/paid-quota";
 import { NextResponse } from "next/server";
 import { analyze } from "@/lib/magic-layers/analysis.ts";
 import { OpenRouterDetector } from "@/lib/magic-layers/openrouter-detector.ts";
@@ -23,7 +25,7 @@ export const maxDuration = 120;
 
 function dataUrlToBuffer(u: string): Buffer { return Buffer.from((u.split(",")[1] ?? ""), "base64"); }
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   try {
     if (!process.env.OPENROUTER_API_KEY) return NextResponse.json({ error: "缺少 OPENROUTER_API_KEY，請在 .env.local 設定" }, { status: 400 });
     if (!process.env.FAL_KEY) return NextResponse.json({ error: "缺少 FAL_KEY，請在 .env.local 設定" }, { status: 400 });
@@ -84,3 +86,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
+
+// 會花 AI 費用：正式站沒設網站密碼時，用每日上限把關（見 src/lib/paid-quota.ts）
+export const POST = protectPaidRoute(handlePost, { quota: dailyQuota("layer-analyze") });

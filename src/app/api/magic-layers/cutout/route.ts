@@ -7,6 +7,8 @@
    Returns: { url, width, height } | { error }
    Requires FAL_KEY (BiRefNet). Skips re-cutting an already-transparent PNG.
    ============================================================ */
+import { protectPaidRoute } from "@/lib/site-gate";
+import { dailyQuota } from "@/lib/paid-quota";
 import { NextResponse } from "next/server";
 import { removeBackground } from "@/lib/fal";
 import { saveBuffer } from "@/lib/storage";
@@ -14,7 +16,7 @@ import sharp from "sharp";
 
 export const maxDuration = 60;
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   try {
     if (!process.env.FAL_KEY) return NextResponse.json({ error: "缺少 FAL_KEY（產品去背需要）" }, { status: 400 });
     const { imageDataUrl } = await request.json();
@@ -44,3 +46,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
+
+// 會花 AI 費用：正式站沒設網站密碼時，用每日上限把關（見 src/lib/paid-quota.ts）
+export const POST = protectPaidRoute(handlePost, { quota: dailyQuota("cutout") });

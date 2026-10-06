@@ -1,3 +1,5 @@
+import { protectPaidRoute } from "@/lib/site-gate";
+import { dailyQuota } from "@/lib/paid-quota";
 import { NextResponse } from "next/server";
 
 // LLM 呼叫可能超過 Vercel 的預設 10 秒上限（AI 反推提示詞）。
@@ -7,7 +9,7 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 // gemini-2.0-flash-001 已從 OpenRouter 下架(404) → 改用可用的 2.5-flash（與 analyze-image/optimize-prompt 一致）
 const OPENROUTER_MODEL = process.env.OPENROUTER_VISION_MODEL ?? "google/gemini-2.5-flash";
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   try {
     if (!OPENROUTER_API_KEY || OPENROUTER_API_KEY === "your-openrouter-api-key-here") {
       return NextResponse.json(
@@ -106,3 +108,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+// 會花 AI 費用：正式站沒設網站密碼時，用每日上限把關（見 src/lib/paid-quota.ts）
+export const POST = protectPaidRoute(handlePost, { quota: dailyQuota("ai-text") });

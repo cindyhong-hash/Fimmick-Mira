@@ -15,6 +15,8 @@
    Returns: { url, transparent } | { error }
    需要 OPENROUTER_API_KEY（生字）。去背為本地色鍵，不需 FAL。
    ============================================================ */
+import { protectPaidRoute } from "@/lib/site-gate";
+import { dailyQuota } from "@/lib/paid-quota";
 import { NextResponse } from "next/server";
 import { describeImageOpenRouter } from "@/lib/openrouter";
 import { loadBuffer, saveBuffer } from "@/lib/storage";
@@ -77,7 +79,7 @@ const STYLE_HINTS: Record<string, string> = {
   cute: "chunky bubbly rounded letters with a cheerful playful colour palette",
 };
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   try {
     if (!process.env.OPENROUTER_API_KEY) return NextResponse.json({ error: "缺少 OPENROUTER_API_KEY（生成特效字需要）" }, { status: 400 });
     const { text, subtitle, width, height, style, brandTones, refImageUrl, guideImageUrl, sceneImageUrl, editImageUrl, instruction } = await request.json();
@@ -192,3 +194,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
+
+// 會花 AI 費用：正式站沒設網站密碼時，用每日上限把關（見 src/lib/paid-quota.ts）
+export const POST = protectPaidRoute(handlePost, { quota: dailyQuota("arttext") });

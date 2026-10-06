@@ -1,3 +1,5 @@
+import { protectPaidRoute } from "@/lib/site-gate";
+import { dailyQuota } from "@/lib/paid-quota";
 import { NextResponse } from "next/server";
 import { inpaintImageFal } from "@/lib/fal";
 import { translateBriefToEnglishPrompt } from "@/lib/generate";
@@ -9,7 +11,7 @@ import { editWithImages } from "@/lib/magic-layers/replace-image.ts";
 
 export const maxDuration = 180;
 
-export async function POST(req: Request) {
+async function handlePost(req: Request) {
   try {
     const body = await req.json() as { imageDataUrl?: string; maskDataUrl?: string; variants?: number; prompt?: string; mode?: "fill" | "remove";
       /** 參考圖（選填，只有「生成」用）＋框（畫布座標，跟遮罩同一個尺寸）。 */
@@ -81,3 +83,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "魔術棒補空白失敗" }, { status: 500 });
   }
 }
+
+// 會花 AI 費用：正式站沒設網站密碼時，用每日上限把關（見 src/lib/paid-quota.ts）
+export const POST = protectPaidRoute(handlePost, { quota: dailyQuota("magic-fill") });

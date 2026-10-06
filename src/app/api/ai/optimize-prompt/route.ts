@@ -1,3 +1,5 @@
+import { protectPaidRoute } from "@/lib/site-gate";
+import { dailyQuota } from "@/lib/paid-quota";
 import { NextResponse } from "next/server";
 
 // LLM 呼叫可能超過 Vercel 的預設 10 秒上限（「優化 Prompt」）。
@@ -5,7 +7,7 @@ export const maxDuration = 60;
 
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   try {
     const { prompt, instruction, restrained } = await request.json();
     if (!prompt?.trim()) {
@@ -71,3 +73,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }
 }
+
+// 會花 AI 費用：正式站沒設網站密碼時，用每日上限把關（見 src/lib/paid-quota.ts）
+export const POST = protectPaidRoute(handlePost, { quota: dailyQuota("ai-text") });

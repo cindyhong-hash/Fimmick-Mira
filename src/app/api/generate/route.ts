@@ -1,3 +1,5 @@
+import { protectPaidRoute } from "@/lib/site-gate";
+import { dailyQuota } from "@/lib/paid-quota";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { generateImageFal, generateImageFluxSchnell, describeStyle, describeProduct, editImageFal } from "@/lib/fal";
@@ -129,7 +131,7 @@ async function analyzeBrandStyle(pastPostUrls: string[]): Promise<string | null>
   return synthesized ?? valid[0];
 }
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   const { activityId } = await request.json();
   if (!activityId) {
     return NextResponse.json({ error: "activityId required" }, { status: 400 });
@@ -598,3 +600,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }
 }
+
+// 會花 AI 費用：正式站沒設網站密碼時，用每日上限把關（見 src/lib/paid-quota.ts）
+export const POST = protectPaidRoute(handlePost, { quota: dailyQuota("generate") });

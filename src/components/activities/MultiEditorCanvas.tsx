@@ -694,7 +694,7 @@ export function MultiEditorCanvas({
 
               {isCell && editMode === "regen" && (
                 <div className="space-y-3">
-                  <p className="text-xs text-gray-400">整格換一張新畫面：沿用這格的文字、產品和色調，只換場景、角度、構圖。不滿意可以按「復原」。</p>
+                  <p className="text-xs text-gray-400">保留文字、產品和色調，換一張新畫面。</p>
                   <div>
                     <label className="text-xs font-medium text-gray-600 mb-1.5 block">想要什麼樣的新畫面？（選填）</label>
                     <textarea
@@ -720,7 +720,7 @@ export function MultiEditorCanvas({
 
               {isCell && editMode === "replace" && (
                 <div className="space-y-3">
-                  <p className="text-xs text-gray-400">從品牌素材庫挑一張，或從電腦上傳，換掉「圖 {activeCell + 1}」。圖會依格子比例自動裁切。</p>
+                  <p className="text-xs text-gray-400">從素材庫挑一張或上傳，會依格子比例裁切。</p>
                   {library === null && clientId ? (
                     <div className="flex items-center justify-center gap-2 rounded-lg border bg-gray-50 py-8 text-xs text-gray-500">
                       <Loader2 className="h-4 w-4 animate-spin text-violet-500" />讀取素材庫…
@@ -751,7 +751,7 @@ export function MultiEditorCanvas({
                     </div>
                   ) : (
                     <>
-                      <p className="text-xs text-gray-400">直接改下面的文字，AI 只會重畫你改的那幾段，字型和位置照舊。清空＝把那段字拿掉。</p>
+                      <p className="text-xs text-gray-400">直接改字，只重畫改到的段落；清空＝刪除。</p>
                       <div className="space-y-2">
                         {draftBlocks.map((value, i) => {
                           const changed = value.trim() !== originalBlocks[i];
@@ -776,7 +776,7 @@ export function MultiEditorCanvas({
                         })}
                       </div>
                       <p className="text-[11px] text-gray-400">
-                        讀錯字或漏掉某段？<button onClick={retryReadText} className="text-violet-600 hover:underline">重新讀取</button>，或改用「其他修改」。
+                        讀錯了？<button onClick={retryReadText} className="text-violet-600 hover:underline">重新讀取</button>
                       </p>
                       <Button
                         onClick={applyTextEdits}
@@ -794,10 +794,6 @@ export function MultiEditorCanvas({
 
               {isCell && editMode === "free" && (
                 <>
-                  <p className="text-xs text-gray-400">
-                    正在修改「圖 {activeCell + 1}」。請選取畫面中的物件，或直接告訴 AI 想怎麼修改，完成會自動更新拼版。
-                  </p>
-
                   {maskDataUrl && (
                     <div className="flex items-center gap-2 text-xs rounded-lg px-3 py-2 border bg-blue-50 border-blue-200 text-blue-700">
                       <span className="w-2 h-2 rounded-full inline-block bg-blue-500" />
@@ -806,17 +802,14 @@ export function MultiEditorCanvas({
                   )}
 
                   <div>
-                    <label className="text-xs font-medium text-gray-600 mb-1.5 block">告訴 AI 你想怎麼修改</label>
+                    <label className="text-xs font-medium text-gray-600 mb-1.5 block">想怎麼改？<span className="font-normal text-gray-400">（可先在圖上框選範圍）</span></label>
                     <textarea
                       value={prompt}
                       onChange={(e) => setPrompt(e.target.value)}
                       rows={4}
-                      placeholder="例：把背景改成日落沙灘 / 移除右下角的水印 / 文字改成：限時優惠中"
+                      placeholder="例：背景改成日落沙灘 / 移除右下角的水印"
                       className="w-full rounded-lg border border-gray-200 bg-white p-3 text-sm resize-none placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-400 transition"
                     />
-                    <p className="text-[11px] text-gray-400 mt-1.5">
-                      想改文字內容：用「文字改成：新內容」呢個句式最準，或者圈選好文字範圍後直接打新內容都得。
-                    </p>
                   </div>
 
                   <div className="space-y-2">
@@ -838,7 +831,7 @@ export function MultiEditorCanvas({
                       >
                         <UploadCloud className="h-5 w-5" />
                         <span className="font-medium">＋ 加入參考圖</span>
-                        <span className="text-[11px] text-gray-400">支援 JPG、PNG，檔案大小不超過 5MB</span>
+                        <span className="text-[11px] text-gray-400">JPG／PNG，5MB 以內</span>
                       </button>
                     )}
                     <input ref={refInputRef} type="file" accept="image/*" className="hidden" onChange={handleRefChange} />

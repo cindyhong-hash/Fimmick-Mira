@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { EditorCanvas } from "@/components/activities/EditorCanvas";
 import { MultiEditorCanvas } from "@/components/activities/MultiEditorCanvas";
 
-type Layout = { id: string; imageUrl: string; copyText: string; layoutType: string; isSelected: boolean; cellImageUrls?: string };
+type Layout = { id: string; imageUrl: string; copyText: string; layoutType: string; isSelected: boolean; cellImageUrls?: string; textLayerJson?: string };
 type LogoVersion = { url: string; label: string };
 type Activity = { id: string; theme: string; imageRatio?: string; logoMode?: string; generatedLayouts: Layout[]; client?: { logoUrl?: string | null; logoUrls?: LogoVersion[] } };
 
@@ -34,6 +34,9 @@ export default function EditorPage({ params }: { params: Promise<{ clientId: str
     <div>
       {isMulti ? (
         <MultiEditorCanvas
+          clientId={clientId}
+          activityId={activityId}
+          layoutMetaJson={selectedLayout.textLayerJson}
           layoutRecordId={selectedLayout.id}
           layoutType={selectedLayout.layoutType}
           initialComposite={selectedLayout.imageUrl}

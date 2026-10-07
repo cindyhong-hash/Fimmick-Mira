@@ -709,6 +709,8 @@ ${cellNoProduct}${cellProductFreeNote}${razorExclusionNote}${subImageNoText}`;
         data: {
           activityId, layoutType: multiLayoutId, imageUrl: composite,
           copyText, textBurnedIn: true, cellImageUrls: JSON.stringify(cellUrls),
+          // 微調畫布重新拼版時照這個拼（見 src/lib/multi-editor.ts）
+          textLayerJson: JSON.stringify({ collage: set.visualTemplateFullBleed ? { fullBleed: true } : { accentColor: heroAccentColor } }),
         },
       });
     };

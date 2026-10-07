@@ -6,6 +6,7 @@ import {
   Loader2, Sparkles, CheckCircle2, X, ChevronLeft, Pencil,
   Maximize2, SplitSquareHorizontal, RotateCcw, RotateCw,
   ChevronDown, ChevronUp, UploadCloud, FileText, LayoutGrid, Download, Type, Wand2,
+  RefreshCw, ImageIcon, ArrowUp, ArrowDown, GripVertical,
 } from "lucide-react";
 import { MaskCanvas, type SelectionBounds } from "@/components/activities/MaskCanvas";
 import LogoPlacerModal, { type LogoVersion } from "@/components/activities/LogoPlacerModal";
@@ -14,8 +15,13 @@ import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import { collectTextEdits } from "@/lib/image-text-edit";
 import { buildDownloadFilename } from "@/lib/download-filename";
 import { downloadImage, downloadImages } from "@/lib/download-image";
+import { moveItem, parseMultiLayoutMeta, type CompositeLogo } from "@/lib/multi-editor";
+import { ImageLibraryPicker } from "@/components/magic-layers/ImageLibraryPicker";
 
 type Props = {
+  clientId?: string;               // 換圖時讀品牌素材庫
+  activityId?: string;             // 重新生成這一格用
+  layoutMetaJson?: string;         // GeneratedLayout.textLayerJson：拼版底色、總覽上的 LOGO（見 src/lib/multi-editor.ts）
   layoutRecordId: string;          // GeneratedLayout id
   layoutType: string;              // 多圖版型 id（two-lr / four-grid…）
   initialComposite: string;        // 拼版大圖 URL
@@ -42,8 +48,13 @@ const COPY_TRANSFORMS = [
 ];
 
 export function MultiEditorCanvas({
-  layoutRecordId, layoutType, initialComposite, initialCells, initialCopy, ratio, brandLogoUrl, logoMode, logoVersions = [], theme, backHref,
+  clientId, activityId, layoutMetaJson,
+  layoutRecordId, layoutType, initialComposite, initialCells, initialCopy, brandLogoUrl, logoVersions = [], theme, backHref,
 }: Props) {
+  // 生成當下的拼版樣式＋放在總覽上的 LOGO：重新拼版要照著拼、拼完重貼
+  const [initialMeta] = useState(() => parseMultiLayoutMeta(layoutMetaJson));
+  const collage = initialMeta.collage;
+  const [compositeLogos, setCompositeLogos] = useState<CompositeLogo[]>(initialMeta.compositeLogos ?? []);
   // 單格大圖嘅框闊度——換格／上一步重做會令 MaskCanvas remount，新圖未載完之前個框
   // 會塌窄再彈返（閃跳），保住上次闊度喺載入期間頂住個位（見 MaskCanvas reservedWidth）。
   const [cellWidth, setCellWidth] = useState<number | undefined>(undefined);
@@ -71,7 +82,13 @@ export function MultiEditorCanvas({
   // 圖片工具列：縮放（0.5~2）＋對比（按住顯示上一步版本）——同單圖版 EditorCanvas.tsx 一致。
   const [tab, setTab] = useState<"edit" | "logo">("edit");
   // 修改圖片分成兩種：改圖上的字（AI 先讀出文字清單，直接在清單上改）／其他修改（框選＋描述）
-  const [editMode, setEditMode] = useState<"text" | "free">("text");
+  // 修改這一格的方式：改圖上的字／其他修改（框選＋描述）／整格重新生成／換成素材庫或上傳的圖
+  const [editMode, setEditMode] = useState<"text" | "free" | "regen" | "replace">("text");
+  const [regenWish, setRegenWish] = useState("");
+  const [regenerating, setRegenerating] = useState(false);
+  // 換圖用的品牌素材庫：第一次打開「換圖」才去讀
+  const [library, setLibrary] = useState<{ url: string; label?: string }[] | null>(null);
+  const [dragFrom, setDragFrom] = useState<number | null>(null);
   // 每張圖讀出來的文字，key 是圖片網址：換格、復原再回來都不用重讀（讀一次要花一次 AI）
   const [textBlocks, setTextBlocks] = useState<Record<string, string[] | "error">>({});
   // 使用者在清單上改到一半的內容，key 同樣是圖片網址
@@ -83,7 +100,7 @@ export function MultiEditorCanvas({
   const [compare, setCompare] = useState(false);
 
   // 回上一步：每次 AI 修改 / 文案轉換前，先把當前狀態存進歷史堆疊
-  type Snapshot = { cells: string[]; composite: string; copyText: string };
+  type Snapshot = { cells: string[]; composite: string; copyText: string; compositeLogos: CompositeLogo[] };
   const [history, setHistory] = useState<Snapshot[]>([]);
   // 重做棧：回上一步彈出嗰版會推入呢度；新改動（pushHistory 一 call）會清空（標準 redo 慣例）。
   const [redoStack, setRedoStack] = useState<Snapshot[]>([]);
@@ -94,16 +111,17 @@ export function MultiEditorCanvas({
   const { pendingHref, confirmLeave, cancelLeave } = useUnsavedChangesGuard(isModified && !saved);
 
   const pushHistory = () => {
-    setHistory((h) => [...h, { cells, composite, copyText }].slice(-30));
+    setHistory((h) => [...h, { cells, composite, copyText, compositeLogos }].slice(-30));
     setRedoStack([]);
   };
   const undo = () => {
     if (history.length === 0) return;
     const prev = history[history.length - 1];
-    setRedoStack((r) => [{ cells, composite, copyText }, ...r].slice(0, 30));
+    setRedoStack((r) => [{ cells, composite, copyText, compositeLogos }, ...r].slice(0, 30));
     setCells(prev.cells);
     setComposite(prev.composite);
     setCopyText(prev.copyText);
+    setCompositeLogos(prev.compositeLogos);
     setHistory((h) => h.slice(0, -1));
     setMaskDataUrl(null);
     setSelectionBounds(null);
@@ -112,10 +130,11 @@ export function MultiEditorCanvas({
   const redo = () => {
     if (redoStack.length === 0) return;
     const next = redoStack[0];
-    setHistory((h) => [...h, { cells, composite, copyText }].slice(-30));
+    setHistory((h) => [...h, { cells, composite, copyText, compositeLogos }].slice(-30));
     setCells(next.cells);
     setComposite(next.composite);
     setCopyText(next.copyText);
+    setCompositeLogos(next.compositeLogos);
     setRedoStack((r) => r.slice(1));
     setMaskDataUrl(null);
     setSelectionBounds(null);
@@ -124,7 +143,7 @@ export function MultiEditorCanvas({
 
   const isCell = typeof view === "number";
   const activeCell = isCell ? (view as number) : -1;
-  const busy = inpainting || recompositing;
+  const busy = inpainting || recompositing || regenerating;
   const peekPreviousImage = history.length === 0 ? null
     : isCell ? history[history.length - 1].cells[activeCell]
     : history[history.length - 1].composite;
@@ -188,6 +207,75 @@ export function MultiEditorCanvas({
     }
   };
 
+  // 換一格的圖（重新生成、換圖都走這裡）：記復原、更新格子、重新拼版
+  const replaceActiveCell = async (url: string, knownTexts?: string[]) => {
+    pushHistory();
+    const nextCells = cells.map((c, i) => (i === activeCell ? url : c));
+    setCells(nextCells);
+    if (knownTexts) setTextBlocks((m) => ({ ...m, [url]: knownTexts }));
+    setSaved(false);
+    await recomposite(nextCells);
+  };
+
+  const regenerateCell = async () => {
+    if (!isCell || !activeUrl || !activityId) return;
+    setRegenerating(true);
+    try {
+      // 改文字模式讀過字就一起送，新圖的字才會一字不差
+      const texts = Array.isArray(blocksForActive) ? blocksForActive : undefined;
+      const res = await fetch("/api/multi/regenerate-cell", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ activityId, layoutType, cellIndex: activeCell, cellUrl: activeUrl, instruction: regenWish, texts }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "重新生成失敗");
+      setRegenWish("");
+      await replaceActiveCell(data.imageUrl);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "重新生成失敗，請稍後再試");
+    } finally {
+      setRegenerating(false);
+    }
+  };
+
+  const needsLibrary = tab === "edit" && editMode === "replace" && library === null && !!clientId;
+  useEffect(() => {
+    if (!needsLibrary || !clientId) return;
+    let cancelled = false;
+    fetch(`/api/library/gallery?clientId=${encodeURIComponent(clientId)}`)
+      .then((r) => r.json())
+      .then((items: { imageUrl?: string; kind?: string; status?: string; name?: string; subject?: string }[]) => {
+        if (cancelled) return;
+        setLibrary((Array.isArray(items) ? items : [])
+          .filter((it) => it?.imageUrl && (it.kind !== "generated" || it.status === "DONE"))
+          .map((it) => ({ url: it.imageUrl as string, label: it.name || it.subject || "" }))
+          .slice(0, 80));
+      })
+      .catch(() => { if (!cancelled) setLibrary([]); });
+    return () => { cancelled = true; };
+  }, [needsLibrary, clientId]);
+  const uploadFile = async (f: File): Promise<string> => {
+    const fd = new FormData(); fd.append("file", f);
+    const r = await fetch("/api/upload", { method: "POST", body: fd });
+    const d = await r.json();
+    if (!r.ok || !d.url) throw new Error(d.error ?? "上傳失敗");
+    return d.url as string;
+  };
+
+  // 換格子順序：拖曳左側縮圖，或用 ↑↓。選著的那格跟著移動。
+  const reorderCells = (from: number, to: number) => {
+    if (busy || from === to || to < 0 || to >= cells.length) return;
+    pushHistory();
+    const nextCells = moveItem(cells, from, to);
+    setCells(nextCells);
+    if (isCell) setView(moveItem(cells.map((_, i) => i), from, to).indexOf(activeCell));
+    setMaskDataUrl(null);
+    setSelectionBounds(null);
+    setSaved(false);
+    void recomposite(nextCells);
+  };
+
   // 下載：拼版圖、全部格子、或只有這一格。下載的是畫面上目前的版本（不用先儲存）。
   const fileFor = (url: string, label: string) => buildDownloadFilename({ url, label, readableText: theme });
   const runDownload = async (job: () => Promise<void>) => {
@@ -210,17 +298,28 @@ export function MultiEditorCanvas({
   };
   const clearRef = () => { setRefImageDataUrl(null); setRefImageName(null); };
 
-  const recomposite = async (nextCells: string[]) => {
+  // 照生成當下的樣子重新拼一張，再把放在總覽上的 LOGO 依原位置重貼（不然改一格 LOGO 就不見了）
+  const recomposite = async (nextCells: string[], logos: CompositeLogo[] = compositeLogos) => {
     setRecompositing(true);
     try {
       const res = await fetch("/api/composite", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // [logo] 重新拼版不再自動疊 logo；logo 改由「放置標誌」手動放置在拼版大圖上。
-        body: JSON.stringify({ cellUrls: nextCells, layoutId: layoutType, ratio, logoMode: "none" }),
+        body: JSON.stringify({ cellUrls: nextCells, layoutId: layoutType, matchGenerated: true, collage, logoMode: "none" }),
       });
       const data = await res.json();
-      if (data.imageUrl) setComposite(data.imageUrl);
+      if (!data.imageUrl) return;
+      let url: string = data.imageUrl;
+      for (const l of logos) {
+        const r = await fetch("/api/logo/place", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ imageUrl: url, logoUrl: l.logoUrl, x: l.x, y: l.y, scale: l.scale, shadow: l.shadow }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.url) url = d.url;
+      }
+      setComposite(url);
     } finally {
       setRecompositing(false);
     }
@@ -284,7 +383,7 @@ export function MultiEditorCanvas({
       await fetch(`/api/layouts/${layoutRecordId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageUrl: composite, cellImageUrls: JSON.stringify(cells), copyText }),
+        body: JSON.stringify({ imageUrl: composite, cellImageUrls: JSON.stringify(cells), copyText, compositeLogos }),
       });
       setSaved(true);
       // 同單圖版一致：儲存後把歷史清空（下次回來仍顯示最新結果）
@@ -397,10 +496,17 @@ export function MultiEditorCanvas({
                 <button
                   key={i}
                   onClick={() => selectView(i)}
-                  className={`relative rounded-lg overflow-hidden border-2 transition-all ${
+                  draggable={!busy}
+                  onDragStart={(e) => { setDragFrom(i); e.dataTransfer.effectAllowed = "move"; }}
+                  onDragOver={(e) => { if (dragFrom !== null) e.preventDefault(); }}
+                  onDrop={(e) => { e.preventDefault(); if (dragFrom !== null) reorderCells(dragFrom, i); setDragFrom(null); }}
+                  onDragEnd={() => setDragFrom(null)}
+                  title="點一下修改這格；拖曳可以換順序"
+                  className={`group relative rounded-lg overflow-hidden border-2 transition-all ${
                     activeCell === i ? "border-violet-500 shadow" : "border-gray-200 hover:border-gray-400"
-                  }`}
+                  } ${dragFrom === i ? "opacity-40" : ""} ${dragFrom !== null && dragFrom !== i ? "ring-2 ring-violet-200" : ""}`}
                 >
+                  <GripVertical className="absolute top-1 left-0.5 h-3.5 w-3.5 text-white drop-shadow opacity-0 group-hover:opacity-100 transition-opacity" />
                   <img src={url} alt={`圖 ${i + 1}`} className="w-full aspect-square object-cover" />
                   <span className="absolute bottom-0 inset-x-0 bg-black/55 text-white text-[9px] py-0.5 text-center">
                     圖 {i + 1}
@@ -420,7 +526,7 @@ export function MultiEditorCanvas({
                     previousImageUrl={peekPreviousImage}
                     reservedWidth={cellWidth}
                     onWidthChange={setCellWidth}
-                    overlay={inpainting && (
+                    overlay={(inpainting || regenerating) && (
                       <div className="absolute inset-0 bg-black/65 backdrop-blur-[2px] flex flex-col items-center justify-center gap-4">
                         <div className="relative">
                           <div className="w-16 h-16 rounded-full border-4 border-white/20" />
@@ -428,8 +534,8 @@ export function MultiEditorCanvas({
                           <Sparkles className="absolute inset-0 m-auto h-6 w-6 text-white/80" />
                         </div>
                         <div className="text-center">
-                          <p className="text-white font-semibold text-sm">AI 正在修改圖片</p>
-                          <p className="text-white/60 text-xs mt-1">通常需要 15–30 秒</p>
+                          <p className="text-white font-semibold text-sm">{regenerating ? "AI 正在重新生成這一格" : "AI 正在修改圖片"}</p>
+                          <p className="text-white/60 text-xs mt-1">{regenerating ? "通常需要 20–40 秒" : "通常需要 15–30 秒"}</p>
                         </div>
                       </div>
                     )}
@@ -555,12 +661,28 @@ export function MultiEditorCanvas({
                 </div>
               ) : (
                 <>
-                  <div className="flex items-center gap-1 rounded-lg border border-gray-200 p-0.5">
-                    {([["text", "改圖上的字", Type], ["free", "其他修改", Wand2]] as const).map(([mode, label, Icon]) => (
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-medium text-gray-700">正在修改：圖 {activeCell + 1}</span>
+                    <span className="flex items-center gap-1 text-gray-400">
+                      換位置
+                      <button onClick={() => reorderCells(activeCell, activeCell - 1)} disabled={busy || activeCell === 0}
+                        aria-label="往前移一格" title="往前移一格"
+                        className="w-6 h-6 grid place-items-center rounded-md border border-gray-200 text-gray-500 hover:border-violet-300 hover:text-violet-600 disabled:opacity-30 disabled:hover:border-gray-200 disabled:hover:text-gray-500">
+                        <ArrowUp className="h-3.5 w-3.5" />
+                      </button>
+                      <button onClick={() => reorderCells(activeCell, activeCell + 1)} disabled={busy || activeCell === cells.length - 1}
+                        aria-label="往後移一格" title="往後移一格"
+                        className="w-6 h-6 grid place-items-center rounded-md border border-gray-200 text-gray-500 hover:border-violet-300 hover:text-violet-600 disabled:opacity-30 disabled:hover:border-gray-200 disabled:hover:text-gray-500">
+                        <ArrowDown className="h-3.5 w-3.5" />
+                      </button>
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1 rounded-lg border border-gray-200 p-0.5">
+                    {([["text", "改字", Type], ["free", "其他修改", Wand2], ["regen", "重新生成", RefreshCw], ["replace", "換圖", ImageIcon]] as const).map(([mode, label, Icon]) => (
                       <button
                         key={mode}
                         onClick={() => setEditMode(mode)}
-                        className={`flex-1 flex items-center justify-center gap-1.5 rounded-md text-xs py-1.5 transition-all ${
+                        className={`flex flex-col items-center justify-center gap-0.5 rounded-md text-[11px] py-1.5 transition-all ${
                           editMode === mode ? "bg-violet-50 text-violet-700 font-medium" : "text-gray-500 hover:text-gray-700"}`}
                       >
                         <Icon className="h-3.5 w-3.5" />{label}
@@ -568,6 +690,47 @@ export function MultiEditorCanvas({
                     ))}
                   </div>
                 </>
+              )}
+
+              {isCell && editMode === "regen" && (
+                <div className="space-y-3">
+                  <p className="text-xs text-gray-400">整格換一張新畫面：沿用這格的文字、產品和色調，只換場景、角度、構圖。不滿意可以按「復原」。</p>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 mb-1.5 block">想要什麼樣的新畫面？（選填）</label>
+                    <textarea
+                      value={regenWish}
+                      onChange={(e) => setRegenWish(e.target.value)}
+                      rows={3}
+                      maxLength={300}
+                      placeholder="例：換成浴室洗手台的場景 / 改成近拍手拿產品 / 背景更明亮"
+                      className="w-full rounded-lg border border-gray-200 bg-white p-3 text-sm resize-none placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-400 transition"
+                    />
+                  </div>
+                  <Button
+                    onClick={regenerateCell}
+                    disabled={busy || !activityId}
+                    className="w-full gap-2 bg-violet-600 hover:bg-violet-700 text-white disabled:opacity-50"
+                  >
+                    {regenerating
+                      ? <><Loader2 className="h-4 w-4 animate-spin" /><span>生成中…（約 20–40 秒）</span></>
+                      : <><RefreshCw className="h-4 w-4" /><span>重新生成圖 {activeCell + 1}</span></>}
+                  </Button>
+                </div>
+              )}
+
+              {isCell && editMode === "replace" && (
+                <div className="space-y-3">
+                  <p className="text-xs text-gray-400">從品牌素材庫挑一張，或從電腦上傳，換掉「圖 {activeCell + 1}」。圖會依格子比例自動裁切。</p>
+                  {library === null && clientId ? (
+                    <div className="flex items-center justify-center gap-2 rounded-lg border bg-gray-50 py-8 text-xs text-gray-500">
+                      <Loader2 className="h-4 w-4 animate-spin text-violet-500" />讀取素材庫…
+                    </div>
+                  ) : (
+                    <div className={busy ? "pointer-events-none opacity-50" : ""}>
+                      <ImageLibraryPicker library={library ?? []} uploadFile={uploadFile} onPick={(url) => { void replaceActiveCell(url); }} />
+                    </div>
+                  )}
+                </div>
               )}
 
               {isCell && editMode === "text" && (
@@ -784,7 +947,7 @@ export function MultiEditorCanvas({
         <LogoPlacerModal
           imageUrl={isCell ? cells[activeCell] : composite}
           logoVersions={availableLogos}
-          onConfirm={(url) => {
+          onConfirm={(url, placed) => {
             setShowLogo(false);
             setSaved(false);
             pushHistory();
@@ -794,6 +957,8 @@ export function MultiEditorCanvas({
               void recomposite(nextCells);
             } else {
               setComposite(url);
+              // 記下位置：之後改任何一格重新拼版時重貼
+              setCompositeLogos((cur) => [...cur, ...placed]);
             }
           }}
           onClose={() => setShowLogo(false)}

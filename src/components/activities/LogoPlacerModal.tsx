@@ -64,7 +64,8 @@ export default function LogoPlacerModal({
 }: {
   imageUrl: string;
   logoVersions?: LogoVersion[];
-  onConfirm: (url: string) => void;
+  /** placed：這次放了哪些 logo、放在哪（多圖要記下來，重新拼版後重貼）。 */
+  onConfirm: (url: string, placed: { logoUrl: string; x: number; y: number; scale: number; shadow: boolean }[]) => void;
   onClose: () => void;
 }) {
   const [logos, setLogos] = useState<LogoItem[]>([]);
@@ -183,7 +184,7 @@ export default function LogoPlacerModal({
         if (!res.ok || !data.url) throw new Error(data.error || "合成失敗");
         currentUrl = data.url;
       }
-      onConfirm(currentUrl);
+      onConfirm(currentUrl, logos.map((l) => ({ logoUrl: l.url, x: l.x, y: l.y, scale: l.scale, shadow })));
     } catch (e) {
       setError((e as Error).message);
     } finally {

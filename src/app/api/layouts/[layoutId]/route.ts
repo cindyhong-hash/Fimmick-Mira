@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { parseMultiLayoutMeta } from "@/lib/multi-editor";
 
 export async function PATCH(
   request: Request,
@@ -8,9 +9,28 @@ export async function PATCH(
   const { layoutId } = await params;
   const body = await request.json();
 
+  // [MULTI] 微調畫布改過的各格圖：以前前端有送、這裡卻沒存，重新整理後改過的格子會變回舊圖
+  let cellImageUrls: string | undefined;
+  if (body.cellImageUrls !== undefined) {
+    try {
+      const arr = typeof body.cellImageUrls === "string" ? JSON.parse(body.cellImageUrls) : body.cellImageUrls;
+      if (Array.isArray(arr) && arr.length && arr.every((u) => typeof u === "string" && u)) cellImageUrls = JSON.stringify(arr);
+    } catch { /* 格式不對就不更新 */ }
+  }
+  // [MULTI] 放在拼版總覽上的 LOGO：存進 textLayerJson（保留同一欄的 collage 設定），重新拼版時重貼
+  let textLayerJson: string | undefined;
+  if (body.compositeLogos !== undefined) {
+    const current = await db.generatedLayout.findUnique({ where: { id: layoutId }, select: { textLayerJson: true } });
+    const meta = parseMultiLayoutMeta(current?.textLayerJson);
+    const logos = parseMultiLayoutMeta(JSON.stringify({ compositeLogos: body.compositeLogos })).compositeLogos ?? [];
+    textLayerJson = JSON.stringify({ ...meta, compositeLogos: logos });
+  }
+
   const layout = await db.generatedLayout.update({
     where: { id: layoutId },
     data: {
+      ...(cellImageUrls !== undefined && { cellImageUrls }),
+      ...(textLayerJson !== undefined && { textLayerJson }),
       ...(body.imageUrl  !== undefined && { imageUrl:  body.imageUrl }),
       ...(body.copyText  !== undefined && { copyText:  body.copyText }),
       ...(body.isSelected !== undefined && { isSelected: body.isSelected }),

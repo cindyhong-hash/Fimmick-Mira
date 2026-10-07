@@ -8,6 +8,7 @@ import sharp from "sharp";
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { loadBuffer, saveBuffer, contentTypeForExt } from "@/lib/storage";
+import { buildTextEditPrompt, MAX_TEXT_BLOCKS, type TextEdit } from "@/lib/image-text-edit";
 
 export const maxDuration = 120;
 
@@ -606,6 +607,7 @@ async function handlePost(request: Request) {
       selectionBounds,
       referenceImageDataUrl,
       brandLogoUrl,
+      textEdits,
     }: {
       imageUrl: string;
       maskDataUrl?: string;
@@ -613,10 +615,22 @@ async function handlePost(request: Request) {
       selectionBounds?: { x:number;y:number;width:number;height:number };
       referenceImageDataUrl?: string;
       brandLogoUrl?: string;
+      /** 「改文字」模式：使用者在讀出來的文字清單上改過的段落（見 src/lib/image-text-edit.ts） */
+      textEdits?: TextEdit[];
     } = await request.json();
 
     if (!imageUrl) {
       return NextResponse.json({ error: "imageUrl is required" }, { status: 400 });
+    }
+
+    // ── Case -1: 改文字模式 → 已經知道「哪段改成什麼」，不用從 prompt 猜，直接一次交給 Gemini ──
+    const edits = Array.isArray(textEdits)
+      ? textEdits.filter((e) => typeof e?.from === "string" && typeof e?.to === "string" && e.from.trim()).slice(0, MAX_TEXT_BLOCKS)
+      : [];
+    if (edits.length) {
+      console.log(`[inpaint] TEXT EDIT LIST mode → ${edits.length} change(s)`);
+      const resultUrl = await generateImageOpenRouter(buildTextEditPrompt(edits), `text-edit-${Date.now()}`, undefined, false, imageUrl, undefined);
+      return NextResponse.json({ imageUrl: resultUrl });
     }
 
     const trim  = rawPrompt?.trim() ?? "";

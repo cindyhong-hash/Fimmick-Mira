@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Check, BookmarkPlus, BookmarkCheck, BookmarkX, Loader2, Download } from "lucide-react";
 import { getMultiLayout } from "@/types/multiLayout";
 import { buildDownloadFilename as buildFilename } from "@/lib/download-filename";
+import { downloadImage } from "@/lib/download-image";
 
 type Layout = {
   id: string;
@@ -65,27 +66,8 @@ export function LayoutPicker({ layouts, selectedId, clientName, onSelect }: Prop
   // 下載檔名用嘅原始 px 尺寸，key=layout.id（GeneratedLayout 冇存 WxH，靠 <img onLoad> 攞）。
   const [dims, setDims] = useState<Record<string, { w: number; h: number }>>({});
 
-  // 下載該款生成圖。本機圖片存喺同源 /uploads，download attribute 直接生效；
-  // 但 Vercel 上圖片存喺 *.public.blob.vercel-storage.com（跨域），瀏覽器會無視
-  // download attribute 直接開新分頁顯示。所以改為 fetch 圖片轉做 blob:// URL
-  // 先落 download attribute，兩種情況都真正觸發下載。
-  const downloadOne = async (url: string, filename: string) => {
-    try {
-      const res = await fetch(url);
-      const blob = await res.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(blobUrl);
-    } catch {
-      // fetch 失敗（例如 CORS 被擋）就 fallback 返開新分頁，起碼睇到張圖
-      window.open(url, "_blank");
-    }
-  };
+  // 下載該款生成圖（跨域 Blob 圖也真的會下載，見 src/lib/download-image.ts）
+  const downloadOne = downloadImage;
 
   // 檔名：{品牌名}-{類型}-{寬x高}-{可讀標題}.ext（見 src/lib/download-filename.ts），
   // 缺邊截就跳過，同 ImageDetailModal 等其他生成類型一致嘅命名格式。

@@ -1,16 +1,19 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
   Loader2, Sparkles, CheckCircle2, X, ChevronLeft, Pencil,
   Maximize2, SplitSquareHorizontal, RotateCcw, RotateCw,
-  ChevronDown, ChevronUp, UploadCloud, FileText, LayoutGrid,
+  ChevronDown, ChevronUp, UploadCloud, FileText, LayoutGrid, Download, Type, Wand2,
 } from "lucide-react";
 import { MaskCanvas, type SelectionBounds } from "@/components/activities/MaskCanvas";
 import LogoPlacerModal, { type LogoVersion } from "@/components/activities/LogoPlacerModal";
 import { UnsavedChangesModal } from "@/components/activities/UnsavedChangesModal";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
+import { collectTextEdits } from "@/lib/image-text-edit";
+import { buildDownloadFilename } from "@/lib/download-filename";
+import { downloadImage, downloadImages } from "@/lib/download-image";
 
 type Props = {
   layoutRecordId: string;          // GeneratedLayout id
@@ -67,6 +70,14 @@ export function MultiEditorCanvas({
   // 右側面板分頁：修改圖片／放置LOGO；文案微調 collapsible（預設展開）；左側
   // 圖片工具列：縮放（0.5~2）＋對比（按住顯示上一步版本）——同單圖版 EditorCanvas.tsx 一致。
   const [tab, setTab] = useState<"edit" | "logo">("edit");
+  // 修改圖片分成兩種：改圖上的字（AI 先讀出文字清單，直接在清單上改）／其他修改（框選＋描述）
+  const [editMode, setEditMode] = useState<"text" | "free">("text");
+  // 每張圖讀出來的文字，key 是圖片網址：換格、復原再回來都不用重讀（讀一次要花一次 AI）
+  const [textBlocks, setTextBlocks] = useState<Record<string, string[] | "error">>({});
+  // 使用者在清單上改到一半的內容，key 同樣是圖片網址
+  const [textDrafts, setTextDrafts] = useState<Record<string, string[]>>({});
+  const [downloadOpen, setDownloadOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [copyOpen, setCopyOpen] = useState(true);
   const [zoom, setZoom] = useState(1);
   const [compare, setCompare] = useState(false);
@@ -123,6 +134,70 @@ export function MultiEditorCanvas({
     setMaskDataUrl(null);
     setSelectionBounds(null);
   };
+
+  // 進到「改文字」時自動讀這一格的字；讀過的圖不重讀
+  const activeUrl = isCell ? cells[activeCell] : null;
+  const blocksForActive = activeUrl ? textBlocks[activeUrl] : undefined;
+  const needsRead = tab === "edit" && editMode === "text" && !!activeUrl && blocksForActive === undefined;
+  useEffect(() => {
+    if (!needsRead || !activeUrl) return;
+    let cancelled = false;
+    fetch("/api/ai/read-image-text", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ imageUrl: activeUrl }) })
+      .then(async (res) => { const data = await res.json(); if (!res.ok) throw new Error(data.error); return data.blocks as string[]; })
+      .then((blocks) => { if (!cancelled) setTextBlocks((m) => ({ ...m, [activeUrl]: blocks })); })
+      .catch(() => { if (!cancelled) setTextBlocks((m) => ({ ...m, [activeUrl]: "error" })); });
+    return () => { cancelled = true; };
+  }, [needsRead, activeUrl]);
+  const retryReadText = () => {
+    if (!activeUrl) return;
+    setTextBlocks((m) => { const next = { ...m }; delete next[activeUrl]; return next; });
+    setTextDrafts((m) => { const next = { ...m }; delete next[activeUrl]; return next; });
+  };
+  const originalBlocks = Array.isArray(blocksForActive) ? blocksForActive : [];
+  const draftBlocks = (activeUrl && textDrafts[activeUrl]) || originalBlocks;
+  const pendingEdits = collectTextEdits(originalBlocks, draftBlocks);
+  const setDraftAt = (i: number, value: string) => {
+    if (!activeUrl) return;
+    const next = draftBlocks.slice(); next[i] = value;
+    setTextDrafts((m) => ({ ...m, [activeUrl]: next }));
+  };
+
+  const applyTextEdits = async () => {
+    if (!isCell || !activeUrl || !pendingEdits.length) return;
+    setInpainting(true);
+    try {
+      const res = await fetch("/api/inpaint", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageUrl: activeUrl, textEdits: pendingEdits }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "修改失敗");
+      pushHistory();
+      const nextCells = cells.map((c, i) => (i === activeCell ? data.imageUrl : c));
+      setCells(nextCells);
+      // 新圖上的字就是剛改好的清單（清空的那段拿掉），不用再花一次 AI 重讀
+      setTextBlocks((m) => ({ ...m, [data.imageUrl]: draftBlocks.map((t) => t.trim()).filter(Boolean) }));
+      setTextDrafts((m) => { const next = { ...m }; delete next[activeUrl]; return next; });
+      setSaved(false);
+      await recomposite(nextCells);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "修改失敗，請稍後再試");
+    } finally {
+      setInpainting(false);
+    }
+  };
+
+  // 下載：拼版圖、全部格子、或只有這一格。下載的是畫面上目前的版本（不用先儲存）。
+  const fileFor = (url: string, label: string) => buildDownloadFilename({ url, label, readableText: theme });
+  const runDownload = async (job: () => Promise<void>) => {
+    setDownloadOpen(false);
+    setDownloading(true);
+    try { await job(); } finally { setDownloading(false); }
+  };
+  const downloadComposite = () => runDownload(() => downloadImage(composite, fileFor(composite, "多圖拼版")));
+  const downloadAllCells = () => runDownload(() => downloadImages(cells.map((u, i) => ({ url: u, filename: fileFor(u, `多圖${String(i + 1).padStart(2, "0")}`) }))));
+  const downloadActiveCell = () => activeUrl && runDownload(() => downloadImage(activeUrl, fileFor(activeUrl, `多圖${String(activeCell + 1).padStart(2, "0")}`)));
 
   const handleRefChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -252,6 +327,42 @@ export function MultiEditorCanvas({
             </span>
           )}
         </div>
+        <div className="flex items-center gap-2">
+        <div className="relative">
+          <Button
+            variant="outline"
+            onClick={() => setDownloadOpen((o) => !o)}
+            disabled={downloading || busy}
+            aria-haspopup="menu"
+            aria-expanded={downloadOpen}
+            className="gap-1.5"
+          >
+            {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            <span>{downloading ? "下載中…" : "下載"}</span>
+            <ChevronDown className="h-3.5 w-3.5 text-gray-400" />
+          </Button>
+          {downloadOpen && (
+            <>
+              <div className="fixed inset-0 z-30" onClick={() => setDownloadOpen(false)} />
+              <div role="menu" className="absolute right-0 top-full mt-1.5 z-40 w-56 rounded-xl border bg-white p-1.5 shadow-lg">
+                <button role="menuitem" onClick={downloadComposite} className="w-full text-left rounded-lg px-3 py-2 hover:bg-violet-50">
+                  <div className="text-sm text-gray-800">拼版圖</div>
+                  <div className="text-[11px] text-gray-400">整組拼成一張</div>
+                </button>
+                <button role="menuitem" onClick={downloadAllCells} className="w-full text-left rounded-lg px-3 py-2 hover:bg-violet-50">
+                  <div className="text-sm text-gray-800">每一格分開（{cells.length} 張）</div>
+                  <div className="text-[11px] text-gray-400">一格一張，適合做輪播貼文</div>
+                </button>
+                {isCell && (
+                  <button role="menuitem" onClick={downloadActiveCell} className="w-full text-left rounded-lg px-3 py-2 hover:bg-violet-50">
+                    <div className="text-sm text-gray-800">只有圖 {activeCell + 1}</div>
+                  </button>
+                )}
+                <p className="px-3 pt-1.5 pb-1 text-[11px] text-gray-400 border-t mt-1">下載的是畫面上目前的版本，還沒儲存也可以。</p>
+              </div>
+            </>
+          )}
+        </div>
         <Button
           onClick={handleSave}
           disabled={!isModified || saving}
@@ -260,6 +371,7 @@ export function MultiEditorCanvas({
           {saving && <Loader2 className="h-4 w-4 animate-spin" />}
           <span>{saving ? "儲存中…" : "儲存草稿"}</span>
         </Button>
+        </div>
       </div>
 
       {/* ── 主體 ── */}
@@ -442,6 +554,82 @@ export function MultiEditorCanvas({
                   目前顯示整體拼版。<br />請從左側選一格（圖 1、圖 2…）來修改。
                 </div>
               ) : (
+                <>
+                  <div className="flex items-center gap-1 rounded-lg border border-gray-200 p-0.5">
+                    {([["text", "改圖上的字", Type], ["free", "其他修改", Wand2]] as const).map(([mode, label, Icon]) => (
+                      <button
+                        key={mode}
+                        onClick={() => setEditMode(mode)}
+                        className={`flex-1 flex items-center justify-center gap-1.5 rounded-md text-xs py-1.5 transition-all ${
+                          editMode === mode ? "bg-violet-50 text-violet-700 font-medium" : "text-gray-500 hover:text-gray-700"}`}
+                      >
+                        <Icon className="h-3.5 w-3.5" />{label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {isCell && editMode === "text" && (
+                <div className="space-y-3">
+                  {blocksForActive === undefined ? (
+                    <div className="flex items-center justify-center gap-2 rounded-lg border bg-gray-50 py-8 text-xs text-gray-500">
+                      <Loader2 className="h-4 w-4 animate-spin text-violet-500" />正在讀取「圖 {activeCell + 1}」上的文字…
+                    </div>
+                  ) : blocksForActive === "error" ? (
+                    <div className="rounded-lg border bg-gray-50 p-4 text-center text-xs text-gray-500 space-y-2">
+                      <p>讀取圖上文字失敗。</p>
+                      <Button variant="outline" size="sm" onClick={retryReadText}>再試一次</Button>
+                    </div>
+                  ) : originalBlocks.length === 0 ? (
+                    <div className="rounded-lg border bg-gray-50 p-4 text-center text-xs text-gray-500 space-y-2">
+                      <p>「圖 {activeCell + 1}」上沒有讀到文字。</p>
+                      <p>要加字或改其他地方，請用「其他修改」。</p>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-xs text-gray-400">直接改下面的文字，AI 只會重畫你改的那幾段，字型和位置照舊。清空＝把那段字拿掉。</p>
+                      <div className="space-y-2">
+                        {draftBlocks.map((value, i) => {
+                          const changed = value.trim() !== originalBlocks[i];
+                          return (
+                            <div key={i}>
+                              <textarea
+                                value={value}
+                                onChange={(e) => setDraftAt(i, e.target.value)}
+                                rows={Math.min(3, Math.max(1, Math.ceil(value.length / 22)))}
+                                aria-label={`第 ${i + 1} 段文字`}
+                                className={`w-full rounded-lg border p-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-violet-400 transition ${
+                                  changed ? "border-violet-300 bg-violet-50/60" : "border-gray-200 bg-white"}`}
+                              />
+                              {changed && (
+                                <div className="flex items-center justify-between gap-2 text-[11px] text-gray-400 mt-0.5 px-1">
+                                  <span className="truncate">原本：{originalBlocks[i]}</span>
+                                  <button onClick={() => setDraftAt(i, originalBlocks[i])} className="shrink-0 text-violet-600 hover:underline">還原</button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <p className="text-[11px] text-gray-400">
+                        讀錯字或漏掉某段？<button onClick={retryReadText} className="text-violet-600 hover:underline">重新讀取</button>，或改用「其他修改」。
+                      </p>
+                      <Button
+                        onClick={applyTextEdits}
+                        disabled={busy || pendingEdits.length === 0}
+                        className="w-full gap-2 bg-violet-600 hover:bg-violet-700 text-white disabled:opacity-50"
+                      >
+                        {inpainting
+                          ? <><Loader2 className="h-4 w-4 animate-spin" /><span>修改中…</span></>
+                          : <><Sparkles className="h-4 w-4" /><span>{pendingEdits.length ? `套用 ${pendingEdits.length} 處修改` : "改好文字後按這裡套用"}</span></>}
+                      </Button>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {isCell && editMode === "free" && (
                 <>
                   <p className="text-xs text-gray-400">
                     正在修改「圖 {activeCell + 1}」。請選取畫面中的物件，或直接告訴 AI 想怎麼修改，完成會自動更新拼版。

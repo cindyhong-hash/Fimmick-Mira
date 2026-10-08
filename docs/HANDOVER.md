@@ -335,6 +335,7 @@ eslint 全 repo 有既有 error（`MagicLayersEditor.tsx` 單檔 29 個），那
 | ⚪ | lint 全 repo 56 error（`MagicLayersEditor.tsx` 單檔 29 個），刻意不改但**不要新增**——改完比對數字有沒有變多 |
 | ⚪ | 使用者 2026-09-22 起**兩台電腦並用**。程式碼靠 git 同步；本機 `prisma/*.db` 是檔案，**兩台不會同步也無法合併**（已知、刻意）。桌面 `Mira 另一台版本/README.md` 有設定說明 |
 | ⚪ | `release-kit` worktree 與 `backup-before-strip` 標記，穩定後可清 |
+| 🟡 | **多圖「輪播（每頁一張）」暫緩**（使用者 2026-10-08 決定先不上）。完整做好、本機驗過，整包是**單一 commit** 在分支 `feat/slides-carousel`（逐步歷史在 tag `slides-edit-steps`）。重啟前要決定：①要不要獨立額度（目前每頁吃 generate）②Vercel 函式 4–5 頁可能超過 60 秒。沒驗過：自由畫布 `?page=` 直達該頁。本機 dev.db 有測試活動，推之前別帶上 |
 
 **已從待辦移除**：RapidAPI key 輪替（使用者 2026-09-17 決定不處理，不要再主動提）。
 
